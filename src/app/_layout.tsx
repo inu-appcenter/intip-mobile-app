@@ -2,7 +2,9 @@ import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
+import WebViewControllerPanel from '../components/WebViewControllerPanel';
 import { registerBackgroundHandlers, requestNotificationPermission } from '../push/messaging';
+import { WebViewProvider } from '../webview/WebViewContext';
 
 // Background FCM/notifee handlers must be registered before React renders so
 // they survive a background/quit launch.
@@ -15,7 +17,9 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <>
+    // WebViewProvider orchestrates every WebView container (root + pushed
+    // sub-pages) and backs the debug controller (dev menu + panel).
+    <WebViewProvider>
       <StatusBar style="auto" />
       <Stack screenOptions={{ headerShown: false }}>
         {/* Root portal: main tabs live here via SPA routing. Swipe-back is
@@ -32,6 +36,8 @@ export default function RootLayout() {
           }}
         />
       </Stack>
-    </>
+      {/* Debug-only GUI controller, rendered above the whole stack. */}
+      <WebViewControllerPanel />
+    </WebViewProvider>
   );
 }

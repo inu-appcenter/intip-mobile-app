@@ -52,6 +52,11 @@ import {
   subscribeNotificationOpen,
 } from '../push/messaging';
 import { backgroundColorFor } from '../theme';
+import {
+  nextWebViewSeq,
+  useWebViewRegistry,
+  type WebViewHandle,
+} from '../webview/WebViewContext';
 
 /** Extensions we treat as downloads on Android (iOS uses onFileDownload). */
 const DOWNLOAD_EXTENSIONS = [
@@ -86,6 +91,11 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
   const backgroundColor = backgroundColorFor(scheme);
   const isRoot = mode === 'root';
 
+  // Connect this container to the WebView orchestrator (spec: shared controller).
+  // A stable id identifies it in the live stack for the duration of its mount.
+  const registry = useWebViewRegistry();
+  const [id] = useState(() => `${mode}-${nextWebViewSeq()}`);
+
   const [currentPath, setCurrentPath] = useState<string>('/');
   const canGoBackRef = useRef(false);
   const lastBackPressRef = useRef(0);
@@ -114,8 +124,9 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
     const token = await getFcmTokenWithRetry();
     if (token) {
       webViewRef.current?.injectJavaScript(buildReceiveFcmTokenScript(token));
+      registry.mergeSession({ fcmToken: token });
     }
-  }, []);
+  }, [registry]);
 
   const navigateSpa = useCallback((path: string) => {
     webViewRef.current?.injectJavaScript(buildNavigateScript(path));
@@ -157,6 +168,40 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
       clearTimeout(timeout);
     };
   }, [dismissOverlay, isRoot, navigateSpa, postFcmToken]);
+
+  // --- Orchestrator: register this container + expose its imperative handle --
+  useEffect(() => {
+    const handle: WebViewHandle = {
+      reload: () => webViewRef.current?.reload(),
+      reloadClearCache: () => clearCacheAndReload(webViewRef),
+      goBackSpa: () => webViewRef.current?.goBack(),
+      navigateSpa: (path) => navigateSpa(path),
+      refreshFcmToken: () => void postFcmToken(),
+    };
+    registry.registerWebView({ id, mode, url, path: '/' }, handle);
+    return () => registry.unregisterWebView(id);
+  }, [id, mode, url, registry, navigateSpa, postFcmToken]);
+
+  // The root owns the expo-router stack, so it registers native-stack navigation
+  // (push/pop/popToRoot) the controller uses to restore a saved session.
+  useEffect(() => {
+    if (!isRoot) return;
+    registry.registerNavigator({
+      push: (target, path) =>
+        router.push({ pathname: '/webview', params: { url: target, path } }),
+      pop: () => {
+        if (router.canGoBack()) router.back();
+      },
+      popToRoot: () => {
+        try {
+          if (router.canGoBack()) router.dismissAll();
+        } catch {
+          while (router.canGoBack()) router.back();
+        }
+      },
+    });
+    return () => registry.registerNavigator(null);
+  }, [isRoot, registry, router]);
 
   // --- Android hardware back (only while this screen is focused) -------------
   useFocusEffect(
@@ -208,9 +253,11 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
         case 'loginSuccess':
           void postFcmToken();
           primeWebPermissions();
+          registry.mergeSession({ loggedIn: true, loginAt: Date.now() });
           break;
         case 'routeChange':
           setCurrentPath(msg.payload || '/');
+          registry.updateWebView(id, { path: msg.payload || '/' });
           break;
         case 'requestAppUpdate':
           Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
@@ -239,7 +286,7 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
           break;
       }
     },
-    [dismissOverlay, postFcmToken, primeWebPermissions, router],
+    [dismissOverlay, id, postFcmToken, primeWebPermissions, registry, router],
   );
 
   // --- External links + Android downloads ------------------------------------
@@ -273,9 +320,13 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
     return true;
   }, []);
 
-  const onNavigationStateChange = useCallback((nav: WebViewNavigation) => {
-    canGoBackRef.current = nav.canGoBack;
-  }, []);
+  const onNavigationStateChange = useCallback(
+    (nav: WebViewNavigation) => {
+      canGoBackRef.current = nav.canGoBack;
+      registry.updateWebView(id, { canGoBack: nav.canGoBack, url: nav.url });
+    },
+    [id, registry],
+  );
 
   const onLoadEnd = useCallback(() => {
     // Push the FCM token into the web context after every page load (spec §5.A).
