@@ -8,7 +8,7 @@
  * container, `goBack` pops the top one, and the rest of the web→native API
  * (app update, settings, downloads, FCM token) is handled here.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -29,7 +29,7 @@ import WebView, {
 } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 
-import { parseBridgeMessage } from '../webview/bridge';
+import { createNativeChannel } from '@inu-appcenter/intip-bridge/native';
 import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
@@ -40,8 +40,6 @@ import {
   INJECTED_SCRIPT,
   LAUNCH_CLEANUP_SCRIPT,
   buildBridgeShimScript,
-  buildNavigateScript,
-  buildReceiveFcmTokenScript,
 } from '../webview/injectedScript';
 import { clearWebViewCache, clearCacheAndReload } from '../native/cache';
 import { saveDownload } from '../native/downloads';
@@ -86,6 +84,9 @@ type Props = {
 
 export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
   const webViewRef = useRef<WebView>(null);
+  // PlatformChannel over the single react-native-webview channel. `onMessage`
+  // is wired to the WebView prop; Web->Native handlers are registered below.
+  const bridge = useMemo(() => createNativeChannel(webViewRef), []);
   const router = useRouter();
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
@@ -123,14 +124,14 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
   const postFcmToken = useCallback(async () => {
     const token = await getFcmTokenWithRetry();
     if (token) {
-      webViewRef.current?.injectJavaScript(buildReceiveFcmTokenScript(token));
+      bridge.channel.send('receiveFcmToken', token);
       registry.mergeSession({ fcmToken: token });
     }
-  }, [registry]);
+  }, [bridge, registry]);
 
   const navigateSpa = useCallback((path: string) => {
-    webViewRef.current?.injectJavaScript(buildNavigateScript(path));
-  }, []);
+    bridge.channel.send('navigate', path);
+  }, [bridge]);
 
   const dismissOverlay = useCallback(() => {
     if (!isRoot) return;
@@ -232,62 +233,61 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
   );
 
   // --- Bridge: Web -> Native -------------------------------------------------
-  const onMessage = useCallback(
-    (event: WebViewMessageEvent) => {
-      const msg = parseBridgeMessage(event.nativeEvent.data);
-      if (!msg) return;
-
-      switch (msg.type) {
-        case 'navigateTo':
-          // Push a new native WebView container onto the stack (spec §3.B/§4).
-          // The web only emits this for non-main-tab destinations.
-          router.push({
-            pathname: '/webview',
-            params: { url: msg.payload.url, path: msg.payload.path },
-          });
-          break;
-        case 'goBack':
-          // Pop the top-most container (spec §3.C). No-op on the root.
-          if (router.canGoBack()) router.back();
-          break;
-        case 'loginSuccess':
-          void postFcmToken();
-          primeWebPermissions();
-          registry.mergeSession({ loggedIn: true, loginAt: Date.now() });
-          break;
-        case 'routeChange':
-          setCurrentPath(msg.payload || '/');
-          registry.updateWebView(id, { path: msg.payload || '/' });
-          break;
-        case 'requestAppUpdate':
-          Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
-            { text: STRINGS.appUpdate.cancel, style: 'cancel' },
-            {
-              text: STRINGS.appUpdate.confirm,
-              onPress: () => clearCacheAndReload(webViewRef),
-            },
-          ]);
-          break;
-        case 'openAppSettings':
-        case 'requestPermissionSettings':
-          // Deep-link to the OS settings so the user can grant a denied
-          // permission (spec §4.A).
-          Linking.openSettings().catch(() => {});
-          break;
-        case 'logWebDiagnostics':
-          console.log('[web-diagnostics]', msg.payload);
-          break;
-        case 'onLaunchWebCleanupFinished':
-          // Cleanup loop done: reveal the WebView (spec §5.B step 4).
-          dismissOverlay();
-          break;
-        case 'jsAlert':
-          Alert.alert('', msg.payload, [{ text: STRINGS.appUpdate.confirm }]);
-          break;
-      }
-    },
-    [dismissOverlay, id, postFcmToken, primeWebPermissions, registry, router],
-  );
+  // Register typed handlers on the channel. Payloads are already Zod-validated
+  // by `@inu-appcenter/intip-bridge`, so each handler receives a narrowed value.
+  useEffect(() => {
+    const { channel } = bridge;
+    const offs = [
+      // Push a new native WebView container onto the stack (spec §3.B/§4).
+      // The web only emits this for non-main-tab destinations.
+      channel.on('navigateTo', ({ path, url }) => {
+        router.push({ pathname: '/webview', params: { url, path } });
+      }),
+      // Pop the top-most container (spec §3.C). No-op on the root.
+      channel.on('goBack', () => {
+        if (router.canGoBack()) router.back();
+      }),
+      channel.on('loginSuccess', () => {
+        void postFcmToken();
+        primeWebPermissions();
+        registry.mergeSession({ loggedIn: true, loginAt: Date.now() });
+      }),
+      channel.on('routeChange', (path) => {
+        setCurrentPath(path || '/');
+        registry.updateWebView(id, { path: path || '/' });
+      }),
+      channel.on('requestAppUpdate', () => {
+        Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
+          { text: STRINGS.appUpdate.cancel, style: 'cancel' },
+          {
+            text: STRINGS.appUpdate.confirm,
+            onPress: () => clearCacheAndReload(webViewRef),
+          },
+        ]);
+      }),
+      // Deep-link to the OS settings so the user can grant a denied
+      // permission (spec §4.A).
+      channel.on('openAppSettings', () => {
+        Linking.openSettings().catch(() => {});
+      }),
+      channel.on('requestPermissionSettings', () => {
+        Linking.openSettings().catch(() => {});
+      }),
+      channel.on('logWebDiagnostics', (diag) => {
+        console.log('[web-diagnostics]', diag);
+      }),
+      // Cleanup loop done: reveal the WebView (spec §5.B step 4).
+      channel.on('onLaunchWebCleanupFinished', () => {
+        dismissOverlay();
+      }),
+      channel.on('jsAlert', (message) => {
+        Alert.alert('', message, [{ text: STRINGS.appUpdate.confirm }]);
+      }),
+    ];
+    return () => {
+      for (const off of offs) off();
+    };
+  }, [bridge, dismissOverlay, id, postFcmToken, primeWebPermissions, registry, router]);
 
   // --- External links + Android downloads ------------------------------------
   const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {
@@ -363,7 +363,7 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
           // Cache: never serve from cache; we also clearCache() on mount.
           cacheEnabled={false}
           // Bridge wiring: shims + alert override before content, observers after.
-          onMessage={onMessage}
+          onMessage={bridge.onMessage}
           injectedJavaScriptBeforeContentLoaded={BRIDGE_SHIM_SCRIPT}
           injectedJavaScript={INJECTED_SCRIPT}
           onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}

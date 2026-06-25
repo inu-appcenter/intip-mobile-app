@@ -16,11 +16,19 @@
  * All scripts are guarded so re-injection is a no-op.
  */
 
-/** Shared `post()` helper source — reused by every injected script fragment. */
+/**
+ * Shared `post()` helper source — reused by every injected script fragment.
+ *
+ * Emits the `@inu-appcenter/intip-bridge` envelope (`{ event, value, v }`) so
+ * that the shell-injected observers (routeChange/jsAlert) and the legacy bridge
+ * shim (used by old web versions) all speak the same protocol the native
+ * `createNativeChannel` parses. The first arg is kept named `type` for source
+ * compatibility but is serialised as `event`.
+ */
 const POST_HELPER = `
   function post(type, payload) {
     try {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: type, payload: payload }));
+      window.ReactNativeWebView.postMessage(JSON.stringify({ event: type, value: payload, v: 1 }));
     } catch (e) {}
   }
 `;
@@ -51,24 +59,35 @@ export function buildBridgeShimScript(platform: 'android' | 'ios'): string {
 
   // iOS handlers receive a single `body`. navigateTo's body is a dict
   // ({ path, url }); the rest ignore it. Each must expose a `postMessage`.
+  //
+  // IMPORTANT (WKWebView quirk): `window.webkit.messageHandlers` is a special
+  // native accessor — adding properties to it (`mh.navigateTo = …`) is silently
+  // dropped even though it reports `isExtensible: true`. So we cannot extend it.
+  // Instead we rebuild `window.webkit` as a plain object whose `messageHandlers`
+  // keeps react-native-webview's own `ReactNativeWebView` handler (the single
+  // real native channel that `post()` ultimately flows through) and adds the
+  // INTIP bridge handlers the web frontend calls.
   const iosShim = `
-    window.webkit = window.webkit || {};
-    window.webkit.messageHandlers = window.webkit.messageHandlers || {};
-    var mh = window.webkit.messageHandlers;
+    var __nativeMH = (window.webkit && window.webkit.messageHandlers) || {};
     function makeHandler(type, transform) {
       return { postMessage: function (body) { post(type, transform ? transform(body) : body); } };
     }
-    mh.navigateTo = makeHandler('navigateTo', function (b) {
-      b = b || {};
-      return { path: typeof b.path === 'string' ? b.path : '', url: typeof b.url === 'string' ? b.url : '' };
-    });
-    mh.goBack = makeHandler('goBack');
-    mh.requestAppUpdate = makeHandler('requestAppUpdate');
-    mh.loginSuccess = makeHandler('loginSuccess', function (b) { return b == null ? '' : String(b); });
-    mh.openAppSettings = makeHandler('openAppSettings');
-    mh.requestPermissionSettings = makeHandler('requestPermissionSettings');
-    mh.logWebDiagnostics = makeHandler('logWebDiagnostics', function (b) { return b == null ? '' : String(b); });
-    mh.onLaunchWebCleanupFinished = makeHandler('onLaunchWebCleanupFinished', function (b) { return b == null ? '' : String(b); });
+    window.webkit = {
+      messageHandlers: {
+        ReactNativeWebView: __nativeMH.ReactNativeWebView,
+        navigateTo: makeHandler('navigateTo', function (b) {
+          b = b || {};
+          return { path: typeof b.path === 'string' ? b.path : '', url: typeof b.url === 'string' ? b.url : '' };
+        }),
+        goBack: makeHandler('goBack'),
+        requestAppUpdate: makeHandler('requestAppUpdate'),
+        loginSuccess: makeHandler('loginSuccess', function (b) { return b == null ? '' : String(b); }),
+        openAppSettings: makeHandler('openAppSettings'),
+        requestPermissionSettings: makeHandler('requestPermissionSettings'),
+        logWebDiagnostics: makeHandler('logWebDiagnostics', function (b) { return b == null ? '' : String(b); }),
+        onLaunchWebCleanupFinished: makeHandler('onLaunchWebCleanupFinished', function (b) { return b == null ? '' : String(b); })
+      }
+    };
   `;
 
   return `
