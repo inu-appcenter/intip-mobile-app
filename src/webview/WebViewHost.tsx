@@ -69,6 +69,13 @@ type SubEntry = {
   path: string;
   /** Set only for a promoted (ex-warm) entry — see WebViewInstance's `active` prop. */
   active?: boolean;
+  /**
+   * Set only for a promoted (ex-warm) entry: the real navigateTo target to
+   * SPA-navigate to on reveal. The warm slot may have booted at an unrelated
+   * path (its own `path` is irrelevant now — see `pushSub`), so once
+   * promoted it still needs one explicit hop to the actual destination.
+   */
+  revealPath?: string;
 };
 /** A parked warm instance: booted at `url` (the shell), SPA-routed to `path`. */
 type WarmSlot = { key: string; url: string; path: string; alive: boolean };
@@ -329,14 +336,27 @@ export default function WebViewHost() {
       return;
     }
 
-    // Adopt-on-navigateTo: promote a matching, alive warm slot instead of
-    // cold-loading. Same `key` moves from `warm` into `subs` in this one
-    // batched update, so React reconciles it as the same still-mounted
-    // instance (no remount, no JS re-boot) — see SubLayer's `revealed` prop.
+    // Adopt-on-navigateTo: promote ANY alive warm slot instead of cold-loading
+    // — its own current path doesn't need to match the target. Requiring a
+    // match (the original design) meant adoption almost never fired in
+    // practice: this app's prewarm intent has near-zero real trigger
+    // coverage (programmatic nav, no <a href>), so the warm slot usually
+    // just sits at its neutral boot path, which no real navigateTo target
+    // ever equals. Adopting unconditionally trades "the shell already has
+    // the right data loaded" for "always skip the JS boot regardless of
+    // whether we predicted the destination" — `revealPath` below drives the
+    // one SPA hop to the real target once promoted.
+    //
+    // Same `key` moves from `warm` into `subs` in this one batched update, so
+    // React reconciles it as the same still-mounted instance (no remount, no
+    // JS re-boot) — see SubLayer's `revealed` prop.
     const w = warmRef.current;
-    if (w?.alive && w.path === path) {
+    if (w?.alive) {
       clearWarmTtl();
-      setSubs((prev) => [...prev, { key: w.key, url: w.url, path: w.path, active: true }]);
+      setSubs((prev) => [
+        ...prev,
+        { key: w.key, url: w.url, path, active: true, revealPath: path },
+      ]);
       setWarm(null);
       // `setWarm` is async — it won't update `warmRef.current` until the
       // mirroring effect commits, which hasn't happened yet at this point in
@@ -391,8 +411,7 @@ export default function WebViewHost() {
   // (moving the same key from one slot to the other) would remount — and
   // silently re-pay the exact JS-boot cost the whole feature exists to skip.
   const renderLayers = useMemo(() => {
-    const list: { key: string; url: string; path: string; active?: boolean; isWarm: boolean }[] =
-      subs.map((s) => ({ ...s, isWarm: false }));
+    const list: (SubEntry & { isWarm: boolean })[] = subs.map((s) => ({ ...s, isWarm: false }));
     if (warm) list.push({ key: warm.key, url: warm.url, path: warm.path, isWarm: true });
     return list;
   }, [subs, warm]);
@@ -444,7 +463,7 @@ export default function WebViewHost() {
             mode="sub"
             url={layer.url}
             active={layer.isWarm ? false : layer.active}
-            targetPath={layer.isWarm ? layer.path : undefined}
+            targetPath={layer.isWarm ? layer.path : layer.revealPath}
             onNavigateTo={pushSub}
             onGoBack={pop}
             onGoHome={goHome}
