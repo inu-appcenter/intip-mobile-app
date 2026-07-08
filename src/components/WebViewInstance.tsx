@@ -1,32 +1,30 @@
 /**
- * A single INTIP WebView container — the unit of the native multi-WebView stack
- * (spec §3). The root portal (`mode="root"`) hosts the main-tab SPA; every
- * sub-page is a pushed instance (`mode="sub"`) shown on its own native screen
- * so it gets slide animation + swipe-back for free from the native stack.
+ * A single INTIP WebView instance — the reusable "content unit" of the native
+ * multi-WebView stack. Unlike the old `WebViewContainer`, this component is
+ * **router-free**: it owns only the WebView + the JS<->Native bridge, and it
+ * lives inside the persistent {@link WebViewHost} rather than on an expo-router
+ * screen. That persistence is what lets the warm pool reuse an instance across
+ * navigations without re-booting its JS context (a WKWebView cannot be
+ * reparented across screen trees).
  *
- * Both modes share the full JS <-> Native bridge: `navigateTo` pushes a new
- * container, `goBack` pops the top one, and the rest of the web→native API
- * (app update, settings, downloads, FCM token) is handled here.
+ * Navigation is delegated to the host through callbacks: the web's `navigateTo`
+ * becomes {@link Props.onNavigateTo} (host pushes a sub-instance) and `goBack`
+ * becomes {@link Props.onGoBack} (host pops). The root instance additionally
+ * owns the launch overlay, cache purge, notifications and FCM lifecycle.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
   AppState,
-  BackHandler,
   Linking,
   Platform,
   StyleSheet,
-  ToastAndroid,
   useColorScheme,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
-import WebView, {
-  type WebViewMessageEvent,
-  type WebViewNavigation,
-} from 'react-native-webview';
+import WebView, { type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 
 import { createNativeChannel } from '@inu-appcenter/intip-bridge/native';
@@ -74,32 +72,45 @@ function looksLikeDownload(url: string): boolean {
 }
 
 type Props = {
-  /** Absolute URL this container loads. */
+  /** Absolute URL this instance loads. */
   url: string;
   /** Root portal hosts the main tabs; sub-pages are pushed on top. */
   mode: 'root' | 'sub';
   /** Path to deep-link to once loaded (push-tap routing). Root only. */
   initialNavPath?: string | null;
+  /** Web asked to push a new sub-page — the host owns the custom stack. */
+  onNavigateTo: (url: string, path: string) => void;
+  /** Web asked to go back — the host pops the top sub-page (no-op on root). */
+  onGoBack: () => void;
+  /** The WebContent process died (iOS jetsam / Android render-process gone). */
+  onContentProcessTerminated?: () => void;
 };
 
-export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
+export default function WebViewInstance({
+  url,
+  mode,
+  initialNavPath,
+  onNavigateTo,
+  onGoBack,
+  onContentProcessTerminated,
+}: Props) {
   const webViewRef = useRef<WebView>(null);
   // PlatformChannel over the single react-native-webview channel. `onMessage`
   // is wired to the WebView prop; Web->Native handlers are registered below.
+  // The channel only stores the ref and reads `.current` later (in post/reload),
+  // never during render — so the react-hooks/refs warning is a false positive.
+  // eslint-disable-next-line react-hooks/refs
   const bridge = useMemo(() => createNativeChannel(webViewRef), []);
-  const router = useRouter();
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
   const isRoot = mode === 'root';
 
-  // Connect this container to the WebView orchestrator (spec: shared controller).
+  // Connect this instance to the WebView orchestrator (spec: shared controller).
   // A stable id identifies it in the live stack for the duration of its mount.
   const registry = useWebViewRegistry();
   const [id] = useState(() => `${mode}-${nextWebViewSeq()}`);
 
   const [currentPath, setCurrentPath] = useState<string>('/');
-  const canGoBackRef = useRef(false);
-  const lastBackPressRef = useRef(0);
   const pendingNavRef = useRef<string | null>(initialNavPath ?? null);
   const permissionsPrimedRef = useRef(false);
   const cleanupStartedRef = useRef(false);
@@ -170,7 +181,7 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
     };
   }, [dismissOverlay, isRoot, navigateSpa, postFcmToken]);
 
-  // --- Orchestrator: register this container + expose its imperative handle --
+  // --- Orchestrator: register this instance + expose its imperative handle ---
   useEffect(() => {
     const handle: WebViewHandle = {
       reload: () => webViewRef.current?.reload(),
@@ -183,69 +194,20 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
     return () => registry.unregisterWebView(id);
   }, [id, mode, url, registry, navigateSpa, postFcmToken]);
 
-  // The root owns the expo-router stack, so it registers native-stack navigation
-  // (push/pop/popToRoot) the controller uses to restore a saved session.
-  useEffect(() => {
-    if (!isRoot) return;
-    registry.registerNavigator({
-      push: (target, path) =>
-        router.push({ pathname: '/webview', params: { url: target, path } }),
-      pop: () => {
-        if (router.canGoBack()) router.back();
-      },
-      popToRoot: () => {
-        try {
-          if (router.canGoBack()) router.dismissAll();
-        } catch {
-          while (router.canGoBack()) router.back();
-        }
-      },
-    });
-    return () => registry.registerNavigator(null);
-  }, [isRoot, registry, router]);
-
-  // --- Android hardware back (only while this screen is focused) -------------
-  useFocusEffect(
-    useCallback(() => {
-      if (Platform.OS !== 'android') return;
-      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-        // Sub-page: the back button pops this native container (spec §3.C.1).
-        if (!isRoot) {
-          if (router.canGoBack()) router.back();
-          return true;
-        }
-        // Root: walk the SPA history while it has any, else "press to exit".
-        if (canGoBackRef.current) {
-          webViewRef.current?.goBack();
-          return true;
-        }
-        const now = Date.now();
-        if (now - lastBackPressRef.current < 2000) {
-          BackHandler.exitApp();
-          return true;
-        }
-        lastBackPressRef.current = now;
-        ToastAndroid.show('뒤로 가기를 한 번 더 누르면 종료됩니다.', ToastAndroid.SHORT);
-        return true;
-      });
-      return () => sub.remove();
-    }, [isRoot, router]),
-  );
-
   // --- Bridge: Web -> Native -------------------------------------------------
   // Register typed handlers on the channel. Payloads are already Zod-validated
   // by `@inu-appcenter/intip-bridge`, so each handler receives a narrowed value.
   useEffect(() => {
     const { channel } = bridge;
     const offs = [
-      // Push a new native WebView container onto the stack (spec §3.B/§4).
+      // Push a new sub-page — the host owns the custom stack (spec §3.B/§4).
       // The web only emits this for non-main-tab destinations.
-      channel.on('navigateTo', ({ path, url }) => {
-        router.push({ pathname: '/webview', params: { url, path } });
+      channel.on('navigateTo', ({ path, url: target }) => {
+        onNavigateTo(target, path);
       }),
-      // Pop the top-most container (spec §3.C). No-op on the root.
+      // Pop the top-most sub-page (spec §3.C). No-op on the root.
       channel.on('goBack', () => {
-        if (router.canGoBack()) router.back();
+        onGoBack();
       }),
       channel.on('loginSuccess', () => {
         void postFcmToken();
@@ -287,7 +249,7 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
     return () => {
       for (const off of offs) off();
     };
-  }, [bridge, dismissOverlay, id, postFcmToken, primeWebPermissions, registry, router]);
+  }, [bridge, dismissOverlay, id, onGoBack, onNavigateTo, postFcmToken, primeWebPermissions, registry]);
 
   // --- External links + Android downloads ------------------------------------
   const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {
@@ -322,7 +284,6 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
 
   const onNavigationStateChange = useCallback(
     (nav: WebViewNavigation) => {
-      canGoBackRef.current = nav.canGoBack;
       registry.updateWebView(id, { canGoBack: nav.canGoBack, url: nav.url });
     },
     [id, registry],
@@ -347,11 +308,11 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
   }, [isRoot, navigateSpa, postFcmToken]);
 
   // Root sits on the main tabs -> no WebView-level swipe-back; sub-pages let the
-  // native stack own the swipe so it pops the container (spec §3.C.2 / §6.5).
+  // host's custom stack own the swipe so it pops the instance (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
 
   return (
-    // Fill the screen but ignore the bottom inset so content reaches the edge.
+    // Fill the host layer but ignore the bottom inset so content reaches the edge.
     <View style={[styles.fill, { backgroundColor }]}>
       <SafeAreaView style={styles.fill} edges={['top', 'left', 'right']}>
         <WebView
@@ -369,6 +330,8 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
           onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
           onNavigationStateChange={onNavigationStateChange}
           onLoadEnd={onLoadEnd}
+          onContentProcessDidTerminate={onContentProcessTerminated}
+          onRenderProcessGone={onContentProcessTerminated}
           onFileDownload={({ nativeEvent }) => saveDownload(nativeEvent.downloadUrl)}
           // Inline media — videos must not auto-fullscreen (spec §6.3).
           allowsInlineMediaPlayback
