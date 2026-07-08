@@ -334,6 +334,13 @@ export default function WebViewHost() {
       clearWarmTtl();
       setSubs((prev) => [...prev, { key: w.key, url: w.url, path: w.path, active: true }]);
       setWarm(null);
+      // `setWarm` is async — it won't update `warmRef.current` until the
+      // mirroring effect commits, which hasn't happened yet at this point in
+      // the same synchronous call. Assign it directly so the very next line's
+      // `spawnWarm()` sees a cleared ref instead of bailing on the stale
+      // (still-`alive`) warm object we just adopted — without this, every
+      // adopt would silently skip re-warming the next slot.
+      warmRef.current = null;
       spawnWarm(); // re-warm a fresh slot for the next +1
       return;
     }
