@@ -32,6 +32,7 @@ import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
   STRINGS,
+  isEdgeToEdgePath,
   isMainTabPath,
 } from '../webview/constants';
 import {
@@ -137,6 +138,19 @@ export default function WebViewInstance({
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
   const isRoot = mode === 'root';
+  // Stable for the instance's lifetime — `url` never changes after mount, so
+  // this can't flip mid-session. Deriving it from a live-changing SPA route
+  // instead would flip which tree branch renders (SafeAreaView-wrapped or
+  // not) and remount the WebView, losing its JS context (same class of bug
+  // as the warm-pool reconciliation issue in WebViewHost).
+  const edgeToEdge = useMemo(() => {
+    if (isRoot) return true;
+    try {
+      return isEdgeToEdgePath(new URL(url).pathname);
+    } catch {
+      return false;
+    }
+  }, [isRoot, url]);
 
   // Connect this instance to the WebView orchestrator (spec: shared controller).
   // A stable id identifies it in the live stack for the duration of its mount.
@@ -419,40 +433,53 @@ export default function WebViewInstance({
   // host's custom stack own the swipe so it pops the instance (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
 
+  const webView = (
+    <WebView
+      ref={webViewRef}
+      source={{ uri: url }}
+      style={[styles.fill, { backgroundColor }]}
+      // Identify as the official app so the web enables multi-WebView routing.
+      applicationNameForUserAgent={APP_UA_SUFFIX}
+      // Cache: never serve from cache; we also clearCache() on mount.
+      cacheEnabled={false}
+      // Bridge wiring: shims + alert override before content, observers after.
+      onMessage={bridge.onMessage}
+      injectedJavaScriptBeforeContentLoaded={BRIDGE_SHIM_SCRIPT}
+      injectedJavaScript={INJECTED_SCRIPT}
+      onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
+      onNavigationStateChange={onNavigationStateChange}
+      onLoadEnd={onLoadEnd}
+      onContentProcessDidTerminate={onContentProcessDied}
+      onRenderProcessGone={onContentProcessDied}
+      onFileDownload={({ nativeEvent }) => saveDownload(nativeEvent.downloadUrl)}
+      // Inline media — videos must not auto-fullscreen (spec §6.3).
+      allowsInlineMediaPlayback
+      mediaPlaybackRequiresUserAction
+      mediaCapturePermissionGrantType="grantIfSameHostElseDeny"
+      allowsBackForwardNavigationGestures={webViewSwipeBack}
+      contentInsetAdjustmentBehavior="never"
+      geolocationEnabled
+      allowsFullscreenVideo={false}
+      originWhitelist={['https://*', 'http://*', 'about:*']}
+      pullToRefreshEnabled={false}
+    />
+  );
+
   return (
     // Fill the host layer but ignore the bottom inset so content reaches the edge.
     <View style={[styles.fill, { backgroundColor }]}>
-      <SafeAreaView style={styles.fill} edges={['top', 'left', 'right']}>
-        <WebView
-          ref={webViewRef}
-          source={{ uri: url }}
-          style={[styles.fill, { backgroundColor }]}
-          // Identify as the official app so the web enables multi-WebView routing.
-          applicationNameForUserAgent={APP_UA_SUFFIX}
-          // Cache: never serve from cache; we also clearCache() on mount.
-          cacheEnabled={false}
-          // Bridge wiring: shims + alert override before content, observers after.
-          onMessage={bridge.onMessage}
-          injectedJavaScriptBeforeContentLoaded={BRIDGE_SHIM_SCRIPT}
-          injectedJavaScript={INJECTED_SCRIPT}
-          onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
-          onNavigationStateChange={onNavigationStateChange}
-          onLoadEnd={onLoadEnd}
-          onContentProcessDidTerminate={onContentProcessDied}
-          onRenderProcessGone={onContentProcessDied}
-          onFileDownload={({ nativeEvent }) => saveDownload(nativeEvent.downloadUrl)}
-          // Inline media — videos must not auto-fullscreen (spec §6.3).
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction
-          mediaCapturePermissionGrantType="grantIfSameHostElseDeny"
-          allowsBackForwardNavigationGestures={webViewSwipeBack}
-          contentInsetAdjustmentBehavior="never"
-          geolocationEnabled
-          allowsFullscreenVideo={false}
-          originWhitelist={['https://*', 'http://*', 'about:*']}
-          pullToRefreshEnabled={false}
-        />
-      </SafeAreaView>
+      {edgeToEdge ? (
+        // Root (and sub-pages whose page has been migrated, see
+        // `isEdgeToEdgePath`) go fully edge-to-edge (top/left/right too) —
+        // the web owns those insets via env(safe-area-inset-*) CSS, matching
+        // how it already owns the bottom inset everywhere. Everything else
+        // keeps the native reservation below until migrated the same way.
+        webView
+      ) : (
+        <SafeAreaView style={styles.fill} edges={['top', 'left', 'right']}>
+          {webView}
+        </SafeAreaView>
+      )}
 
       {overlayVisible && (
         <Animated.View
