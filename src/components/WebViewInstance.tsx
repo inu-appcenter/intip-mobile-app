@@ -82,6 +82,12 @@ type Props = {
   onNavigateTo: (url: string, path: string) => void;
   /** Web asked to go back — the host pops the top sub-page (no-op on root). */
   onGoBack: () => void;
+  /**
+   * Web asked to return to a home-tab path (`/home`, `/m/home`). The host
+   * collapses the whole sub-stack back to root and drives root there — see
+   * `targetPath` below, which is what actually performs that SPA move.
+   */
+  onGoHome: (path: string) => void;
   /** The WebContent process died (iOS jetsam / Android render-process gone). Only
    * meaningful while `active === false` (parked warm slot) — see the handler below. */
   onContentProcessTerminated?: () => void;
@@ -93,9 +99,13 @@ type Props = {
    */
   active?: boolean;
   /**
-   * Tier 3 warm pool: SPA-route this (already-booted) instance to `path`.
-   * Used to pre-navigate a warm slot ahead of adoption; re-sent whenever the
-   * value changes (latest prewarm intent overrides an earlier one).
+   * SPA-route this (already-booted) instance to `path` whenever the value
+   * changes (queued if the instance hasn't finished its first `routeChange`
+   * yet, flushed once it does). Two independent callers drive this:
+   *  - Tier 3 warm pool: pre-navigate a parked warm slot ahead of adoption
+   *    (latest prewarm intent overrides an earlier one).
+   *  - `goHome`: drive the always-loaded root instance to a home path after
+   *    the sub-stack collapses (see `WebViewHost.goHome`).
    */
   targetPath?: string;
   /** Web sent a `prewarm` touchstart intent. Only wired for the root instance. */
@@ -110,6 +120,7 @@ export default function WebViewInstance({
   initialNavPath,
   onNavigateTo,
   onGoBack,
+  onGoHome,
   onContentProcessTerminated,
   active,
   targetPath,
@@ -260,6 +271,11 @@ export default function WebViewInstance({
       channel.on('goBack', () => {
         onGoBack();
       }),
+      // Return to a home-tab path — collapse the stack to root and drive
+      // root there, regardless of which instance (root or a sub-page) sent it.
+      channel.on('goHome', ({ path }) => {
+        onGoHome(path);
+      }),
       channel.on('loginSuccess', () => {
         void postFcmToken();
         primeWebPermissions();
@@ -324,6 +340,7 @@ export default function WebViewInstance({
     id,
     navigateSpa,
     onGoBack,
+    onGoHome,
     onNavigateTo,
     onPrewarm,
     onRouteChange,

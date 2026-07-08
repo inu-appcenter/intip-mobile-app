@@ -209,6 +209,10 @@ export default function WebViewHost() {
   const [initialNavPath, setInitialNavPath] = useState<string | null>(null);
   const [subs, setSubs] = useState<SubEntry[]>([]);
   const [warm, setWarm] = useState<WarmSlot | null>(null);
+  // `goHome` drives root's own SPA via the same targetPath/pendingTargetRef
+  // mechanism the warm pool uses to pre-navigate a parked instance — root is
+  // always already loaded, so it takes effect immediately.
+  const [rootTargetPath, setRootTargetPath] = useState<string | undefined>(undefined);
 
   // Mirror the live stack into refs so the stable navigator actions read fresh
   // values without re-creating themselves.
@@ -360,6 +364,17 @@ export default function WebViewHost() {
     setSubs([]);
   }, []);
 
+  // Return to a home-tab path from anywhere in the stack (root or any pushed
+  // sub-page): collapse to root, then drive root's own SPA there via
+  // `rootTargetPath` (root's `targetPath` prop below). Composes the same two
+  // primitives `restoreSession` already uses (`popToRoot` + driving root's
+  // handle), but the destination is fixed to a home path instead of a saved
+  // session snapshot.
+  const goHome = useCallback((path: string) => {
+    popToRoot();
+    setRootTargetPath(path);
+  }, [popToRoot]);
+
   // Reuse the orchestrator: register the host as the stack navigator so the
   // controller (goBackActive / restoreSession / popToRoot) drives it unchanged.
   useEffect(() => {
@@ -402,8 +417,10 @@ export default function WebViewHost() {
           mode="root"
           url={ROOT_URL}
           initialNavPath={initialNavPath}
+          targetPath={rootTargetPath}
           onNavigateTo={pushSub}
           onGoBack={pop}
+          onGoHome={goHome}
           onPrewarm={handlePrewarm}
           onRouteChange={handleRootRouteChange}
         />
@@ -430,6 +447,7 @@ export default function WebViewHost() {
             targetPath={layer.isWarm ? layer.path : undefined}
             onNavigateTo={pushSub}
             onGoBack={pop}
+            onGoHome={goHome}
             onContentProcessTerminated={layer.isWarm ? markWarmDead : undefined}
           />
         </SubLayer>
