@@ -55,8 +55,23 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const POP_DISTANCE = SCREEN_WIDTH * 0.33;
 const POP_VELOCITY = 800;
 
+// Tier 3 warm pool tuning. No numeric guidance in the design doc — these are
+// starting defaults; adjust from the Phase 5 warm-hit-vs-cold measurements.
+/** Idle delay after the shell signals interactive before booting the warm slot. */
+const WARM_LAZY_DELAY_MS = 1500;
+/** How long an un-adopted warm slot survives before eviction (memory reclaim). */
+const WARM_TTL_MS = 60_000;
+
 type GateStatus = 'checking' | 'offline' | 'online';
-type SubEntry = { key: string; url: string; path: string };
+type SubEntry = {
+  key: string;
+  url: string;
+  path: string;
+  /** Set only for a promoted (ex-warm) entry — see WebViewInstance's `active` prop. */
+  active?: boolean;
+};
+/** A parked warm instance: booted at `url` (the shell), SPA-routed to `path`. */
+type WarmSlot = { key: string; url: string; path: string; alive: boolean };
 type SubLayerHandle = { close: () => void };
 
 /** True when `url` points at the portal host and is therefore safe to host. */
@@ -76,17 +91,24 @@ function isPortalUrl(url: string): boolean {
  */
 const SubLayer = forwardRef<SubLayerHandle, {
   isTop: boolean;
+  /**
+   * false keeps the layer parked off-screen and non-interactive (a warm
+   * slot); true slides it in. Firing on a `revealed` transition rather than
+   * on mount lets the same already-booted instance (same `key`, never
+   * remounted) later animate in when adopted — see `pushSub`'s promotion path.
+   */
+  revealed: boolean;
   onRemoved: () => void;
   children: ReactNode;
-}>(function SubLayer({ isTop, onRemoved, children }, ref) {
+}>(function SubLayer({ isTop, revealed, onRemoved, children }, ref) {
   const tx = useSharedValue(SCREEN_WIDTH);
   const startX = useSharedValue(0);
 
-  // Slide in from the right on mount. (`.set`/`.get` is the React-Compiler-safe
-  // shared-value API — plain `.value =` trips react-hooks/immutability.)
+  // (`.set`/`.get` is the React-Compiler-safe shared-value API — plain
+  // `.value =` trips react-hooks/immutability.)
   useEffect(() => {
-    tx.set(withTiming(0, { duration: 280 }));
-  }, [tx]);
+    if (revealed) tx.set(withTiming(0, { duration: 280 }));
+  }, [revealed, tx]);
 
   const close = useCallback(() => {
     tx.set(
@@ -186,6 +208,7 @@ export default function WebViewHost() {
   const [status, setStatus] = useState<GateStatus>('checking');
   const [initialNavPath, setInitialNavPath] = useState<string | null>(null);
   const [subs, setSubs] = useState<SubEntry[]>([]);
+  const [warm, setWarm] = useState<WarmSlot | null>(null);
 
   // Mirror the live stack into refs so the stable navigator actions read fresh
   // values without re-creating themselves.
@@ -193,8 +216,16 @@ export default function WebViewHost() {
   useEffect(() => {
     subsRef.current = subs;
   }, [subs]);
+  const warmRef = useRef<WarmSlot | null>(warm);
+  useEffect(() => {
+    warmRef.current = warm;
+  }, [warm]);
   const layersRef = useRef(new Map<string, SubLayerHandle>());
   const seqRef = useRef(0);
+  const warmSeqRef = useRef(0);
+  const rootBootedRef = useRef(false);
+  const lazyWarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warmTtlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Launch gate (moved from app/index.tsx) --------------------------------
   // Function declaration (hoisted) so the retry action can recurse into it.
@@ -220,6 +251,66 @@ export default function WebViewHost() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // --- Tier 3 warm pool: 1 slot, lazy-warmed, TTL-evicted ---------------------
+  const clearWarmTtl = useCallback(() => {
+    if (warmTtlTimerRef.current) {
+      clearTimeout(warmTtlTimerRef.current);
+      warmTtlTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleWarmTtl = useCallback(() => {
+    clearWarmTtl();
+    warmTtlTimerRef.current = setTimeout(() => {
+      // Unused long enough — reclaim the WebContent process; re-warms lazily
+      // on the next prewarm intent.
+      setWarm(null);
+    }, WARM_TTL_MS);
+  }, [clearWarmTtl]);
+
+  // Boots a fresh warm slot at the shared shell URL (same origin/bundle as
+  // root — any portal URL triggers the same JS boot) and SPA-navigates it to
+  // `initialTargetPath` once loaded. A still-alive slot is left untouched.
+  const spawnWarm = useCallback((initialTargetPath?: string) => {
+    if (warmRef.current?.alive) return;
+    const key = `warm-${++warmSeqRef.current}`;
+    setWarm({ key, url: ROOT_URL, path: initialTargetPath ?? '/', alive: true });
+    scheduleWarmTtl();
+  }, [scheduleWarmTtl]);
+
+  const markWarmDead = useCallback(() => {
+    setWarm((w) => (w ? { ...w, alive: false } : w));
+  }, []);
+
+  // Root's `prewarm` (touchstart intent). The payload's `url` is always
+  // same-origin as ROOT_URL in this app (the web computes it as
+  // `${location.origin}${path}`), so warming always reuses the already-booted
+  // shell and SPA-navigates by path — there is no cross-origin reload path to
+  // handle here.
+  const handlePrewarm = useCallback((_url: string, path: string) => {
+    if (warmRef.current?.alive) {
+      setWarm((w) => (w ? { ...w, path } : w)); // latest intent overrides
+      scheduleWarmTtl();
+    } else {
+      spawnWarm(path);
+    }
+  }, [spawnWarm, scheduleWarmTtl]);
+
+  // Lazy warm: once root's shell signals interactive (first routeChange),
+  // boot the warm slot after an idle delay at a neutral route.
+  const handleRootRouteChange = useCallback(() => {
+    if (rootBootedRef.current) return;
+    rootBootedRef.current = true;
+    lazyWarmTimerRef.current = setTimeout(() => spawnWarm(), WARM_LAZY_DELAY_MS);
+  }, [spawnWarm]);
+
+  useEffect(() => {
+    return () => {
+      if (lazyWarmTimerRef.current) clearTimeout(lazyWarmTimerRef.current);
+      clearWarmTtl();
+    };
+  }, [clearWarmTtl]);
+
   // --- Custom sub-stack navigation -------------------------------------------
   const removeSub = useCallback((key: string) => {
     layersRef.current.delete(key);
@@ -233,9 +324,23 @@ export default function WebViewHost() {
       if (url) Linking.openURL(url).catch(() => {});
       return;
     }
+
+    // Adopt-on-navigateTo: promote a matching, alive warm slot instead of
+    // cold-loading. Same `key` moves from `warm` into `subs` in this one
+    // batched update, so React reconciles it as the same still-mounted
+    // instance (no remount, no JS re-boot) — see SubLayer's `revealed` prop.
+    const w = warmRef.current;
+    if (w?.alive && w.path === path) {
+      clearWarmTtl();
+      setSubs((prev) => [...prev, { key: w.key, url: w.url, path: w.path, active: true }]);
+      setWarm(null);
+      spawnWarm(); // re-warm a fresh slot for the next +1
+      return;
+    }
+
     const key = `sub-${++seqRef.current}`;
     setSubs((prev) => [...prev, { key, url, path }]);
-  }, []);
+  }, [clearWarmTtl, spawnWarm]);
 
   const pop = useCallback(() => {
     const top = subsRef.current[subsRef.current.length - 1];
@@ -254,6 +359,22 @@ export default function WebViewHost() {
     registry.registerNavigator({ push: pushSub, pop, popToRoot });
     return () => registry.registerNavigator(null);
   }, [registry, pushSub, pop, popToRoot]);
+
+  // Tier 3 warm pool: `subs` and `warm` are merged into ONE array for
+  // rendering. This is load-bearing, not cosmetic — React only preserves a
+  // keyed element's identity (no remount) when it moves within the SAME
+  // array/`.map()` across renders. Rendering the warm slot as a separate
+  // sibling JSX expression (`{warm && <SubLayer/>}`) would put it in a
+  // different reconciliation "slot" than `{subs.map(...)}`, so promoting it
+  // (moving the same key from one slot to the other) would remount — and
+  // silently re-pay the exact JS-boot cost the whole feature exists to skip.
+  const renderLayers = useMemo(() => {
+    const list: { key: string; url: string; path: string; active?: boolean; isWarm: boolean }[] =
+      subs.map((s) => ({ ...s, isWarm: false }));
+    if (warm) list.push({ key: warm.key, url: warm.url, path: warm.path, isWarm: true });
+    return list;
+  }, [subs, warm]);
+  const lastSubIndex = renderLayers.reduce((acc, l, idx) => (l.isWarm ? acc : idx), -1);
 
   if (status !== 'online') {
     return (
@@ -276,24 +397,33 @@ export default function WebViewHost() {
           initialNavPath={initialNavPath}
           onNavigateTo={pushSub}
           onGoBack={pop}
+          onPrewarm={handlePrewarm}
+          onRouteChange={handleRootRouteChange}
         />
       </View>
 
-      {subs.map((s, i) => (
+      {renderLayers.map((layer, i) => (
         <SubLayer
-          key={s.key}
-          isTop={i === subs.length - 1}
-          onRemoved={() => removeSub(s.key)}
+          key={layer.key}
+          isTop={!layer.isWarm && i === lastSubIndex}
+          // Warm stays parked off-screen (revealed=false) and non-interactive;
+          // it isn't registered with the controller until adopted
+          // (WebViewInstance gates registration on `active !== false`).
+          revealed={!layer.isWarm}
+          onRemoved={() => removeSub(layer.key)}
           ref={(handle) => {
-            if (handle) layersRef.current.set(s.key, handle);
-            else layersRef.current.delete(s.key);
+            if (handle) layersRef.current.set(layer.key, handle);
+            else layersRef.current.delete(layer.key);
           }}
         >
           <WebViewInstance
             mode="sub"
-            url={s.url}
+            url={layer.url}
+            active={layer.isWarm ? false : layer.active}
+            targetPath={layer.isWarm ? layer.path : undefined}
             onNavigateTo={pushSub}
             onGoBack={pop}
+            onContentProcessTerminated={layer.isWarm ? markWarmDead : undefined}
           />
         </SubLayer>
       ))}

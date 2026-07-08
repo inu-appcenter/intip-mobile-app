@@ -82,8 +82,26 @@ type Props = {
   onNavigateTo: (url: string, path: string) => void;
   /** Web asked to go back — the host pops the top sub-page (no-op on root). */
   onGoBack: () => void;
-  /** The WebContent process died (iOS jetsam / Android render-process gone). */
+  /** The WebContent process died (iOS jetsam / Android render-process gone). Only
+   * meaningful while `active === false` (parked warm slot) — see the handler below. */
   onContentProcessTerminated?: () => void;
+  /**
+   * Tier 3 warm pool: `false` while parked (suspended, hidden from the
+   * controller stack), `true` once revealed/promoted. `undefined` (root and
+   * plain cold sub-pages) means "not pool-managed" — no `setActive` is ever
+   * sent and the instance registers with the controller immediately, as in M1.
+   */
+  active?: boolean;
+  /**
+   * Tier 3 warm pool: SPA-route this (already-booted) instance to `path`.
+   * Used to pre-navigate a warm slot ahead of adoption; re-sent whenever the
+   * value changes (latest prewarm intent overrides an earlier one).
+   */
+  targetPath?: string;
+  /** Web sent a `prewarm` touchstart intent. Only wired for the root instance. */
+  onPrewarm?: (url: string, path: string) => void;
+  /** SPA route changed. Used by the host to detect "shell interactive" (root only). */
+  onRouteChange?: (path: string) => void;
 };
 
 export default function WebViewInstance({
@@ -93,6 +111,10 @@ export default function WebViewInstance({
   onNavigateTo,
   onGoBack,
   onContentProcessTerminated,
+  active,
+  targetPath,
+  onPrewarm,
+  onRouteChange,
 }: Props) {
   const webViewRef = useRef<WebView>(null);
   // PlatformChannel over the single react-native-webview channel. `onMessage`
@@ -114,6 +136,11 @@ export default function WebViewInstance({
   const pendingNavRef = useRef<string | null>(initialNavPath ?? null);
   const permissionsPrimedRef = useRef(false);
   const cleanupStartedRef = useRef(false);
+  // Tier 3 warm pool: independent of the root-only `pendingNavRef`/deep-link
+  // queue above, so promoting a warm slot can never interfere with root's
+  // push-notification flow. Flushed once, same as pendingNavRef, in onLoadEnd.
+  const hasLoadedRef = useRef(false);
+  const pendingTargetRef = useRef<string | undefined>(targetPath);
 
   // Launch overlay (root only): a branded screen held over the WebView until
   // the web cleanup loop reports back, masking the service-worker/cache purge.
@@ -153,6 +180,25 @@ export default function WebViewInstance({
     }).start(() => setOverlayVisible(false));
   }, [isRoot, overlayOpacity]);
 
+  // Tier 3 warm pool: suspend(false)/resume(true) the parked instance. Only
+  // fires for pool-managed instances (`active` explicitly boolean) — root and
+  // plain cold sub-pages leave `active` undefined and never touch this, so a
+  // normal push never triggers a wasted suspend/resume + reveal-revalidate.
+  useEffect(() => {
+    if (active === undefined) return;
+    bridge.channel.send('setActive', active);
+  }, [active, bridge]);
+
+  // Tier 3 warm pool: SPA-navigate an already-booted instance to `targetPath`,
+  // once the SPA has reported its own first route (or queue it if it hasn't —
+  // flushed on the first `routeChange` below). Re-fires on change so a later
+  // prewarm intent overrides an earlier one still in flight.
+  useEffect(() => {
+    if (targetPath === undefined) return;
+    if (hasLoadedRef.current) navigateSpa(targetPath);
+    else pendingTargetRef.current = targetPath;
+  }, [targetPath, navigateSpa]);
+
   // --- Lifecycle: cache, notifications, deep-link subscription (root only) ---
   useEffect(() => {
     // Sub-pages share the process-wide WebView cache; only the launch screen
@@ -183,6 +229,11 @@ export default function WebViewInstance({
 
   // --- Orchestrator: register this instance + expose its imperative handle ---
   useEffect(() => {
+    // Tier 3 warm pool: a parked slot (`active === false`) stays out of the
+    // controller stack until adopted, so the dev panel only ever shows real
+    // navigation entries. Once promoted, `active` flips to `true` and this
+    // effect re-runs (same component instance, no remount) and registers.
+    if (active === false) return;
     const handle: WebViewHandle = {
       reload: () => webViewRef.current?.reload(),
       reloadClearCache: () => clearCacheAndReload(webViewRef),
@@ -192,7 +243,7 @@ export default function WebViewInstance({
     };
     registry.registerWebView({ id, mode, url, path: '/' }, handle);
     return () => registry.unregisterWebView(id);
-  }, [id, mode, url, registry, navigateSpa, postFcmToken]);
+  }, [id, mode, url, registry, navigateSpa, postFcmToken, active]);
 
   // --- Bridge: Web -> Native -------------------------------------------------
   // Register typed handlers on the channel. Payloads are already Zod-validated
@@ -217,6 +268,24 @@ export default function WebViewInstance({
       channel.on('routeChange', (path) => {
         setCurrentPath(path || '/');
         registry.updateWebView(id, { path: path || '/' });
+        onRouteChange?.(path || '/');
+        // Tier 3 warm pool: flush a queued prewarm target on the SPA's FIRST
+        // reported route, not on document-load (onLoadEnd) — the web app's
+        // own boot-time redirect (e.g. "/" -> "/home") can otherwise race
+        // with and silently overwrite an externally-triggered `navigate()`
+        // sent too early, before the router/history listeners have settled.
+        if (!hasLoadedRef.current) {
+          hasLoadedRef.current = true;
+          if (pendingTargetRef.current) {
+            navigateSpa(pendingTargetRef.current);
+            pendingTargetRef.current = undefined;
+          }
+        }
+      }),
+      // Tier 3 warm pool: link touchstart intent. Only meaningful when the
+      // host wires `onPrewarm` (root only) — inert (no-op) for sub-pages.
+      channel.on('prewarm', ({ path, url: target }) => {
+        onPrewarm?.(target, path);
       }),
       channel.on('requestAppUpdate', () => {
         Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
@@ -249,7 +318,19 @@ export default function WebViewInstance({
     return () => {
       for (const off of offs) off();
     };
-  }, [bridge, dismissOverlay, id, onGoBack, onNavigateTo, postFcmToken, primeWebPermissions, registry]);
+  }, [
+    bridge,
+    dismissOverlay,
+    id,
+    navigateSpa,
+    onGoBack,
+    onNavigateTo,
+    onPrewarm,
+    onRouteChange,
+    postFcmToken,
+    primeWebPermissions,
+    registry,
+  ]);
 
   // --- External links + Android downloads ------------------------------------
   const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {
@@ -307,6 +388,16 @@ export default function WebViewInstance({
     }
   }, [isRoot, navigateSpa, postFcmToken]);
 
+  // Jetsam recovery (iOS content-process termination / Android render-process
+  // gone). A parked warm instance can't self-heal usefully (nothing is being
+  // shown) — bubble up so the pool manager marks it dead and adopt-on-navigateTo
+  // cold-falls-back. A visible instance (root, cold sub, or promoted) reloads
+  // itself in place.
+  const onContentProcessDied = useCallback(() => {
+    if (active === false) onContentProcessTerminated?.();
+    else webViewRef.current?.reload();
+  }, [active, onContentProcessTerminated]);
+
   // Root sits on the main tabs -> no WebView-level swipe-back; sub-pages let the
   // host's custom stack own the swipe so it pops the instance (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
@@ -330,8 +421,8 @@ export default function WebViewInstance({
           onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
           onNavigationStateChange={onNavigationStateChange}
           onLoadEnd={onLoadEnd}
-          onContentProcessDidTerminate={onContentProcessTerminated}
-          onRenderProcessGone={onContentProcessTerminated}
+          onContentProcessDidTerminate={onContentProcessDied}
+          onRenderProcessGone={onContentProcessDied}
           onFileDownload={({ nativeEvent }) => saveDownload(nativeEvent.downloadUrl)}
           // Inline media — videos must not auto-fullscreen (spec §6.3).
           allowsInlineMediaPlayback
