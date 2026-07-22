@@ -5,11 +5,17 @@
  */
 import { PORTAL_HOST } from '../webview/constants';
 
-/** Map a notification's data payload to a portal path, if any. */
-export function extractNavPath(data?: Record<string, unknown>): string | null {
+/** The raw path/route/link/url field from a notification payload, if any. */
+export function extractCandidate(data?: Record<string, unknown>): string | null {
   if (!data) return null;
   const candidate = data.path ?? data.route ?? data.link ?? data.url;
-  if (typeof candidate !== 'string' || candidate.length === 0) return null;
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+}
+
+/** Map a notification's data payload to a portal path, if any. */
+export function extractNavPath(data?: Record<string, unknown>): string | null {
+  const candidate = extractCandidate(data);
+  if (!candidate) return null;
   if (candidate.startsWith('/')) return candidate;
   try {
     const u = new URL(candidate);

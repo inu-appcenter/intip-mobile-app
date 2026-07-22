@@ -12,6 +12,14 @@ export const ROOT_URL = "http://localhost:5173";
 export const PORTAL_HOST = "localhost:5173";
 
 /**
+ * Hosts a push notification's payload is allowed to point off-portal to (e.g.
+ * school/department notice originals we don't control). Anything else is
+ * ignored rather than opened — a notification payload is outside our trust
+ * boundary, so it must not be able to make the app open an arbitrary URL.
+ */
+export const PUSH_EXTERNAL_HOSTS = ["inu.ac.kr"] as const;
+
+/**
  * Suffix appended to the WebView User-Agent so the web frontend detects the
  * official app and switches to the multi-WebView routing protocol (spec §2.A).
  * The WebView's `applicationNameForUserAgent` joins it with a single space,

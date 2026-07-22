@@ -26,6 +26,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
+import * as WebBrowser from 'expo-web-browser';
 
 import { createNativeChannel } from '@inu-appcenter/intip-bridge/native';
 import {
@@ -243,10 +244,14 @@ export default function WebViewInstance({
     clearWebViewCache(webViewRef);
 
     const unsubForeground = setupForegroundNotifications();
-    const unsubOpen = subscribeNotificationOpen((path) => {
+    const unsubOpen = subscribeNotificationOpen((intent) => {
+      if (intent.kind === 'external') {
+        WebBrowser.openBrowserAsync(intent.url).catch(() => {});
+        return;
+      }
       // If the page is up, navigate immediately; otherwise queue it for onLoad.
-      navigateSpa(path);
-      pendingNavRef.current = path;
+      navigateSpa(intent.path);
+      pendingNavRef.current = intent.path;
     });
     // Re-post the FCM token whenever the app returns to the foreground, so the
     // web always holds the latest token after a backgrounded refresh (spec §5.A #3).
