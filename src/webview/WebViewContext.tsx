@@ -60,6 +60,11 @@ export type StackNavigator = {
   push: (url: string, path: string) => void;
   pop: () => void;
   popToRoot: () => void;
+  /** TEMP (flicker debug): spawn a warm slot immediately, bypassing the lazy delay. */
+  debugSpawnWarm?: (path: string) => void;
+  /** TEMP (flicker debug): reveal the current warm slot as-is (no redirect), to test
+   * whether the slide-in animation itself is smooth for already-loaded content. */
+  debugForceAdopt?: () => void;
 };
 
 /** Stable registration API consumed by the WebView containers. */
@@ -97,6 +102,11 @@ export type WebViewController = {
   showPanel: () => void;
   hidePanel: () => void;
   togglePanel: () => void;
+
+  /** TEMP (flicker debug). */
+  debugSpawnWarm: (path: string) => void;
+  /** TEMP (flicker debug). */
+  debugForceAdopt: () => void;
 };
 
 const RegistryContext = createContext<WebViewRegistry | null>(null);
@@ -225,6 +235,8 @@ export function WebViewProvider({ children }: { children: ReactNode }) {
       showPanel: () => setPanelVisible(true),
       hidePanel: () => setPanelVisible(false),
       togglePanel: () => setPanelVisible((v) => !v),
+      debugSpawnWarm: (path: string) => navigatorRef.current?.debugSpawnWarm?.(path),
+      debugForceAdopt: () => navigatorRef.current?.debugForceAdopt?.(),
     };
   }, []);
 

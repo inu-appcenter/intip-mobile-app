@@ -93,6 +93,16 @@ type Props = {
    * meaningful while `active === false` (parked warm slot) — see the handler below. */
   onContentProcessTerminated?: () => void;
   /**
+   * PILOT (temp, Android only): Android WebView renders via SurfaceView by
+   * default, a separate OS-compositor surface that doesn't reliably respect
+   * an ancestor's transform animation — confirmed as the source of the
+   * reveal-slide flicker (reproduced even revealing already-fully-loaded
+   * content). Forcing 'software' (TextureView-based) rendering for the
+   * animation's duration fixes it, but is too slow to leave on permanently
+   * — this prop scopes it to exactly the slide.
+   */
+  androidSoftwareRenderDuringSlide?: boolean;
+  /**
    * Tier 3 warm pool: `false` while parked (suspended, hidden from the
    * controller stack), `true` once revealed/promoted. `undefined` (root and
    * plain cold sub-pages) means "not pool-managed" — no `setActive` is ever
@@ -127,6 +137,7 @@ export default function WebViewInstance({
   targetPath,
   onPrewarm,
   onRouteChange,
+  androidSoftwareRenderDuringSlide,
 }: Props) {
   const webViewRef = useRef<WebView>(null);
   // PlatformChannel over the single react-native-webview channel. `onMessage`
@@ -438,6 +449,9 @@ export default function WebViewInstance({
       ref={webViewRef}
       source={{ uri: url }}
       style={[styles.fill, { backgroundColor }]}
+      androidLayerType={
+        Platform.OS === 'android' && androidSoftwareRenderDuringSlide ? 'software' : undefined
+      }
       // Identify as the official app so the web enables multi-WebView routing.
       applicationNameForUserAgent={APP_UA_SUFFIX}
       // Cache: never serve from cache; we also clearCache() on mount.

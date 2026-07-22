@@ -106,21 +106,70 @@ const SubLayer = forwardRef<SubLayerHandle, {
    */
   revealed: boolean;
   onRemoved: () => void;
-  children: ReactNode;
-}>(function SubLayer({ isTop, revealed, onRemoved, children }, ref) {
+  /** Opaque background for this layer's own animated container — see the
+   * comment on WebViewHost's root View for why this matters on Android. */
+  backgroundColor: string;
+  // Render prop (not plain ReactNode): passes `softwareRender` down so the
+  // WebView inside can switch androidLayerType — see the PILOT comment on
+  // `softwareRender` below.
+  children: (softwareRender: boolean) => ReactNode;
+}>(function SubLayer({ isTop, revealed, onRemoved, backgroundColor, children }, ref) {
   const tx = useSharedValue(SCREEN_WIDTH);
   const startX = useSharedValue(0);
+  // Android: a live WebView's own hardware-accelerated surface doesn't
+  // composite cleanly with a per-frame Reanimated transform on its parent —
+  // the two rendering paths race, producing visible flicker/tearing while
+  // sliding. Rendering this layer to a single cached hardware texture for
+  // the animation's duration (push, pop, and the swipe-back drag) avoids
+  // that; left off otherwise so the live WebView repaints normally (a
+  // permanently-cached texture can go stale against real content updates).
+  // No-op on iOS, which doesn't have this prop.
+  const [isAnimating, setIsAnimating] = useState(false);
+  // Render-phase transition detection (React's documented pattern for
+  // deriving state from a prop change) instead of setting state directly in
+  // the effect below — flips `isAnimating` on in the same render the prop
+  // changes, without an extra post-commit render.
+  const [prevRevealed, setPrevRevealed] = useState(revealed);
+  if (revealed !== prevRevealed) {
+    setPrevRevealed(revealed);
+    if (revealed) setIsAnimating(true);
+  }
+  // PILOT (temp): androidLayerType="software" for the WebView (see
+  // WebViewInstance) genuinely fixes the SurfaceView/transform flicker —
+  // confirmed by forcing it on permanently. But toggling it exactly at
+  // animation start (mirroring `isAnimating` above) still flickered: the
+  // toggle is a JS state update -> bridge -> native prop write, which isn't
+  // guaranteed to land before the *native, UI-thread-driven* Reanimated
+  // transform begins moving on the very same trigger — a cross-thread race,
+  // not a logic bug. Sidestep it entirely by making software the *initial*
+  // mount value (no toggle needed for the very first reveal — root cause of
+  // the race removed) and only switching to hardware once, well after that
+  // first reveal has visibly settled; switching back to software up front
+  // for any later close/swipe so pop shares the same fix.
+  const [softwareRender, setSoftwareRender] = useState(true);
 
   // (`.set`/`.get` is the React-Compiler-safe shared-value API — plain
   // `.value =` trips react-hooks/immutability.)
   useEffect(() => {
-    if (revealed) tx.set(withTiming(0, { duration: 280 }));
+    if (!revealed) return;
+    tx.set(
+      withTiming(0, { duration: 280 }, (finished) => {
+        if (finished) runOnJS(setIsAnimating)(false);
+      }),
+    );
+    const t = setTimeout(() => setSoftwareRender(false), 280 + 250);
+    return () => clearTimeout(t);
   }, [revealed, tx]);
 
   const close = useCallback(() => {
+    setIsAnimating(true);
+    setSoftwareRender(true);
     tx.set(
       withTiming(SCREEN_WIDTH, { duration: 220 }, (finished) => {
-        if (finished) runOnJS(onRemoved)();
+        if (finished) {
+          runOnJS(onRemoved)();
+          runOnJS(setIsAnimating)(false);
+        }
       }),
     );
   }, [onRemoved, tx]);
@@ -137,6 +186,8 @@ const SubLayer = forwardRef<SubLayerHandle, {
         .failOffsetY([-16, 16])
         .onBegin(() => {
           startX.set(tx.get());
+          runOnJS(setIsAnimating)(true);
+          runOnJS(setSoftwareRender)(true);
         })
         .onUpdate((e) => {
           const next = startX.get() + e.translationX;
@@ -146,11 +197,18 @@ const SubLayer = forwardRef<SubLayerHandle, {
           if (tx.get() > POP_DISTANCE || e.velocityX > POP_VELOCITY) {
             tx.set(
               withTiming(SCREEN_WIDTH, { duration: 180 }, (finished) => {
-                if (finished) runOnJS(onRemoved)();
+                if (finished) {
+                  runOnJS(onRemoved)();
+                  runOnJS(setIsAnimating)(false);
+                }
               }),
             );
           } else {
-            tx.set(withSpring(0, { damping: 22, stiffness: 220 }));
+            tx.set(
+              withSpring(0, { damping: 22, stiffness: 220 }, (finished) => {
+                if (finished) runOnJS(setIsAnimating)(false);
+              }),
+            );
           }
         }),
     [isTop, onRemoved, startX, tx],
@@ -163,11 +221,12 @@ const SubLayer = forwardRef<SubLayerHandle, {
   return (
     <GestureDetector gesture={gesture}>
       <Animated.View
-        style={[styles.layer, animatedStyle]}
+        style={[styles.layer, { backgroundColor }, animatedStyle]}
         // Covered layers must not receive touches through the top one.
         pointerEvents={isTop ? 'auto' : 'none'}
+        renderToHardwareTextureAndroid={Platform.OS === 'android' && isAnimating}
       >
-        {children}
+        {children(softwareRender)}
       </Animated.View>
     </GestureDetector>
   );
@@ -351,6 +410,7 @@ export default function WebViewHost() {
     // React reconciles it as the same still-mounted instance (no remount, no
     // JS re-boot) — see SubLayer's `revealed` prop.
     const w = warmRef.current;
+    console.log('[flicker-diag] TEMP', w?.alive ? 'ADOPTED (warm)' : 'COLD', { path }); // TEMP
     if (w?.alive) {
       clearWarmTtl();
       setSubs((prev) => [
@@ -384,6 +444,19 @@ export default function WebViewHost() {
     setSubs([]);
   }, []);
 
+  // TEMP (flicker debug): reveal the current warm slot exactly as-is, with
+  // no `revealPath` redirect — isolates whether the slide-in animation
+  // itself is smooth when the content is already fully loaded, decoupled
+  // from any content-loading-latency explanation.
+  const debugForceAdopt = useCallback(() => {
+    const w = warmRef.current;
+    if (!w?.alive) return;
+    clearWarmTtl();
+    setSubs((prev) => [...prev, { key: w.key, url: w.url, path: w.path, active: true }]);
+    setWarm(null);
+    warmRef.current = null;
+  }, [clearWarmTtl]);
+
   // Return to a home-tab path from anywhere in the stack (root or any pushed
   // sub-page): collapse to root, then drive root's own SPA there via
   // `rootTargetPath` (root's `targetPath` prop below). Composes the same two
@@ -398,9 +471,15 @@ export default function WebViewHost() {
   // Reuse the orchestrator: register the host as the stack navigator so the
   // controller (goBackActive / restoreSession / popToRoot) drives it unchanged.
   useEffect(() => {
-    registry.registerNavigator({ push: pushSub, pop, popToRoot });
+    registry.registerNavigator({
+      push: pushSub,
+      pop,
+      popToRoot,
+      debugSpawnWarm: spawnWarm,
+      debugForceAdopt,
+    });
     return () => registry.registerNavigator(null);
-  }, [registry, pushSub, pop, popToRoot]);
+  }, [registry, pushSub, pop, popToRoot, spawnWarm, debugForceAdopt]);
 
   // Tier 3 warm pool: `subs` and `warm` are merged into ONE array for
   // rendering. This is load-bearing, not cosmetic — React only preserves a
@@ -428,10 +507,18 @@ export default function WebViewHost() {
   return (
     // Absolutely fill so the host overlays the router <Stack>; box-none lets the
     // transparent host frame pass touches through — only instance layers are
-    // interactive.
-    <View style={styles.host} pointerEvents="box-none">
+    // interactive. Opaque backgroundColor (not just on the WebView itself)
+    // is load-bearing on Android/Fabric: a documented New Architecture +
+    // Android flicker (github.com/expo/expo/issues/33647,
+    // react-navigation/react-navigation#12377) shows through any
+    // unstyled/transparent ancestor during a transition; every layer in
+    // this tree needs its own opaque color, not just the leaf WebView.
+    <View style={[styles.host, { backgroundColor }]} pointerEvents="box-none">
       {/* Root portal — always mounted, beneath every sub-page. */}
-      <View style={styles.layer} pointerEvents={subs.length === 0 ? 'auto' : 'none'}>
+      <View
+        style={[styles.layer, { backgroundColor }]}
+        pointerEvents={subs.length === 0 ? 'auto' : 'none'}
+      >
         <WebViewInstance
           mode="root"
           url={ROOT_URL}
@@ -453,22 +540,26 @@ export default function WebViewHost() {
           // it isn't registered with the controller until adopted
           // (WebViewInstance gates registration on `active !== false`).
           revealed={!layer.isWarm}
+          backgroundColor={backgroundColor}
           onRemoved={() => removeSub(layer.key)}
           ref={(handle) => {
             if (handle) layersRef.current.set(layer.key, handle);
             else layersRef.current.delete(layer.key);
           }}
         >
-          <WebViewInstance
-            mode="sub"
-            url={layer.url}
-            active={layer.isWarm ? false : layer.active}
-            targetPath={layer.isWarm ? layer.path : layer.revealPath}
-            onNavigateTo={pushSub}
-            onGoBack={pop}
-            onGoHome={goHome}
-            onContentProcessTerminated={layer.isWarm ? markWarmDead : undefined}
-          />
+          {(softwareRender) => (
+            <WebViewInstance
+              mode="sub"
+              url={layer.url}
+              active={layer.isWarm ? false : layer.active}
+              targetPath={layer.isWarm ? layer.path : layer.revealPath}
+              onNavigateTo={pushSub}
+              onGoBack={pop}
+              onGoHome={goHome}
+              onContentProcessTerminated={layer.isWarm ? markWarmDead : undefined}
+              androidSoftwareRenderDuringSlide={softwareRender}
+            />
+          )}
         </SubLayer>
       ))}
 
