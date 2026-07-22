@@ -16,9 +16,9 @@ import { Platform } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import { ensureAndroidPostNotifications } from '../native/permissions';
-import { extractNavPath } from './navPath';
+import { resolveNavIntent, type NavIntent } from './navIntent';
 
-export { extractNavPath };
+export type { NavIntent };
 
 const ANDROID_CHANNEL_ID = 'default';
 
@@ -89,34 +89,34 @@ export function setupForegroundNotifications(): () => void {
 }
 
 /**
- * Path to deep-link to from a notification that launched the app from a cold
- * start (tapped while the app was killed). Checks both FCM-tray and
+ * Nav intent from a notification that launched the app from a cold start
+ * (tapped while the app was killed). Checks both FCM-tray and
  * notifee-displayed notifications.
  */
-export async function getInitialNavPath(): Promise<string | null> {
+export async function getInitialNavIntent(): Promise<NavIntent | null> {
   const fcm = await messaging().getInitialNotification();
   if (fcm) {
-    const p = extractNavPath(fcm.data);
-    if (p) return p;
+    const intent = resolveNavIntent(fcm.data);
+    if (intent) return intent;
   }
   const local = await notifee.getInitialNotification();
   if (local) {
-    const p = extractNavPath(local.notification.data);
-    if (p) return p;
+    const intent = resolveNavIntent(local.notification.data);
+    if (intent) return intent;
   }
   return null;
 }
 
 /** Subscribe to notification taps while the app is running. */
-export function subscribeNotificationOpen(cb: (path: string) => void): () => void {
+export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () => void {
   const unsubFcm = messaging().onNotificationOpenedApp((remoteMessage) => {
-    const p = extractNavPath(remoteMessage.data);
-    if (p) cb(p);
+    const intent = resolveNavIntent(remoteMessage.data);
+    if (intent) cb(intent);
   });
   const unsubNotifee = notifee.onForegroundEvent(({ type, detail }) => {
     if (type === EventType.PRESS) {
-      const p = extractNavPath(detail.notification?.data);
-      if (p) cb(p);
+      const intent = resolveNavIntent(detail.notification?.data);
+      if (intent) cb(intent);
     }
   });
   return () => {

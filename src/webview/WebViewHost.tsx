@@ -42,10 +42,11 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import * as WebBrowser from 'expo-web-browser';
 
 import WebViewInstance from '../components/WebViewInstance';
 import { isConnected } from '../native/network';
-import { getInitialNavPath } from '../push/messaging';
+import { getInitialNavIntent } from '../push/messaging';
 import { backgroundColorFor } from '../theme';
 import { PORTAL_HOST, ROOT_URL, STRINGS } from './constants';
 import { useWebViewController, useWebViewRegistry } from './WebViewContext';
@@ -250,7 +251,14 @@ export default function WebViewHost() {
   }
 
   useEffect(() => {
-    void getInitialNavPath().then(setInitialNavPath);
+    void getInitialNavIntent().then((intent) => {
+      if (!intent) return;
+      if (intent.kind === 'external') {
+        WebBrowser.openBrowserAsync(intent.url).catch(() => {});
+        return;
+      }
+      setInitialNavPath(intent.path);
+    });
     void check();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
