@@ -10,12 +10,12 @@
 | 케이스 | 내용 | 상태 |
 |---|---|---|
 | G1 | 외부 URL 공지(학교 홈페이지) → 인앱 브라우저 | ✅ 완료 |
-| G2 | 콜드스타트 딥링크 유실 (레이스) | ⬜ 예정 |
-| G3 | 목적지 종류별 분기 (SPA / sub-page push / 외부) | ⬜ 예정 |
-| G4 | 백그라운드 notifee 탭 유실 | ⬜ 예정 |
-| G5 | Android 기본 알림 채널 | ⬜ 예정 |
-| G6 | 공유 가이드 문서 오류 정정 | ⬜ 예정 (코드 변경 없음) |
-| G7 | 같은 목적지 재탭 무시 | ⬜ 예정 |
+| G2 | 콜드스타트 딥링크 유실 (레이스) | ✅ 완료 |
+| G3 | 목적지 종류별 분기 (SPA / sub-page push / 외부) | ✅ 완료 |
+| G4 | 백그라운드 notifee 탭 유실 | ✅ 완료 |
+| G5 | Android 기본 알림 채널 | ✅ 완료 (네이티브 재빌드 필요) |
+| G6 | 공유 가이드 문서 오류 정정 | ✅ 정정문 작성 ([`guide-corrections.md`](./guide-corrections.md)) — 회람 대기 |
+| G7 | 같은 목적지 재탭 무시 | ✅ 완료 |
 
 **G1 구현 내역** (`feat/multi-webview-ux-improvement` 브랜치):
 - `src/webview/constants.ts` — `PUSH_EXTERNAL_HOSTS = ['inu.ac.kr']`,
@@ -30,8 +30,21 @@
 - `src/push/__tests__/navIntent.test.ts`(신규) — allowlist/서브도메인/룩얼라이크
   거부 케이스.
 
-G2 이후는 아직 코드 변경 없음 — 아래 "케이스별 해결 계획" 섹션이 각각의
-설계다. 다음에 이어서 작업할 때는 G2부터.
+**G2~G7 구현 내역** (2026-07-22, 같은 브랜치):
+- G2(b) 최종안: `initialNavPath` prop / `pendingNavRef` 제거, 콜드스타트 인텐트를
+  host의 `rootTargetPath` 메커니즘(첫 `routeChange` flush)으로 이관.
+- G3: `NavIntent` 3종(`spa`/`push`/`external`) 유니온, `routeMap.ts`(빈 표 +
+  fallthrough), `portalUrlFor()`, 구독·포그라운드 배너 host 이관,
+  `handleNavIntent` 분기(spa→`goHome` / push→`pushSub` / external→인앱 브라우저).
+- G4: `pendingIntent.ts` 모듈 스코프 큐 + 8슬롯 dedupe 링버퍼,
+  `onBackgroundEvent` PRESS 처리, 배너 `id`를 FCM `messageId`로 통일해
+  경로 간 중복 억제.
+- G5: `plugins/withDefaultNotificationChannel.js` + `app.json` 등록
+  (prebuild로 매니페스트 삽입 검증). **네이티브 재빌드 필요, OTA 불가.**
+- G7: `targetPath`(warm용 문자열) / `driveTarget`(`{path, seq}` 객체) prop 분리.
+
+남은 것: 수동 QA 12케이스(아래 "수동 검증"), G6 정정문 회람, 웹팀/서버팀 확인
+사항, `PORTAL_HOST` 프로덕션 값 교체.
 
 ## 서버가 보내는 것 (확정)
 

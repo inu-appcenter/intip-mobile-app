@@ -63,11 +63,17 @@
       ],
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
+      "./plugins/withDefaultNotificationChannel",
       [
         "expo-build-properties",
         {
           "ios": {
             "useFrameworks": "static"
+          },
+          "android": {
+            "extraMavenRepos": [
+              "../../node_modules/@notifee/react-native/android/libs"
+            ]
           }
         }
       ],

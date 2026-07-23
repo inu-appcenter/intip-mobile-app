@@ -17,6 +17,7 @@ import messaging from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import { ensureAndroidPostNotifications } from '../native/permissions';
 import { resolveNavIntent, type NavIntent } from './navIntent';
+import { consumePending, deliver, isDuplicate, subscribe } from './pendingIntent';
 
 export type { NavIntent };
 
@@ -75,6 +76,12 @@ export function setupForegroundNotifications(): () => void {
   return messaging().onMessage(async (remoteMessage) => {
     await ensureAndroidChannel();
     await notifee.displayNotification({
+      // Mirror the FCM messageId as notifee's own id so a later
+      // background/foreground PRESS on *this* notification and any
+      // independent RNFirebase "opened from notification" report share one
+      // dedupe key (see `pendingIntent.ts`) instead of living in two
+      // unrelated id spaces.
+      id: remoteMessage.messageId,
       title: remoteMessage.notification?.title,
       body: remoteMessage.notification?.body,
       data: remoteMessage.data,
@@ -90,36 +97,53 @@ export function setupForegroundNotifications(): () => void {
 
 /**
  * Nav intent from a notification that launched the app from a cold start
- * (tapped while the app was killed). Checks both FCM-tray and
- * notifee-displayed notifications.
+ * (tapped while the app was killed), or one that arrived via the background
+ * queue before anything was listening (spec G4). Checked in order:
+ *  1. `pending` (queued by `registerBackgroundHandlers`'s PRESS handler).
+ *  2. FCM's own "app opened from notification" report.
+ *  3. notifee's own "app opened from notification" report.
+ * Each is consumed/cleared as it's read so a later call doesn't re-deliver
+ * the same intent.
  */
 export async function getInitialNavIntent(): Promise<NavIntent | null> {
+  const queued = consumePending();
+  if (queued) return queued;
+
   const fcm = await messaging().getInitialNotification();
-  if (fcm) {
+  if (fcm && !isDuplicate(fcm.messageId)) {
     const intent = resolveNavIntent(fcm.data);
     if (intent) return intent;
   }
   const local = await notifee.getInitialNotification();
-  if (local) {
+  if (local && !isDuplicate(local.notification.id)) {
     const intent = resolveNavIntent(local.notification.data);
     if (intent) return intent;
   }
   return null;
 }
 
-/** Subscribe to notification taps while the app is running. */
+/**
+ * Subscribe to notification taps while the app is running. Also registers as
+ * the module-scope pending-queue subscriber (`pendingIntent.subscribe`), so
+ * any intent queued by a background tap before this call is flushed through
+ * `cb` immediately.
+ */
 export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () => void {
+  const unsubQueue = subscribe(cb);
   const unsubFcm = messaging().onNotificationOpenedApp((remoteMessage) => {
+    if (isDuplicate(remoteMessage.messageId)) return;
     const intent = resolveNavIntent(remoteMessage.data);
-    if (intent) cb(intent);
+    if (intent) deliver(intent);
   });
   const unsubNotifee = notifee.onForegroundEvent(({ type, detail }) => {
     if (type === EventType.PRESS) {
+      if (isDuplicate(detail.notification?.id)) return;
       const intent = resolveNavIntent(detail.notification?.data);
-      if (intent) cb(intent);
+      if (intent) deliver(intent);
     }
   });
   return () => {
+    unsubQueue();
     unsubFcm();
     unsubNotifee();
   };
@@ -139,7 +163,16 @@ export function registerBackgroundHandlers(): void {
   // payloads itself; nothing extra to do here, but the handler must exist.
   messaging().setBackgroundMessageHandler(async () => {});
 
-  // Taps on notifee notifications while backgrounded are resolved on next
-  // launch via getInitialNotification(); the handler just needs to exist.
-  notifee.onBackgroundEvent(async () => {});
+  // Taps on notifee-displayed notifications while backgrounded (or after the
+  // app was killed — notifee runs this via a headless task either way).
+  // Resolve the intent and hand it to the module-scope queue: delivered
+  // immediately if `subscribeNotificationOpen` is already mounted, queued
+  // otherwise (see `pendingIntent.ts`). Previously a no-op relying on
+  // `getInitialNotification()` alone, which only ever resolves for a killed
+  // -> cold-start launch, not a plain background tap (spec G4).
+  notifee.onBackgroundEvent(async ({ type, detail }) => {
+    if (type !== EventType.PRESS) return;
+    if (isDuplicate(detail.notification?.id)) return;
+    deliver(resolveNavIntent(detail.notification?.data));
+  });
 }

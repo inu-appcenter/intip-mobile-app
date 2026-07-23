@@ -26,17 +26,18 @@ sub-page push / 외부 브라우저 중 알맞은 방식으로 의도된 화면�
 
 - [x] **G1**: 외부 URL(학교 홈페이지 등) 알림 → 인앱 브라우저(`expo-web-browser`)로
       열기. Allowlist(`PUSH_EXTERNAL_HOSTS`, 서브도메인 포함) 기반. — 완료
-- [ ] **G2**: 콜드스타트 딥링크 유실 수정 (host 레벨로 큐 이관, `routeChange`
-      기준 flush)
-- [ ] **G3**: `NavIntent`에 `spa`/`push` 분기 추가 — 비-메인탭 목적지는
-      네이티브 sub-page push로 열리도록
-- [ ] **G4**: 백그라운드 notifee 탭 유실 수정 (모듈 스코프 pending 큐 +
-      메시지 ID 중복 억제)
-- [ ] **G5**: Android `default_notification_channel_id` config plugin 추가
-      (네이티브 재빌드 필요 — 별도 PR)
-- [ ] **G6**: 공유 가이드 문서 정정 (코드 변경 없음, 문서 회람)
-- [ ] **G7**: 같은 목적지 재탭이 무시되지 않도록 타겟 전달을 값 대신
-      시퀀스 객체로
+- [x] **G2**: 콜드스타트 딥링크 유실 수정 (host 레벨로 큐 이관, `routeChange`
+      기준 flush) — 완료
+- [x] **G3**: `NavIntent`에 `spa`/`push` 분기 추가 — 비-메인탭 목적지는
+      네이티브 sub-page push로 열리도록 — 완료
+- [x] **G4**: 백그라운드 notifee 탭 유실 수정 (모듈 스코프 pending 큐 +
+      메시지 ID 중복 억제) — 완료
+- [x] **G5**: Android `default_notification_channel_id` config plugin 추가
+      (네이티브 재빌드 필요 — 별도 PR) — 완료
+- [x] **G6**: 공유 가이드 문서 정정 (코드 변경 없음, 문서 회람) —
+      정정문 작성 완료(`guide-corrections.md`), 회람 대기
+- [x] **G7**: 같은 목적지 재탭이 무시되지 않도록 타겟 전달을 값 대신
+      시퀀스 객체로 — 완료
 - [ ] 4개 타입 × 3가지 앱 상태(포그라운드/백그라운드/종료) × iOS/Android
       수동 QA (`plan.md` "수동 검증" 체크리스트)
 

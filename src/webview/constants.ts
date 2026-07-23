@@ -62,6 +62,18 @@ export function isMainTabPath(pathname: string): boolean {
 }
 
 /**
+ * Absolute portal URL for an in-portal `path` (which may carry a query
+ * string, e.g. `/councilnoticedetail?id=456`). Used to build the `url` a
+ * `push` nav intent needs — the pushed sub-page screen (`app/webview.tsx`)
+ * only accepts portal origins (`isPortalUrl` guard), so a native-triggered
+ * sub-page push must be given a fully-qualified URL, not just a path. Mirrors
+ * what the web computes for `navigateTo` (`${location.origin}${path}`).
+ */
+export function portalUrlFor(path: string): string {
+  return new URL(path, ROOT_URL).toString();
+}
+
+/**
  * Paths whose page has been migrated to own its top inset itself via
  * `env(safe-area-inset-top)` (see `MobileHeader.tsx`). Instances loading one
  * of these go fully edge-to-edge (native skips the top `SafeAreaView`
