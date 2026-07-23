@@ -46,7 +46,6 @@ export default function WebViewControllerPanel() {
   const controller = useWebViewController();
   const [navInput, setNavInput] = useState('');
   const [note, setNote] = useState<string | null>(null);
-  const [warmPathInput, setWarmPathInput] = useState('/home/notice'); // TEMP (flicker debug)
 
   // Debug-only surface; never ship in a release bundle.
   if (!__DEV__ || !controller.panelVisible) return null;
@@ -157,39 +156,6 @@ export default function WebViewControllerPanel() {
             <View style={styles.row}>
               <Button label="Save" onPress={() => void onSave()} />
               <Button label="Load + Restore" onPress={() => void onLoad()} />
-            </View>
-          </Section>
-
-          <Section title="Flicker debug (TEMP)">
-            <View style={styles.row}>
-              <TextInput
-                value={warmPathInput}
-                onChangeText={setWarmPathInput}
-                placeholder="/home/notice"
-                placeholderTextColor="#7d7d82"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.input}
-              />
-              <Button
-                label="1. Spawn warm now"
-                onPress={() => {
-                  controller.debugSpawnWarm(warmPathInput.trim() || '/');
-                  flash(`Warming ${warmPathInput}… wait a few seconds, then Force adopt.`);
-                }}
-              />
-            </View>
-            <View style={styles.row}>
-              <Button
-                label="2. Force adopt (reveal as-is, no redirect)"
-                onPress={() => {
-                  // Close first so the sheet's own dismissal doesn't obscure
-                  // the reveal we're trying to observe; give it a beat to
-                  // get out of the way before actually firing.
-                  controller.hidePanel();
-                  setTimeout(() => controller.debugForceAdopt(), 1000);
-                }}
-              />
             </View>
           </Section>
 

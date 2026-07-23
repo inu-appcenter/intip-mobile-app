@@ -5,7 +5,6 @@ import { StatusBar } from 'expo-status-bar';
 
 import WebViewControllerPanel from '../components/WebViewControllerPanel';
 import { registerBackgroundHandlers, requestNotificationPermission } from '../push/messaging';
-import WebViewHost from '../webview/WebViewHost';
 import { WebViewProvider } from '../webview/WebViewContext';
 
 // Background FCM/notifee handlers must be registered before React renders so
@@ -19,22 +18,30 @@ export default function RootLayout() {
   }, []);
 
   return (
-    // GestureHandlerRootView must wrap the tree so the custom sub-stack's
-    // swipe-back gesture (Gesture.Pan in WebViewHost) receives touches.
+    // GestureHandlerRootView wraps the tree so gesture-handler based components
+    // (the dev controller panel) work; native-stack transitions/swipe-back are
+    // handled natively by react-native-screens and don't depend on it.
     <GestureHandlerRootView style={{ flex: 1 }}>
-      {/* WebViewProvider orchestrates every WebView instance (root + pushed
+      {/* WebViewProvider orchestrates every WebView container (root + pushed
           sub-pages) and backs the debug controller (dev menu + panel). */}
       <WebViewProvider>
         <StatusBar style="auto" />
-        {/* The only router screen is the launch background; every WebView
-            instance (root + custom sub-stack) is owned by <WebViewHost/>, which
-            overlays the stack so instances persist across navigations. */}
         <Stack screenOptions={{ headerShown: false }}>
+          {/* Root portal: main tabs live here via SPA routing. Swipe-back is
+              disabled so it never conflicts with the bottom tab navigation. */}
           <Stack.Screen name="index" options={{ gestureEnabled: false }} />
+          {/* Sub-pages pushed by `navigateTo`: slide in from the right and allow
+              the native swipe-back gesture to pop the screen (spec §3.C). */}
+          <Stack.Screen
+            name="webview"
+            options={{
+              animation: 'slide_from_right',
+              gestureEnabled: true,
+              fullScreenGestureEnabled: true,
+            }}
+          />
         </Stack>
-        {/* Persistent WebView layer: root portal + custom animated sub-stack. */}
-        <WebViewHost />
-        {/* Debug-only GUI controller, rendered above everything. */}
+        {/* Debug-only GUI controller, rendered above the whole stack. */}
         <WebViewControllerPanel />
       </WebViewProvider>
     </GestureHandlerRootView>

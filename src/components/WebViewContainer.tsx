@@ -1,29 +1,37 @@
 /**
- * A single INTIP WebView instance — the reusable "content unit" of the native
- * multi-WebView stack. Unlike the old `WebViewContainer`, this component is
- * **router-free**: it owns only the WebView + the JS<->Native bridge, and it
- * lives inside the persistent {@link WebViewHost} rather than on an expo-router
- * screen. That persistence is what lets the warm pool reuse an instance across
- * navigations without re-booting its JS context (a WKWebView cannot be
- * reparented across screen trees).
+ * A single INTIP WebView container — the unit of the native multi-WebView stack.
+ * The root portal (`mode="root"`) hosts the main-tab SPA and is the
+ * always-mounted launch screen; every sub-page is a pushed instance
+ * (`mode="sub"`) on its own expo-router native-stack screen, so it gets the
+ * slide-in animation and swipe-back **natively** from react-native-screens.
  *
- * Navigation is delegated to the host through callbacks: the web's `navigateTo`
- * becomes {@link Props.onNavigateTo} (host pushes a sub-instance) and `goBack`
- * becomes {@link Props.onGoBack} (host pops). The root instance additionally
- * owns the launch overlay, cache purge, notifications and FCM lifecycle.
+ * This replaces the Tier 3 custom `WebViewHost` (persistent layer + Reanimated
+ * slide + warm pool). That design existed to reuse warmed WebView instances,
+ * but its real-world hit rate was near-zero and driving a live Android WebView
+ * with a JS transform flickered (half-white flash on push/pop). Native-stack
+ * transitions are OS-composited, so that flicker is gone; the trade-off is no
+ * warm reuse (every sub-page cold-loads), which the measurements showed costs
+ * little.
+ *
+ * Both modes share the full JS <-> Native bridge. The root additionally owns the
+ * push-notification lifecycle, the native-stack navigator registration (for the
+ * dev controller / `restoreSession`), and the launch cache-purge overlay.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
   AppState,
+  BackHandler,
   Linking,
   Platform,
   StyleSheet,
+  ToastAndroid,
   useColorScheme,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect, useRouter } from 'expo-router';
 import WebView, { type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import * as WebBrowser from 'expo-web-browser';
@@ -46,8 +54,10 @@ import { saveDownload } from '../native/downloads';
 import { ensureCameraPermission, ensureLocationPermission } from '../native/permissions';
 import {
   getFcmTokenWithRetry,
+  getInitialNavIntent,
   setupForegroundNotifications,
   subscribeNotificationOpen,
+  type NavIntent,
 } from '../push/messaging';
 import { backgroundColorFor } from '../theme';
 import {
@@ -74,87 +84,24 @@ function looksLikeDownload(url: string): boolean {
 }
 
 type Props = {
-  /** Absolute URL this instance loads. */
+  /** Absolute URL this container loads. */
   url: string;
   /** Root portal hosts the main tabs; sub-pages are pushed on top. */
   mode: 'root' | 'sub';
-  /** Path to deep-link to once loaded (push-tap routing). Root only. */
-  initialNavPath?: string | null;
-  /** Web asked to push a new sub-page — the host owns the custom stack. */
-  onNavigateTo: (url: string, path: string) => void;
-  /** Web asked to go back — the host pops the top sub-page (no-op on root). */
-  onGoBack: () => void;
-  /**
-   * Web asked to return to a home-tab path (`/home`, `/m/home`). The host
-   * collapses the whole sub-stack back to root and drives root there — see
-   * `targetPath` below, which is what actually performs that SPA move.
-   */
-  onGoHome: (path: string) => void;
-  /** The WebContent process died (iOS jetsam / Android render-process gone). Only
-   * meaningful while `active === false` (parked warm slot) — see the handler below. */
-  onContentProcessTerminated?: () => void;
-  /**
-   * PILOT (temp, Android only): Android WebView renders via SurfaceView by
-   * default, a separate OS-compositor surface that doesn't reliably respect
-   * an ancestor's transform animation — confirmed as the source of the
-   * reveal-slide flicker (reproduced even revealing already-fully-loaded
-   * content). Forcing 'software' (TextureView-based) rendering for the
-   * animation's duration fixes it, but is too slow to leave on permanently
-   * — this prop scopes it to exactly the slide.
-   */
-  androidSoftwareRenderDuringSlide?: boolean;
-  /**
-   * Tier 3 warm pool: `false` while parked (suspended, hidden from the
-   * controller stack), `true` once revealed/promoted. `undefined` (root and
-   * plain cold sub-pages) means "not pool-managed" — no `setActive` is ever
-   * sent and the instance registers with the controller immediately, as in M1.
-   */
-  active?: boolean;
-  /**
-   * SPA-route this (already-booted) instance to `path` whenever the value
-   * changes (queued if the instance hasn't finished its first `routeChange`
-   * yet, flushed once it does). Two independent callers drive this:
-   *  - Tier 3 warm pool: pre-navigate a parked warm slot ahead of adoption
-   *    (latest prewarm intent overrides an earlier one).
-   *  - `goHome`: drive the always-loaded root instance to a home path after
-   *    the sub-stack collapses (see `WebViewHost.goHome`).
-   */
-  targetPath?: string;
-  /** Web sent a `prewarm` touchstart intent. Only wired for the root instance. */
-  onPrewarm?: (url: string, path: string) => void;
-  /** SPA route changed. Used by the host to detect "shell interactive" (root only). */
-  onRouteChange?: (path: string) => void;
 };
 
-export default function WebViewInstance({
-  url,
-  mode,
-  initialNavPath,
-  onNavigateTo,
-  onGoBack,
-  onGoHome,
-  onContentProcessTerminated,
-  active,
-  targetPath,
-  onPrewarm,
-  onRouteChange,
-  androidSoftwareRenderDuringSlide,
-}: Props) {
+export default function WebViewContainer({ url, mode }: Props) {
   const webViewRef = useRef<WebView>(null);
   // PlatformChannel over the single react-native-webview channel. `onMessage`
   // is wired to the WebView prop; Web->Native handlers are registered below.
-  // The channel only stores the ref and reads `.current` later (in post/reload),
-  // never during render — so the react-hooks/refs warning is a false positive.
   // eslint-disable-next-line react-hooks/refs
   const bridge = useMemo(() => createNativeChannel(webViewRef), []);
+  const router = useRouter();
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
   const isRoot = mode === 'root';
-  // Stable for the instance's lifetime — `url` never changes after mount, so
-  // this can't flip mid-session. Deriving it from a live-changing SPA route
-  // instead would flip which tree branch renders (SafeAreaView-wrapped or
-  // not) and remount the WebView, losing its JS context (same class of bug
-  // as the warm-pool reconciliation issue in WebViewHost).
+  // Stable for the container's lifetime — `url` never changes after mount, so
+  // this can't flip mid-session and remount the WebView (losing its JS context).
   const edgeToEdge = useMemo(() => {
     if (isRoot) return true;
     try {
@@ -164,30 +111,23 @@ export default function WebViewInstance({
     }
   }, [isRoot, url]);
 
-  // Connect this instance to the WebView orchestrator (spec: shared controller).
-  // A stable id identifies it in the live stack for the duration of its mount.
+  // Connect this container to the WebView orchestrator (shared dev controller).
   const registry = useWebViewRegistry();
   const [id] = useState(() => `${mode}-${nextWebViewSeq()}`);
 
   const [currentPath, setCurrentPath] = useState<string>('/');
-  const pendingNavRef = useRef<string | null>(initialNavPath ?? null);
+  const canGoBackRef = useRef(false);
+  const lastBackPressRef = useRef(0);
+  const pendingNavRef = useRef<string | null>(null);
   const permissionsPrimedRef = useRef(false);
   const cleanupStartedRef = useRef(false);
-  // Tier 3 warm pool: independent of the root-only `pendingNavRef`/deep-link
-  // queue above, so promoting a warm slot can never interfere with root's
-  // push-notification flow. Flushed once, same as pendingNavRef, in onLoadEnd.
-  const hasLoadedRef = useRef(false);
-  const pendingTargetRef = useRef<string | undefined>(targetPath);
 
   // Launch overlay (root only): a branded screen held over the WebView until
   // the web cleanup loop reports back, masking the service-worker/cache purge.
   const [overlayVisible, setOverlayVisible] = useState(isRoot);
-  // Lazy useState (not useRef().current) so the Animated.Value is created once
-  // without reading a ref during render (react-hooks/refs).
   const [overlayOpacity] = useState(() => new Animated.Value(1));
 
-  // Prime camera (photo upload) + location (campus map) once logged in, so the
-  // portal's getUserMedia / geolocation work without a second WebView prompt.
+  // Prime camera (photo upload) + location (campus map) once logged in.
   const primeWebPermissions = useCallback(() => {
     if (permissionsPrimedRef.current) return;
     permissionsPrimedRef.current = true;
@@ -217,44 +157,53 @@ export default function WebViewInstance({
     }).start(() => setOverlayVisible(false));
   }, [isRoot, overlayOpacity]);
 
-  // Tier 3 warm pool: suspend(false)/resume(true) the parked instance. Only
-  // fires for pool-managed instances (`active` explicitly boolean) — root and
-  // plain cold sub-pages leave `active` undefined and never touch this, so a
-  // normal push never triggers a wasted suspend/resume + reveal-revalidate.
-  useEffect(() => {
-    if (active === undefined) return;
-    bridge.channel.send('setActive', active);
-  }, [active, bridge]);
+  // Collapse the native sub-stack back to root, then drive root's SPA to a
+  // main-tab path. Root is always mounted (the index screen), so `driveRoot`
+  // works whether or not any sub-pages are currently on top of it.
+  const goHome = useCallback((path: string) => {
+    if (router.canGoBack()) {
+      try {
+        router.dismissAll();
+      } catch {
+        while (router.canGoBack()) router.back();
+      }
+    }
+    registry.driveRoot(path);
+  }, [registry, router]);
 
-  // Tier 3 warm pool: SPA-navigate an already-booted instance to `targetPath`,
-  // once the SPA has reported its own first route (or queue it if it hasn't —
-  // flushed on the first `routeChange` below). Re-fires on change so a later
-  // prewarm intent overrides an earlier one still in flight.
-  useEffect(() => {
-    if (targetPath === undefined) return;
-    if (hasLoadedRef.current) navigateSpa(targetPath);
-    else pendingTargetRef.current = targetPath;
-  }, [targetPath, navigateSpa]);
+  // Push-notification tap / cold-start routing (root only).
+  const handleNavIntent = useCallback(
+    (intent: NavIntent) => {
+      if (intent.kind === 'external') {
+        WebBrowser.openBrowserAsync(intent.url).catch(() => {});
+      } else if (intent.kind === 'push') {
+        // Land ON TOP of whatever is open (don't collapse the user's stack).
+        router.push({ pathname: '/webview', params: { url: intent.url, path: intent.path } });
+      } else {
+        // spa: a main-tab destination — collapse to root and drive it there.
+        // Also queue for the cold-start case where root's SPA hasn't loaded
+        // yet; the queued path is flushed in onLoadEnd.
+        goHome(intent.path);
+        pendingNavRef.current = intent.path;
+      }
+    },
+    [goHome, router],
+  );
 
-  // --- Lifecycle: cache, notifications, deep-link subscription (root only) ---
+  // --- Lifecycle: cache + notifications (root only) --------------------------
   useEffect(() => {
     // Sub-pages share the process-wide WebView cache; only the launch screen
-    // clears it (login/cookies preserved) and owns notifications + overlay.
+    // clears it (login/cookies preserved) and owns the notification lifecycle.
     if (!isRoot) return;
     clearWebViewCache(webViewRef);
 
     const unsubForeground = setupForegroundNotifications();
-    const unsubOpen = subscribeNotificationOpen((intent) => {
-      if (intent.kind === 'external') {
-        WebBrowser.openBrowserAsync(intent.url).catch(() => {});
-        return;
-      }
-      // If the page is up, navigate immediately; otherwise queue it for onLoad.
-      navigateSpa(intent.path);
-      pendingNavRef.current = intent.path;
+    const unsubOpen = subscribeNotificationOpen(handleNavIntent);
+    // Cold-start deep link: same branching as a live tap.
+    void getInitialNavIntent().then((intent) => {
+      if (intent) handleNavIntent(intent);
     });
-    // Re-post the FCM token whenever the app returns to the foreground, so the
-    // web always holds the latest token after a backgrounded refresh (spec §5.A #3).
+    // Re-post the FCM token whenever the app returns to the foreground.
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') void postFcmToken();
     });
@@ -266,15 +215,10 @@ export default function WebViewInstance({
       appStateSub.remove();
       clearTimeout(timeout);
     };
-  }, [dismissOverlay, isRoot, navigateSpa, postFcmToken]);
+  }, [dismissOverlay, handleNavIntent, isRoot, postFcmToken]);
 
-  // --- Orchestrator: register this instance + expose its imperative handle ---
+  // --- Orchestrator: register this container + expose its imperative handle --
   useEffect(() => {
-    // Tier 3 warm pool: a parked slot (`active === false`) stays out of the
-    // controller stack until adopted, so the dev panel only ever shows real
-    // navigation entries. Once promoted, `active` flips to `true` and this
-    // effect re-runs (same component instance, no remount) and registers.
-    if (active === false) return;
     const handle: WebViewHandle = {
       reload: () => webViewRef.current?.reload(),
       reloadClearCache: () => clearCacheAndReload(webViewRef),
@@ -284,27 +228,74 @@ export default function WebViewInstance({
     };
     registry.registerWebView({ id, mode, url, path: '/' }, handle);
     return () => registry.unregisterWebView(id);
-  }, [id, mode, url, registry, navigateSpa, postFcmToken, active]);
+  }, [id, mode, url, registry, navigateSpa, postFcmToken]);
+
+  // The root owns the expo-router stack, so it registers native-stack navigation
+  // (push/pop/popToRoot) the controller uses to restore a saved session.
+  useEffect(() => {
+    if (!isRoot) return;
+    registry.registerNavigator({
+      push: (target, path) =>
+        router.push({ pathname: '/webview', params: { url: target, path } }),
+      pop: () => {
+        if (router.canGoBack()) router.back();
+      },
+      popToRoot: () => {
+        try {
+          if (router.canGoBack()) router.dismissAll();
+        } catch {
+          while (router.canGoBack()) router.back();
+        }
+      },
+    });
+    return () => registry.registerNavigator(null);
+  }, [isRoot, registry, router]);
+
+  // --- Android hardware back (only while this screen is focused) -------------
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        // Sub-page: the back button pops this native screen.
+        if (!isRoot) {
+          if (router.canGoBack()) router.back();
+          return true;
+        }
+        // Root: walk the SPA history while it has any, else "press to exit".
+        if (canGoBackRef.current) {
+          webViewRef.current?.goBack();
+          return true;
+        }
+        const now = Date.now();
+        if (now - lastBackPressRef.current < 2000) {
+          BackHandler.exitApp();
+          return true;
+        }
+        lastBackPressRef.current = now;
+        ToastAndroid.show('뒤로 가기를 한 번 더 누르면 종료됩니다.', ToastAndroid.SHORT);
+        return true;
+      });
+      return () => sub.remove();
+    }, [isRoot, router]),
+  );
 
   // --- Bridge: Web -> Native -------------------------------------------------
-  // Register typed handlers on the channel. Payloads are already Zod-validated
-  // by `@inu-appcenter/intip-bridge`, so each handler receives a narrowed value.
   useEffect(() => {
     const { channel } = bridge;
     const offs = [
-      // Push a new sub-page — the host owns the custom stack (spec §3.B/§4).
-      // The web only emits this for non-main-tab destinations.
+      // Push a new native sub-page screen (spec §3.B/§4). The web only emits
+      // this for non-main-tab destinations.
       channel.on('navigateTo', ({ path, url: target }) => {
-        onNavigateTo(target, path);
+        router.push({ pathname: '/webview', params: { url: target, path } });
       }),
-      // Pop the top-most sub-page (spec §3.C). No-op on the root.
+      // Pop the top-most screen (spec §3.C). No-op on the root.
       channel.on('goBack', () => {
-        onGoBack();
+        if (router.canGoBack()) router.back();
       }),
-      // Return to a home-tab path — collapse the stack to root and drive
-      // root there, regardless of which instance (root or a sub-page) sent it.
+      // Return to a home-tab path — collapse the stack to root and drive root
+      // there, regardless of which page (root or a sub) sent it.
       channel.on('goHome', ({ path }) => {
-        onGoHome(path);
+        goHome(path);
       }),
       channel.on('loginSuccess', () => {
         void postFcmToken();
@@ -314,24 +305,6 @@ export default function WebViewInstance({
       channel.on('routeChange', (path) => {
         setCurrentPath(path || '/');
         registry.updateWebView(id, { path: path || '/' });
-        onRouteChange?.(path || '/');
-        // Tier 3 warm pool: flush a queued prewarm target on the SPA's FIRST
-        // reported route, not on document-load (onLoadEnd) — the web app's
-        // own boot-time redirect (e.g. "/" -> "/home") can otherwise race
-        // with and silently overwrite an externally-triggered `navigate()`
-        // sent too early, before the router/history listeners have settled.
-        if (!hasLoadedRef.current) {
-          hasLoadedRef.current = true;
-          if (pendingTargetRef.current) {
-            navigateSpa(pendingTargetRef.current);
-            pendingTargetRef.current = undefined;
-          }
-        }
-      }),
-      // Tier 3 warm pool: link touchstart intent. Only meaningful when the
-      // host wires `onPrewarm` (root only) — inert (no-op) for sub-pages.
-      channel.on('prewarm', ({ path, url: target }) => {
-        onPrewarm?.(target, path);
       }),
       channel.on('requestAppUpdate', () => {
         Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
@@ -342,8 +315,6 @@ export default function WebViewInstance({
           },
         ]);
       }),
-      // Deep-link to the OS settings so the user can grant a denied
-      // permission (spec §4.A).
       channel.on('openAppSettings', () => {
         Linking.openSettings().catch(() => {});
       }),
@@ -364,20 +335,7 @@ export default function WebViewInstance({
     return () => {
       for (const off of offs) off();
     };
-  }, [
-    bridge,
-    dismissOverlay,
-    id,
-    navigateSpa,
-    onGoBack,
-    onGoHome,
-    onNavigateTo,
-    onPrewarm,
-    onRouteChange,
-    postFcmToken,
-    primeWebPermissions,
-    registry,
-  ]);
+  }, [bridge, dismissOverlay, goHome, id, postFcmToken, primeWebPermissions, registry, router]);
 
   // --- External links + Android downloads ------------------------------------
   const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {
@@ -412,6 +370,7 @@ export default function WebViewInstance({
 
   const onNavigationStateChange = useCallback(
     (nav: WebViewNavigation) => {
+      canGoBackRef.current = nav.canGoBack;
       registry.updateWebView(id, { canGoBack: nav.canGoBack, url: nav.url });
     },
     [id, registry],
@@ -436,17 +395,13 @@ export default function WebViewInstance({
   }, [isRoot, navigateSpa, postFcmToken]);
 
   // Jetsam recovery (iOS content-process termination / Android render-process
-  // gone). A parked warm instance can't self-heal usefully (nothing is being
-  // shown) — bubble up so the pool manager marks it dead and adopt-on-navigateTo
-  // cold-falls-back. A visible instance (root, cold sub, or promoted) reloads
-  // itself in place.
+  // gone): a visible container just reloads itself in place.
   const onContentProcessDied = useCallback(() => {
-    if (active === false) onContentProcessTerminated?.();
-    else webViewRef.current?.reload();
-  }, [active, onContentProcessTerminated]);
+    webViewRef.current?.reload();
+  }, []);
 
   // Root sits on the main tabs -> no WebView-level swipe-back; sub-pages let the
-  // host's custom stack own the swipe so it pops the instance (spec §3.C.2 / §6.5).
+  // native stack own the swipe so it pops the screen (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
 
   const webView = (
@@ -454,9 +409,6 @@ export default function WebViewInstance({
       ref={webViewRef}
       source={{ uri: url }}
       style={[styles.fill, { backgroundColor }]}
-      androidLayerType={
-        Platform.OS === 'android' && androidSoftwareRenderDuringSlide ? 'software' : undefined
-      }
       // Identify as the official app so the web enables multi-WebView routing.
       applicationNameForUserAgent={APP_UA_SUFFIX}
       // Cache: never serve from cache; we also clearCache() on mount.
@@ -485,14 +437,11 @@ export default function WebViewInstance({
   );
 
   return (
-    // Fill the host layer but ignore the bottom inset so content reaches the edge.
+    // Fill the screen; ignore the bottom inset so content reaches the edge.
     <View style={[styles.fill, { backgroundColor }]}>
       {edgeToEdge ? (
-        // Root (and sub-pages whose page has been migrated, see
-        // `isEdgeToEdgePath`) go fully edge-to-edge (top/left/right too) —
-        // the web owns those insets via env(safe-area-inset-*) CSS, matching
-        // how it already owns the bottom inset everywhere. Everything else
-        // keeps the native reservation below until migrated the same way.
+        // Root (and sub-pages migrated to own their top inset via
+        // env(safe-area-inset-*)) go fully edge-to-edge; the web owns the insets.
         webView
       ) : (
         <SafeAreaView style={styles.fill} edges={['top', 'left', 'right']}>
