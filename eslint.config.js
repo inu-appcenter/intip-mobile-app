@@ -5,6 +5,8 @@ const expoConfig = require("eslint-config-expo/flat");
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ["dist/*"],
+    // packages/intip-bridge is a git submodule (own repo/tooling); the app only
+    // compiles its source, it doesn't lint it here.
+    ignores: ["dist/*", "packages/**"],
   }
 ]);

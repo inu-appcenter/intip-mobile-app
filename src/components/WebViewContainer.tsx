@@ -36,7 +36,9 @@ import WebView, { type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import * as WebBrowser from 'expo-web-browser';
 
-import { createNativeChannel } from '@inu-appcenter/intip-bridge/native';
+// Shared bridge is vendored as a git submodule under packages/intip-bridge and
+// compiled from source (no npm package / registry). See AGENTS.md.
+import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
 import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
