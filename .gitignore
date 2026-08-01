@@ -48,3 +48,5 @@ example
 # generated native folders
 /ios
 /android
+
+ios_distribution.cer
