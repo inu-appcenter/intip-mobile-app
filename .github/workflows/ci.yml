@@ -93,13 +93,13 @@ jobs:
       - name: Prebuild (android)
         run: npx expo prebuild --platform android
 
-      - name: Build signed release AAB
+      - name: Build signed release AAB and APK
         working-directory: android
         env:
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
-        run: ./gradlew bundleRelease
+        run: ./gradlew assembleRelease bundleRelease
 
       - name: Remove decoded secrets
         if: always()
@@ -110,6 +110,13 @@ jobs:
         with:
           name: intip-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 14
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: intip-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
 
   ios-release:
@@ -326,7 +333,7 @@ jobs:
                 "color": ${COLOR},
                 "fields": [
                   {
-                    "name": "🤖 Android (AAB)",
+                    "name": "🤖 Android (APK & AAB)",
                     "value": "${ANDROID_STATUS}",
                     "inline": true
                   },
