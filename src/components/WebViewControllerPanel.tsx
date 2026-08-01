@@ -45,6 +45,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default function WebViewControllerPanel() {
   const controller = useWebViewController();
   const [navInput, setNavInput] = useState('');
+  const [urlInput, setUrlInput] = useState('');
   const [note, setNote] = useState<string | null>(null);
 
   // Debug-only surface; never ship in a release bundle.
@@ -75,6 +76,14 @@ export default function WebViewControllerPanel() {
     controller.navigateActive(path.startsWith('/') ? path : `/${path}`);
     setNavInput('');
     flash(`Navigated active WebView.`);
+  };
+
+  const onLoadUrl = () => {
+    const url = urlInput.trim();
+    if (!url) return;
+    controller.loadUrlActive(url);
+    setUrlInput('');
+    flash('Loading full URL in active WebView…');
   };
 
   return (
@@ -149,6 +158,23 @@ export default function WebViewControllerPanel() {
                 onSubmitEditing={onNavigate}
               />
               <Button label="Go" onPress={onNavigate} />
+            </View>
+          </Section>
+
+          <Section title="Load full URL (active)">
+            <View style={styles.row}>
+              <TextInput
+                value={urlInput}
+                onChangeText={setUrlInput}
+                placeholder="http://localhost:5173/board/12"
+                placeholderTextColor="#7d7d82"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                style={styles.input}
+                onSubmitEditing={onLoadUrl}
+              />
+              <Button label="Load" onPress={onLoadUrl} />
             </View>
           </Section>
 

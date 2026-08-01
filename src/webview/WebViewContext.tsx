@@ -52,6 +52,8 @@ export type WebViewHandle = {
   reloadClearCache: () => void;
   goBackSpa: () => void;
   navigateSpa: (path: string) => void;
+  /** Navigate the WebView to a full URL (not an SPA path). Dev controller only. */
+  loadUrl: (url: string) => void;
   refreshFcmToken: () => void;
 };
 
@@ -94,6 +96,8 @@ export type WebViewController = {
   reloadActive: (clearCache?: boolean) => void;
   goBackActive: () => void;
   navigateActive: (path: string) => void;
+  /** Load a full URL into the active (top-most) WebView. Dev controller only. */
+  loadUrlActive: (url: string) => void;
   refreshActiveFcm: () => void;
   popToRoot: () => void;
 
@@ -202,6 +206,7 @@ export function WebViewProvider({ children }: { children: ReactNode }) {
       else navigatorRef.current?.pop();
     };
     const navigateActive = (path: string) => activeHandle()?.navigateSpa(path);
+    const loadUrlActive = (url: string) => activeHandle()?.loadUrl(url);
     const refreshActiveFcm = () => activeHandle()?.refreshFcmToken();
     const popToRoot = () => navigatorRef.current?.popToRoot();
 
@@ -228,6 +233,7 @@ export function WebViewProvider({ children }: { children: ReactNode }) {
       reloadActive,
       goBackActive,
       navigateActive,
+      loadUrlActive,
       refreshActiveFcm,
       popToRoot,
       saveSession,

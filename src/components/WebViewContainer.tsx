@@ -32,7 +32,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import WebView, { type WebViewNavigation } from 'react-native-webview';
+import WebView, {
+  type WebViewMessageEvent,
+  type WebViewNavigation,
+} from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -51,6 +54,7 @@ import {
   LAUNCH_CLEANUP_SCRIPT,
   buildBridgeShimScript,
 } from '../webview/injectedScript';
+import { relayWebConsoleMessage, WEB_CONSOLE_SCRIPT } from '../webview/webConsole';
 import { clearWebViewCache, clearCacheAndReload } from '../native/cache';
 import { saveDownload } from '../native/downloads';
 import { ensureCameraPermission, ensureLocationPermission } from '../native/permissions';
@@ -80,6 +84,11 @@ const CLEANUP_OVERLAY_TIMEOUT_MS = 4000;
 /** Bridge shim is platform-specific (see injectedScript.ts). */
 const BRIDGE_SHIM_SCRIPT = buildBridgeShimScript(Platform.OS === 'ios' ? 'ios' : 'android');
 
+/** Dev builds also relay the web's console.* to the Metro log (webConsole.ts). */
+const BEFORE_CONTENT_SCRIPT = __DEV__
+  ? BRIDGE_SHIM_SCRIPT + WEB_CONSOLE_SCRIPT
+  : BRIDGE_SHIM_SCRIPT;
+
 function looksLikeDownload(url: string): boolean {
   const path = url.split('?')[0].toLowerCase();
   return DOWNLOAD_EXTENSIONS.some((ext) => path.endsWith(ext));
@@ -98,6 +107,21 @@ export default function WebViewContainer({ url, mode }: Props) {
   // is wired to the WebView prop; Web->Native handlers are registered below.
   // eslint-disable-next-line react-hooks/refs
   const bridge = useMemo(() => createNativeChannel(webViewRef), []);
+  // Dev only: peel relayed web console messages off before the bridge channel
+  // parses the stream (they're not part of the intip-bridge contract).
+  const onWebViewMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      if (__DEV__) {
+        let tag = url;
+        try {
+          tag = new URL(url).pathname;
+        } catch {}
+        if (relayWebConsoleMessage(event.nativeEvent.data, tag)) return;
+      }
+      bridge.onMessage(event);
+    },
+    [bridge, url],
+  );
   const router = useRouter();
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
@@ -123,6 +147,10 @@ export default function WebViewContainer({ url, mode }: Props) {
   const pendingNavRef = useRef<string | null>(null);
   const permissionsPrimedRef = useRef(false);
   const cleanupStartedRef = useRef(false);
+  // Dev controller "load full URL": the URL a developer asked to load in place.
+  // Lets `onShouldStartLoadWithRequest` allow that one navigation even off-portal
+  // (which the security guard would otherwise divert to the system browser).
+  const devLoadUrlRef = useRef<string | null>(null);
 
   // Launch overlay (root only): a branded screen held over the WebView until
   // the web cleanup loop reports back, masking the service-worker/cache purge.
@@ -226,6 +254,15 @@ export default function WebViewContainer({ url, mode }: Props) {
       reloadClearCache: () => clearCacheAndReload(webViewRef),
       goBackSpa: () => webViewRef.current?.goBack(),
       navigateSpa: (path) => navigateSpa(path),
+      // Dev-only: navigate this WebView to a full URL (not an SPA hop). Records
+      // the target so the off-portal guard lets it through this once.
+      loadUrl: (target) => {
+        if (!__DEV__) return;
+        devLoadUrlRef.current = target;
+        webViewRef.current?.injectJavaScript(
+          `window.location.href = ${JSON.stringify(target)}; true;`,
+        );
+      },
       refreshFcmToken: () => void postFcmToken(),
     };
     registry.registerWebView({ id, mode, url, path: '/' }, handle);
@@ -345,6 +382,14 @@ export default function WebViewContainer({ url, mode }: Props) {
     // Allow sub-frame / resource loads (iOS reports these too).
     if (request.isTopFrame === false) return true;
 
+    // Dev controller "load full URL": let the exact URL a developer asked to
+    // load navigate in place, even if off-portal (the guard below would send it
+    // to the system browser). One-shot; cleared once consumed.
+    if (__DEV__ && devLoadUrlRef.current === target) {
+      devLoadUrlRef.current = null;
+      return true;
+    }
+
     let host = '';
     try {
       host = new URL(target).host;
@@ -415,9 +460,11 @@ export default function WebViewContainer({ url, mode }: Props) {
       applicationNameForUserAgent={APP_UA_SUFFIX}
       // Cache: never serve from cache; we also clearCache() on mount.
       cacheEnabled={false}
+      // Dev builds only: chrome://inspect (Android) / Safari Web Inspector (iOS).
+      webviewDebuggingEnabled={__DEV__}
       // Bridge wiring: shims + alert override before content, observers after.
-      onMessage={bridge.onMessage}
-      injectedJavaScriptBeforeContentLoaded={BRIDGE_SHIM_SCRIPT}
+      onMessage={onWebViewMessage}
+      injectedJavaScriptBeforeContentLoaded={BEFORE_CONTENT_SCRIPT}
       injectedJavaScript={INJECTED_SCRIPT}
       onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
       onNavigationStateChange={onNavigationStateChange}
