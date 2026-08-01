@@ -76,6 +76,11 @@ jobs:
       - name: Decode release keystore
         run: echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > intip.jks
 
+      # app.json's android.googleServicesFile points at this — gitignored
+      # (like the keystore), so prebuild has nothing to read without it.
+      - name: Decode google-services.json
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > google-services.json
+
       - name: Prebuild (android)
         run: npx expo prebuild --platform android
 
@@ -87,9 +92,9 @@ jobs:
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
         run: ./gradlew bundleRelease
 
-      - name: Remove decoded keystore
+      - name: Remove decoded secrets
         if: always()
-        run: rm -f intip.jks
+        run: rm -f intip.jks google-services.json
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
