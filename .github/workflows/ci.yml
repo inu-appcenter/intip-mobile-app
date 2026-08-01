@@ -264,3 +264,115 @@ jobs:
           name: intip-release-ipa
           path: ${{ runner.temp }}/export/INTIP.ipa
           retention-days: 14
+
+  notify-discord:
+    if: always() && github.event_name == 'workflow_dispatch'
+    needs: [verify, android-release, ios-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          ANDROID_RESULT: ${{ needs.android-release.result }}
+          IOS_RESULT: ${{ needs.ios-release.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || github.sha }}
+          ACTOR: ${{ github.actor }}
+          REF_NAME: ${{ github.ref_name }}
+          PLATFORM_INPUT: ${{ inputs.platform || 'both' }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK secret is not set. Skipping Discord notification."
+            exit 0
+          fi
+
+          map_status() {
+            case "$1" in
+              "success") echo "✅ 성공" ;;
+              "failure") echo "❌ 실패" ;;
+              "cancelled") echo "⚠️ 취소됨" ;;
+              "skipped") echo "⏭️ 건너뜀" ;;
+              *) echo "❓ 알 수 없음 ($1)" ;;
+            esac
+          }
+
+          ANDROID_STATUS=$(map_status "$ANDROID_RESULT")
+          IOS_STATUS=$(map_status "$IOS_RESULT")
+          VERIFY_STATUS=$(map_status "$VERIFY_RESULT")
+
+          COLOR=3066993
+          TITLE_EMOJI="🎉"
+          TITLE_TEXT="모바일 앱 배포 파이프라인 완료"
+
+          if [ "$ANDROID_RESULT" = "failure" ] || [ "$IOS_RESULT" = "failure" ] || [ "$VERIFY_RESULT" = "failure" ]; then
+            COLOR=15158332
+            TITLE_EMOJI="❌"
+            TITLE_TEXT="모바일 앱 배포 파이프라인 실패"
+          elif [ "$ANDROID_RESULT" = "cancelled" ] || [ "$IOS_RESULT" = "cancelled" ]; then
+            COLOR=15105570
+            TITLE_EMOJI="⚠️"
+            TITLE_TEXT="모바일 앱 배포 중단/취소됨"
+          fi
+
+          CLEAN_COMMIT_MSG=$(echo "$COMMIT_MSG" | head -n 1 | sed 's/"/\\"/g')
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [
+              {
+                "title": "${TITLE_EMOJI} ${TITLE_TEXT}",
+                "url": "${RUN_URL}",
+                "color": ${COLOR},
+                "fields": [
+                  {
+                    "name": "🤖 Android (AAB)",
+                    "value": "${ANDROID_STATUS}",
+                    "inline": true
+                  },
+                  {
+                    "name": "🍎 iOS (IPA / TestFlight)",
+                    "value": "${IOS_STATUS}",
+                    "inline": true
+                  },
+                  {
+                    "name": "🔍 사전 검증 (Verify)",
+                    "value": "${VERIFY_STATUS}",
+                    "inline": true
+                  },
+                  {
+                    "name": "📌 요청 플랫폼",
+                    "value": "${PLATFORM_INPUT}",
+                    "inline": true
+                  },
+                  {
+                    "name": "🌿 브랜치",
+                    "value": "${REF_NAME}",
+                    "inline": true
+                  },
+                  {
+                    "name": "👤 실행자",
+                    "value": "${ACTOR}",
+                    "inline": true
+                  },
+                  {
+                    "name": "💬 커밋 메세지",
+                    "value": "${CLEAN_COMMIT_MSG}"
+                  },
+                  {
+                    "name": "📦 빌드 결과물 및 아티팩트 다운로드",
+                    "value": "[👉 GitHub Actions 실행 페이지에서 AAB/IPA 다운로드하기](${RUN_URL}#artifacts)"
+                  }
+                ],
+                "footer": {
+                  "text": "INTIP Mobile Deployment Pipeline"
+                },
+                "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+              }
+            ]
+          }
+          EOF
+          )
+
+          curl -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK"
+
