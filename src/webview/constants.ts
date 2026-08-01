@@ -6,10 +6,10 @@
  */
 
 /** The portal the WebView hosts. Loaded on every launch. */
-export const ROOT_URL = "http://localhost:5173";
+export const ROOT_URL = "http://intip-test.pages.dev";
 
 /** Host that is considered "internal". Anything else opens in the system browser. */
-export const PORTAL_HOST = "localhost:5173";
+export const PORTAL_HOST = "intip-test.pages.dev";
 
 /**
  * Hosts a push notification's payload is allowed to point off-portal to (e.g.
