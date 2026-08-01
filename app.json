@@ -2,7 +2,7 @@
   "expo": {
     "name": "INTIP",
     "slug": "intip-mobile-app",
-    "version": "3.0.5",
+    "version": "3.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "intipmobileapp",
@@ -25,7 +25,7 @@
     },
     "android": {
       "package": "inu.appcenter.intip_android",
-      "versionCode": 18,
+      "versionCode": 19,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
