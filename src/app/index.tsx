@@ -11,30 +11,30 @@ import {
 
 import WebViewContainer from '../components/WebViewContainer';
 import { isConnected } from '../native/network';
-import { getInitialNavPath } from '../push/messaging';
 import { ROOT_URL, STRINGS } from '../webview/constants';
 import { backgroundColorFor } from '../theme';
 
 type GateStatus = 'checking' | 'offline' | 'online';
 
 /**
- * Launch gate: check connectivity before rendering the portal.
- * Swift ref: `ContentView.checkNetwork()`. The WebView is not mounted until the
- * device is connected.
+ * Launch gate: check connectivity before rendering the portal (Swift ref:
+ * `ContentView.checkNetwork()`). Once online, the root WebView container mounts
+ * and stays mounted for the app's lifetime; sub-pages are pushed on top as
+ * native-stack screens (`app/webview.tsx`). Push-notification routing, the
+ * launch overlay, and the dev-controller navigator all live in the root
+ * container.
  */
 export default function Index() {
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
 
   const [status, setStatus] = useState<GateStatus>('checking');
-  const [initialNavPath, setInitialNavPath] = useState<string | null>(null);
 
-  // React Compiler is enabled (app.json), so these stay plain functions — no
+  // React Compiler is enabled (app.json), so this stays a plain function — no
   // manual useCallback, which avoids the check/alert circular-memoization warning.
   const check = async () => {
     setStatus('checking');
-    const connected = await isConnected();
-    if (connected) {
+    if (await isConnected()) {
       setStatus('online');
       return;
     }
@@ -48,15 +48,12 @@ export default function Index() {
   };
 
   useEffect(() => {
-    // Resolve a deep-link if a notification cold-started the app, then gate on
-    // connectivity. Runs once on mount.
-    void getInitialNavPath().then(setInitialNavPath);
     void check();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (status === 'online') {
-    return <WebViewContainer mode="root" url={ROOT_URL} initialNavPath={initialNavPath} />;
+    return <WebViewContainer mode="root" url={ROOT_URL} />;
   }
 
   // Checking / offline: a plain branded background (no WebView yet).

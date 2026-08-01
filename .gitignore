@@ -3,6 +3,9 @@
 # dependencies
 node_modules/
 
+# npm auth (holds GitHub Packages token — must never be committed)
+.npmrc
+
 # Expo
 .expo/
 dist/

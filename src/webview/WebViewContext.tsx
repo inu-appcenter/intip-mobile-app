@@ -75,6 +75,13 @@ export type WebViewRegistry = {
   ) => void;
   mergeSession: (partial: Partial<SessionState>) => void;
   registerNavigator: (navigator: StackNavigator | null) => void;
+  /**
+   * SPA-navigate the always-mounted root container to `path`. Used by `goHome`
+   * (collapse the sub-stack, then drive root to a main-tab path) from any
+   * container — the root is a different component instance, so a sub reaches it
+   * through the shared registry rather than a direct ref.
+   */
+  driveRoot: (path: string) => void;
 };
 
 /** Reactive controller API consumed by the dev menu + controller panel. */
@@ -160,6 +167,10 @@ export function WebViewProvider({ children }: { children: ReactNode }) {
       },
       registerNavigator(navigator) {
         navigatorRef.current = navigator;
+      },
+      driveRoot(path) {
+        const root = stackRef.current.find((e) => e.mode === 'root');
+        if (root) handlesRef.current.get(root.id)?.navigateSpa(path);
       },
     }),
     [],

@@ -1,7 +1,8 @@
 /**
  * A pushed sub-page in the native multi-WebView stack (spec §3). Reached when
  * the web calls `navigateTo(path, url)` from a non-main-tab destination; the
- * native stack gives it the slide-in animation and swipe-back gesture.
+ * native stack (react-native-screens) gives it the slide-in animation and
+ * swipe-back gesture for free — no custom transform, so no Android flicker.
  */
 import { useEffect } from 'react';
 import { Linking } from 'react-native';

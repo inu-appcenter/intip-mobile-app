@@ -17,10 +17,7 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": [
-          "remote-notification",
-          "fetch"
-        ],
+        "UIBackgroundModes": ["remote-notification", "fetch"],
         "NSCameraUsageDescription": "이 앱은 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
         "NSPhotoLibraryUsageDescription": "이 앱은 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
         "NSPhotoLibraryAddUsageDescription": "이 앱은 촬영한 사진을 저장하기 위해 사진첩 접근 권한이 필요합니다.",
@@ -28,7 +25,7 @@
       }
     },
     "android": {
-      "package": "kr.inuappcenter.intip",
+      "package": "inu.appcenter.intip_android",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -66,18 +63,30 @@
       ],
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
+      "./plugins/withDefaultNotificationChannel",
+      "./plugins/withAndroidReleaseSigning",
       [
         "expo-build-properties",
         {
           "ios": {
             "useFrameworks": "static"
+          },
+          "android": {
+            "extraMavenRepos": [
+              "../../node_modules/@notifee/react-native/android/libs"
+            ]
           }
         }
       ],
       [
         "react-native-permissions",
         {
-          "iosPermissions": ["Camera", "LocationWhenInUse", "PhotoLibrary", "Notifications"]
+          "iosPermissions": [
+            "Camera",
+            "LocationWhenInUse",
+            "PhotoLibrary",
+            "Notifications"
+          ]
         }
       ]
     ],

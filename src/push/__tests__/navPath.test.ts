@@ -1,4 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
+import { PORTAL_HOST } from '../../webview/constants';
 import { extractNavPath } from '../navPath';
 
 describe('extractNavPath', () => {
@@ -18,7 +19,7 @@ describe('extractNavPath', () => {
   });
 
   it('extracts path + search from a portal URL', () => {
-    expect(extractNavPath({ url: 'https://intip.inuappcenter.kr/board/12?x=1' })).toBe('/board/12?x=1');
+    expect(extractNavPath({ url: `https://${PORTAL_HOST}/board/12?x=1` })).toBe('/board/12?x=1');
   });
 
   it('rejects URLs from other hosts', () => {

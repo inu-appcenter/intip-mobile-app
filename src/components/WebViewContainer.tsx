@@ -1,14 +1,23 @@
 /**
- * A single INTIP WebView container — the unit of the native multi-WebView stack
- * (spec §3). The root portal (`mode="root"`) hosts the main-tab SPA; every
- * sub-page is a pushed instance (`mode="sub"`) shown on its own native screen
- * so it gets slide animation + swipe-back for free from the native stack.
+ * A single INTIP WebView container — the unit of the native multi-WebView stack.
+ * The root portal (`mode="root"`) hosts the main-tab SPA and is the
+ * always-mounted launch screen; every sub-page is a pushed instance
+ * (`mode="sub"`) on its own expo-router native-stack screen, so it gets the
+ * slide-in animation and swipe-back **natively** from react-native-screens.
  *
- * Both modes share the full JS <-> Native bridge: `navigateTo` pushes a new
- * container, `goBack` pops the top one, and the rest of the web→native API
- * (app update, settings, downloads, FCM token) is handled here.
+ * This replaces the Tier 3 custom `WebViewHost` (persistent layer + Reanimated
+ * slide + warm pool). That design existed to reuse warmed WebView instances,
+ * but its real-world hit rate was near-zero and driving a live Android WebView
+ * with a JS transform flickered (half-white flash on push/pop). Native-stack
+ * transitions are OS-composited, so that flicker is gone; the trade-off is no
+ * warm reuse (every sub-page cold-loads), which the measurements showed costs
+ * little.
+ *
+ * Both modes share the full JS <-> Native bridge. The root additionally owns the
+ * push-notification lifecycle, the native-stack navigator registration (for the
+ * dev controller / `restoreSession`), and the launch cache-purge overlay.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -23,33 +32,34 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import WebView, {
-  type WebViewMessageEvent,
-  type WebViewNavigation,
-} from 'react-native-webview';
+import WebView, { type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
+import * as WebBrowser from 'expo-web-browser';
 
-import { parseBridgeMessage } from '../webview/bridge';
+// Shared bridge is vendored as a git submodule under packages/intip-bridge and
+// compiled from source (no npm package / registry). See AGENTS.md.
+import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
 import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
   STRINGS,
+  isEdgeToEdgePath,
   isMainTabPath,
 } from '../webview/constants';
 import {
   INJECTED_SCRIPT,
   LAUNCH_CLEANUP_SCRIPT,
   buildBridgeShimScript,
-  buildNavigateScript,
-  buildReceiveFcmTokenScript,
 } from '../webview/injectedScript';
 import { clearWebViewCache, clearCacheAndReload } from '../native/cache';
 import { saveDownload } from '../native/downloads';
 import { ensureCameraPermission, ensureLocationPermission } from '../native/permissions';
 import {
   getFcmTokenWithRetry,
+  getInitialNavIntent,
   setupForegroundNotifications,
   subscribeNotificationOpen,
+  type NavIntent,
 } from '../push/messaging';
 import { backgroundColorFor } from '../theme';
 import {
@@ -80,38 +90,46 @@ type Props = {
   url: string;
   /** Root portal hosts the main tabs; sub-pages are pushed on top. */
   mode: 'root' | 'sub';
-  /** Path to deep-link to once loaded (push-tap routing). Root only. */
-  initialNavPath?: string | null;
 };
 
-export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
+export default function WebViewContainer({ url, mode }: Props) {
   const webViewRef = useRef<WebView>(null);
+  // PlatformChannel over the single react-native-webview channel. `onMessage`
+  // is wired to the WebView prop; Web->Native handlers are registered below.
+  // eslint-disable-next-line react-hooks/refs
+  const bridge = useMemo(() => createNativeChannel(webViewRef), []);
   const router = useRouter();
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
   const isRoot = mode === 'root';
+  // Stable for the container's lifetime — `url` never changes after mount, so
+  // this can't flip mid-session and remount the WebView (losing its JS context).
+  const edgeToEdge = useMemo(() => {
+    if (isRoot) return true;
+    try {
+      return isEdgeToEdgePath(new URL(url).pathname);
+    } catch {
+      return false;
+    }
+  }, [isRoot, url]);
 
-  // Connect this container to the WebView orchestrator (spec: shared controller).
-  // A stable id identifies it in the live stack for the duration of its mount.
+  // Connect this container to the WebView orchestrator (shared dev controller).
   const registry = useWebViewRegistry();
   const [id] = useState(() => `${mode}-${nextWebViewSeq()}`);
 
   const [currentPath, setCurrentPath] = useState<string>('/');
   const canGoBackRef = useRef(false);
   const lastBackPressRef = useRef(0);
-  const pendingNavRef = useRef<string | null>(initialNavPath ?? null);
+  const pendingNavRef = useRef<string | null>(null);
   const permissionsPrimedRef = useRef(false);
   const cleanupStartedRef = useRef(false);
 
   // Launch overlay (root only): a branded screen held over the WebView until
   // the web cleanup loop reports back, masking the service-worker/cache purge.
   const [overlayVisible, setOverlayVisible] = useState(isRoot);
-  // Lazy useState (not useRef().current) so the Animated.Value is created once
-  // without reading a ref during render (react-hooks/refs).
   const [overlayOpacity] = useState(() => new Animated.Value(1));
 
-  // Prime camera (photo upload) + location (campus map) once logged in, so the
-  // portal's getUserMedia / geolocation work without a second WebView prompt.
+  // Prime camera (photo upload) + location (campus map) once logged in.
   const primeWebPermissions = useCallback(() => {
     if (permissionsPrimedRef.current) return;
     permissionsPrimedRef.current = true;
@@ -123,14 +141,14 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
   const postFcmToken = useCallback(async () => {
     const token = await getFcmTokenWithRetry();
     if (token) {
-      webViewRef.current?.injectJavaScript(buildReceiveFcmTokenScript(token));
+      bridge.channel.send('receiveFcmToken', token);
       registry.mergeSession({ fcmToken: token });
     }
-  }, [registry]);
+  }, [bridge, registry]);
 
   const navigateSpa = useCallback((path: string) => {
-    webViewRef.current?.injectJavaScript(buildNavigateScript(path));
-  }, []);
+    bridge.channel.send('navigate', path);
+  }, [bridge]);
 
   const dismissOverlay = useCallback(() => {
     if (!isRoot) return;
@@ -141,21 +159,53 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
     }).start(() => setOverlayVisible(false));
   }, [isRoot, overlayOpacity]);
 
-  // --- Lifecycle: cache, notifications, deep-link subscription (root only) ---
+  // Collapse the native sub-stack back to root, then drive root's SPA to a
+  // main-tab path. Root is always mounted (the index screen), so `driveRoot`
+  // works whether or not any sub-pages are currently on top of it.
+  const goHome = useCallback((path: string) => {
+    if (router.canGoBack()) {
+      try {
+        router.dismissAll();
+      } catch {
+        while (router.canGoBack()) router.back();
+      }
+    }
+    registry.driveRoot(path);
+  }, [registry, router]);
+
+  // Push-notification tap / cold-start routing (root only).
+  const handleNavIntent = useCallback(
+    (intent: NavIntent) => {
+      if (intent.kind === 'external') {
+        WebBrowser.openBrowserAsync(intent.url).catch(() => {});
+      } else if (intent.kind === 'push') {
+        // Land ON TOP of whatever is open (don't collapse the user's stack).
+        router.push({ pathname: '/webview', params: { url: intent.url, path: intent.path } });
+      } else {
+        // spa: a main-tab destination — collapse to root and drive it there.
+        // Also queue for the cold-start case where root's SPA hasn't loaded
+        // yet; the queued path is flushed in onLoadEnd.
+        goHome(intent.path);
+        pendingNavRef.current = intent.path;
+      }
+    },
+    [goHome, router],
+  );
+
+  // --- Lifecycle: cache + notifications (root only) --------------------------
   useEffect(() => {
     // Sub-pages share the process-wide WebView cache; only the launch screen
-    // clears it (login/cookies preserved) and owns notifications + overlay.
+    // clears it (login/cookies preserved) and owns the notification lifecycle.
     if (!isRoot) return;
     clearWebViewCache(webViewRef);
 
     const unsubForeground = setupForegroundNotifications();
-    const unsubOpen = subscribeNotificationOpen((path) => {
-      // If the page is up, navigate immediately; otherwise queue it for onLoad.
-      navigateSpa(path);
-      pendingNavRef.current = path;
+    const unsubOpen = subscribeNotificationOpen(handleNavIntent);
+    // Cold-start deep link: same branching as a live tap.
+    void getInitialNavIntent().then((intent) => {
+      if (intent) handleNavIntent(intent);
     });
-    // Re-post the FCM token whenever the app returns to the foreground, so the
-    // web always holds the latest token after a backgrounded refresh (spec §5.A #3).
+    // Re-post the FCM token whenever the app returns to the foreground.
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') void postFcmToken();
     });
@@ -167,7 +217,7 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
       appStateSub.remove();
       clearTimeout(timeout);
     };
-  }, [dismissOverlay, isRoot, navigateSpa, postFcmToken]);
+  }, [dismissOverlay, handleNavIntent, isRoot, postFcmToken]);
 
   // --- Orchestrator: register this container + expose its imperative handle --
   useEffect(() => {
@@ -208,7 +258,7 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
     useCallback(() => {
       if (Platform.OS !== 'android') return;
       const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-        // Sub-page: the back button pops this native container (spec §3.C.1).
+        // Sub-page: the back button pops this native screen.
         if (!isRoot) {
           if (router.canGoBack()) router.back();
           return true;
@@ -232,62 +282,62 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
   );
 
   // --- Bridge: Web -> Native -------------------------------------------------
-  const onMessage = useCallback(
-    (event: WebViewMessageEvent) => {
-      const msg = parseBridgeMessage(event.nativeEvent.data);
-      if (!msg) return;
-
-      switch (msg.type) {
-        case 'navigateTo':
-          // Push a new native WebView container onto the stack (spec §3.B/§4).
-          // The web only emits this for non-main-tab destinations.
-          router.push({
-            pathname: '/webview',
-            params: { url: msg.payload.url, path: msg.payload.path },
-          });
-          break;
-        case 'goBack':
-          // Pop the top-most container (spec §3.C). No-op on the root.
-          if (router.canGoBack()) router.back();
-          break;
-        case 'loginSuccess':
-          void postFcmToken();
-          primeWebPermissions();
-          registry.mergeSession({ loggedIn: true, loginAt: Date.now() });
-          break;
-        case 'routeChange':
-          setCurrentPath(msg.payload || '/');
-          registry.updateWebView(id, { path: msg.payload || '/' });
-          break;
-        case 'requestAppUpdate':
-          Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
-            { text: STRINGS.appUpdate.cancel, style: 'cancel' },
-            {
-              text: STRINGS.appUpdate.confirm,
-              onPress: () => clearCacheAndReload(webViewRef),
-            },
-          ]);
-          break;
-        case 'openAppSettings':
-        case 'requestPermissionSettings':
-          // Deep-link to the OS settings so the user can grant a denied
-          // permission (spec §4.A).
-          Linking.openSettings().catch(() => {});
-          break;
-        case 'logWebDiagnostics':
-          console.log('[web-diagnostics]', msg.payload);
-          break;
-        case 'onLaunchWebCleanupFinished':
-          // Cleanup loop done: reveal the WebView (spec §5.B step 4).
-          dismissOverlay();
-          break;
-        case 'jsAlert':
-          Alert.alert('', msg.payload, [{ text: STRINGS.appUpdate.confirm }]);
-          break;
-      }
-    },
-    [dismissOverlay, id, postFcmToken, primeWebPermissions, registry, router],
-  );
+  useEffect(() => {
+    const { channel } = bridge;
+    const offs = [
+      // Push a new native sub-page screen (spec §3.B/§4). The web only emits
+      // this for non-main-tab destinations.
+      channel.on('navigateTo', ({ path, url: target }) => {
+        router.push({ pathname: '/webview', params: { url: target, path } });
+      }),
+      // Pop the top-most screen (spec §3.C). No-op on the root.
+      channel.on('goBack', () => {
+        if (router.canGoBack()) router.back();
+      }),
+      // Return to a home-tab path — collapse the stack to root and drive root
+      // there, regardless of which page (root or a sub) sent it.
+      channel.on('goHome', ({ path }) => {
+        goHome(path);
+      }),
+      channel.on('loginSuccess', () => {
+        void postFcmToken();
+        primeWebPermissions();
+        registry.mergeSession({ loggedIn: true, loginAt: Date.now() });
+      }),
+      channel.on('routeChange', (path) => {
+        setCurrentPath(path || '/');
+        registry.updateWebView(id, { path: path || '/' });
+      }),
+      channel.on('requestAppUpdate', () => {
+        Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
+          { text: STRINGS.appUpdate.cancel, style: 'cancel' },
+          {
+            text: STRINGS.appUpdate.confirm,
+            onPress: () => clearCacheAndReload(webViewRef),
+          },
+        ]);
+      }),
+      channel.on('openAppSettings', () => {
+        Linking.openSettings().catch(() => {});
+      }),
+      channel.on('requestPermissionSettings', () => {
+        Linking.openSettings().catch(() => {});
+      }),
+      channel.on('logWebDiagnostics', (diag) => {
+        console.log('[web-diagnostics]', diag);
+      }),
+      // Cleanup loop done: reveal the WebView (spec §5.B step 4).
+      channel.on('onLaunchWebCleanupFinished', () => {
+        dismissOverlay();
+      }),
+      channel.on('jsAlert', (message) => {
+        Alert.alert('', message, [{ text: STRINGS.appUpdate.confirm }]);
+      }),
+    ];
+    return () => {
+      for (const off of offs) off();
+    };
+  }, [bridge, dismissOverlay, goHome, id, postFcmToken, primeWebPermissions, registry, router]);
 
   // --- External links + Android downloads ------------------------------------
   const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {
@@ -346,42 +396,60 @@ export default function WebViewContainer({ url, mode, initialNavPath }: Props) {
     }
   }, [isRoot, navigateSpa, postFcmToken]);
 
+  // Jetsam recovery (iOS content-process termination / Android render-process
+  // gone): a visible container just reloads itself in place.
+  const onContentProcessDied = useCallback(() => {
+    webViewRef.current?.reload();
+  }, []);
+
   // Root sits on the main tabs -> no WebView-level swipe-back; sub-pages let the
-  // native stack own the swipe so it pops the container (spec §3.C.2 / §6.5).
+  // native stack own the swipe so it pops the screen (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
 
+  const webView = (
+    <WebView
+      ref={webViewRef}
+      source={{ uri: url }}
+      style={[styles.fill, { backgroundColor }]}
+      // Identify as the official app so the web enables multi-WebView routing.
+      applicationNameForUserAgent={APP_UA_SUFFIX}
+      // Cache: never serve from cache; we also clearCache() on mount.
+      cacheEnabled={false}
+      // Bridge wiring: shims + alert override before content, observers after.
+      onMessage={bridge.onMessage}
+      injectedJavaScriptBeforeContentLoaded={BRIDGE_SHIM_SCRIPT}
+      injectedJavaScript={INJECTED_SCRIPT}
+      onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
+      onNavigationStateChange={onNavigationStateChange}
+      onLoadEnd={onLoadEnd}
+      onContentProcessDidTerminate={onContentProcessDied}
+      onRenderProcessGone={onContentProcessDied}
+      onFileDownload={({ nativeEvent }) => saveDownload(nativeEvent.downloadUrl)}
+      // Inline media — videos must not auto-fullscreen (spec §6.3).
+      allowsInlineMediaPlayback
+      mediaPlaybackRequiresUserAction
+      mediaCapturePermissionGrantType="grantIfSameHostElseDeny"
+      allowsBackForwardNavigationGestures={webViewSwipeBack}
+      contentInsetAdjustmentBehavior="never"
+      geolocationEnabled
+      allowsFullscreenVideo={false}
+      originWhitelist={['https://*', 'http://*', 'about:*']}
+      pullToRefreshEnabled={false}
+    />
+  );
+
   return (
-    // Fill the screen but ignore the bottom inset so content reaches the edge.
+    // Fill the screen; ignore the bottom inset so content reaches the edge.
     <View style={[styles.fill, { backgroundColor }]}>
-      <SafeAreaView style={styles.fill} edges={['top', 'left', 'right']}>
-        <WebView
-          ref={webViewRef}
-          source={{ uri: url }}
-          style={[styles.fill, { backgroundColor }]}
-          // Identify as the official app so the web enables multi-WebView routing.
-          applicationNameForUserAgent={APP_UA_SUFFIX}
-          // Cache: never serve from cache; we also clearCache() on mount.
-          cacheEnabled={false}
-          // Bridge wiring: shims + alert override before content, observers after.
-          onMessage={onMessage}
-          injectedJavaScriptBeforeContentLoaded={BRIDGE_SHIM_SCRIPT}
-          injectedJavaScript={INJECTED_SCRIPT}
-          onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
-          onNavigationStateChange={onNavigationStateChange}
-          onLoadEnd={onLoadEnd}
-          onFileDownload={({ nativeEvent }) => saveDownload(nativeEvent.downloadUrl)}
-          // Inline media — videos must not auto-fullscreen (spec §6.3).
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction
-          mediaCapturePermissionGrantType="grantIfSameHostElseDeny"
-          allowsBackForwardNavigationGestures={webViewSwipeBack}
-          contentInsetAdjustmentBehavior="never"
-          geolocationEnabled
-          allowsFullscreenVideo={false}
-          originWhitelist={['https://*', 'http://*', 'about:*']}
-          pullToRefreshEnabled={false}
-        />
-      </SafeAreaView>
+      {edgeToEdge ? (
+        // Root (and sub-pages migrated to own their top inset via
+        // env(safe-area-inset-*)) go fully edge-to-edge; the web owns the insets.
+        webView
+      ) : (
+        <SafeAreaView style={styles.fill} edges={['top', 'left', 'right']}>
+          {webView}
+        </SafeAreaView>
+      )}
 
       {overlayVisible && (
         <Animated.View
