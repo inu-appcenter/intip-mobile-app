@@ -2,14 +2,14 @@
   "expo": {
     "name": "INTIP",
     "slug": "intip-mobile-app",
-    "version": "1.0.4",
+    "version": "3.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "intipmobileapp",
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "kr.inuappcenter.intip",
-      "supportsTablet": false,
+      "supportsTablet": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "entitlements": {
         "aps-environment": "production"
