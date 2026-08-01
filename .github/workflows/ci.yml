@@ -119,6 +119,11 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       (github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'both')
     runs-on: macos-26
+    env:
+      # Matches the AuthKey_<id>.p8 filename — not itself a secret.
+      APP_STORE_CONNECT_KEY_ID: "45D3A26734"
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_KEY_PATH: "/Users/runner/.appstoreconnect/private_keys/AuthKey_45D3A26734.p8"
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -179,11 +184,23 @@ jobs:
           mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
           cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
-      # Signing is overridden on the command line rather than via a config
-      # plugin (contrast withAndroidReleaseSigning): xcodebuild build-setting
-      # overrides apply to this invocation only and don't require touching
-      # the generated ios/ project, so nothing needs to survive `prebuild
-      # --clean` the way Gradle's signingConfigs block does.
+      # Decoded here (not just in the upload step) because xcodebuild also
+      # needs it below: -allowProvisioningUpdates has it talk to App Store
+      # Connect directly to resolve/renew the provisioning profile, instead
+      # of us pinning PROVISIONING_PROFILE_SPECIFIER on the command line.
+      - name: Decode App Store Connect API key
+        env:
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+        run: |
+          mkdir -p "$(dirname "$APP_STORE_CONNECT_KEY_PATH")"
+          echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode -o "$APP_STORE_CONNECT_KEY_PATH"
+
+      # CODE_SIGN_STYLE=Manual + PROVISIONING_PROFILE_SPECIFIER as command-line
+      # overrides apply to *every* target in the workspace, not just the app —
+      # including CocoaPods' framework/library targets, which can't carry a
+      # provisioning profile at all and fail with "does not support
+      # provisioning profiles". -allowProvisioningUpdates (automatic signing,
+      # authenticated via the API key) only touches the actual app target.
       - name: Archive
         working-directory: ios
         run: |
@@ -193,10 +210,12 @@ jobs:
             -configuration Release \
             -archivePath "$RUNNER_TEMP/INTIP.xcarchive" \
             -destination "generic/platform=iOS" \
-            CODE_SIGN_STYLE=Manual \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
-            DEVELOPMENT_TEAM=AANGG4Q668 \
-            PROVISIONING_PROFILE_SPECIFIER=INTIP
+            DEVELOPMENT_TEAM=AANGG4Q668
 
       - name: Export IPA
         run: |
@@ -210,12 +229,7 @@ jobs:
             <key>teamID</key>
             <string>AANGG4Q668</string>
             <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>kr.inuappcenter.intip</key>
-              <string>INTIP</string>
-            </dict>
+            <string>automatic</string>
           </dict>
           </plist>
           EOF
@@ -223,19 +237,14 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/INTIP.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
 
       - name: Upload to App Store Connect
-        env:
-          # Matches the AuthKey_<id>.p8 filename — not itself a secret.
-          APP_STORE_CONNECT_KEY_ID: "45D3A26734"
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
         run: |
-          set -euo pipefail
-          mkdir -p ~/.appstoreconnect/private_keys
-          echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode -o ~/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8
-
           xcrun altool --upload-app \
             -f "$RUNNER_TEMP/export/INTIP.ipa" \
             -t ios \
@@ -247,7 +256,7 @@ jobs:
         run: |
           security delete-keychain "$RUNNER_TEMP/ios-ci.keychain-db" 2>/dev/null || true
           rm -f GoogleService-Info.plist
-          rm -f ~/.appstoreconnect/private_keys/AuthKey_*.p8
+          rm -f "$APP_STORE_CONNECT_KEY_PATH"
           rm -f ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
       - name: Upload IPA
