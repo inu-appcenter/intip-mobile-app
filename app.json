@@ -64,6 +64,7 @@
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
       "./plugins/withDefaultNotificationChannel",
+      "./plugins/withAndroidReleaseSigning",
       [
         "expo-build-properties",
         {
