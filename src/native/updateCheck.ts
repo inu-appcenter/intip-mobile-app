@@ -22,11 +22,11 @@ export async function checkForUpdate(): Promise<void> {
 
   // Embedded builds (direct from App Store/Play Store, not EAS Update) have no
   // updates URL and can't check.
-  if (Updates.isEmbedded) return;
+  if (Updates.isEmbeddedLaunch) return;
 
   try {
-    const update = await Updates.checkAsync();
-    if (!update.isAvailable) return;
+    const update = await Updates.checkForUpdateAsync();
+    if (update.isAvailable === false) return;
 
     // New version found. Prompt the user to download + reload.
     Alert.alert(
