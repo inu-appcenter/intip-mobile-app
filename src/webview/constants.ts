@@ -5,8 +5,13 @@
  * (`WebViewActivity.kt`, `WebViewController.swift`, `getMobilePlatform.ts`).
  */
 
-/** The portal the WebView hosts. Loaded on every launch. */
-export const ROOT_URL = "http://intip-test.pages.dev";
+/**
+ * The portal the WebView hosts. Loaded on every launch.
+ * https, not http: the host 301-redirects cleartext to https, so an `http://`
+ * origin cost every launch (and every `portalUrlFor` push) a wasted round-trip
+ * before the first byte of HTML.
+ */
+export const ROOT_URL = "https://intip-test.pages.dev";
 
 /** Host that is considered "internal". Anything else opens in the system browser. */
 export const PORTAL_HOST = "intip-test.pages.dev";
