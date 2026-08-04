@@ -95,6 +95,22 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/4dd31317-0fde-484b-bbe5-c445f82ae718",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4dd31317-0fde-484b-bbe5-c445f82ae718"
+      }
+    },
+    "owner": "gang_03"
   }
 }

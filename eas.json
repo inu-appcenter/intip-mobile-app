@@ -1,0 +1,6 @@
+{
+  "cli": {
+    "version": ">= 21.5.0",
+    "appVersionSource": "local"
+  }
+}
