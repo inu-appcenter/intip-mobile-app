@@ -58,6 +58,7 @@ import { relayWebConsoleMessage, WEB_CONSOLE_SCRIPT } from '../webview/webConsol
 import { clearWebViewCache, clearCacheAndReload } from '../native/cache';
 import { saveDownload } from '../native/downloads';
 import { ensureCameraPermission, ensureLocationPermission } from '../native/permissions';
+import { clearTokenInfo, saveTokenInfo } from '../native/secureTokenStore';
 import {
   getFcmTokenWithRetry,
   getInitialNavIntent,
@@ -65,6 +66,7 @@ import {
   subscribeNotificationOpen,
   type NavIntent,
 } from '../push/messaging';
+import { flushPendingFcmToken } from '../push/fcmTokenSync';
 import { backgroundColorFor } from '../theme';
 import {
   nextWebViewSeq,
@@ -172,6 +174,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       bridge.channel.send('receiveFcmToken', token);
       registry.mergeSession({ fcmToken: token });
     }
+    flushPendingFcmToken();
   }, [bridge, registry]);
 
   const navigateSpa = useCallback((path: string) => {
@@ -264,10 +267,11 @@ export default function WebViewContainer({ url, mode }: Props) {
         );
       },
       refreshFcmToken: () => void postFcmToken(),
+      sendTokenInfo: (tokenInfo) => bridge.channel.send('tokenInfoUpdated', tokenInfo),
     };
     registry.registerWebView({ id, mode, url, path: '/' }, handle);
     return () => registry.unregisterWebView(id);
-  }, [id, mode, url, registry, navigateSpa, postFcmToken]);
+  }, [id, mode, url, registry, navigateSpa, postFcmToken, bridge]);
 
   // The root owns the expo-router stack, so it registers native-stack navigation
   // (push/pop/popToRoot) the controller uses to restore a saved session.
@@ -340,6 +344,13 @@ export default function WebViewContainer({ url, mode }: Props) {
         void postFcmToken();
         primeWebPermissions();
         registry.mergeSession({ loggedIn: true, loginAt: Date.now() });
+      }),
+      // Mirror the web's JWT into SecureStore so the shell can call
+      // authenticated backend endpoints on its own (background FCM token
+      // registration) without a live WebView. An empty accessToken is the
+      // web's logout signal — clear the native copy too.
+      channel.on('syncTokenInfo', (tokenInfo) => {
+        void (tokenInfo.accessToken ? saveTokenInfo(tokenInfo) : clearTokenInfo());
       }),
       channel.on('routeChange', (path) => {
         setCurrentPath(path || '/');

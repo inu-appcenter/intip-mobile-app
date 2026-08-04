@@ -33,6 +33,8 @@ import {
   type WebViewMode,
 } from './sessionSnapshot';
 import { readSnapshot, writeSnapshot } from './sessionStore';
+import { onNativeTokenRefresh } from '../native/authTokens';
+import type { TokenInfo } from '../native/secureTokenStore';
 
 /** A live entry in the native stack, as tracked by the orchestrator. */
 export type WebViewEntry = {
@@ -55,6 +57,8 @@ export type WebViewHandle = {
   /** Navigate the WebView to a full URL (not an SPA path). Dev controller only. */
   loadUrl: (url: string) => void;
   refreshFcmToken: () => void;
+  /** Push a native-initiated token refresh result into this container's web page. */
+  sendTokenInfo: (tokenInfo: TokenInfo) => void;
 };
 
 /** Native-stack navigation, registered by the root container (owns the router). */
@@ -84,6 +88,10 @@ export type WebViewRegistry = {
    * through the shared registry rather than a direct ref.
    */
   driveRoot: (path: string) => void;
+  /** Broadcast a native-initiated token refresh result to every mounted
+   * WebView (root + pushed subs), so the web store/localStorage stays in
+   * sync with whatever the native shell just refreshed on its own. */
+  broadcastTokenInfo: (tokenInfo: TokenInfo) => void;
 };
 
 /** Reactive controller API consumed by the dev menu + controller panel. */
@@ -176,9 +184,17 @@ export function WebViewProvider({ children }: { children: ReactNode }) {
         const root = stackRef.current.find((e) => e.mode === 'root');
         if (root) handlesRef.current.get(root.id)?.navigateSpa(path);
       },
+      broadcastTokenInfo(tokenInfo) {
+        for (const handle of handlesRef.current.values()) handle.sendTokenInfo(tokenInfo);
+      },
     }),
     [],
   );
+
+  // Echo a native-initiated token refresh (e.g. from a background FCM token
+  // registration) to every live WebView, so the web store/localStorage stays
+  // in sync with what native just persisted.
+  useEffect(() => onNativeTokenRefresh(registry.broadcastTokenInfo), [registry]);
 
   // --- Controller actions: stable identity, read live state through refs ----
   const actions = useMemo(() => {
