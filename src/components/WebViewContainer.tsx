@@ -268,6 +268,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       },
       refreshFcmToken: () => void postFcmToken(),
       sendTokenInfo: (tokenInfo) => bridge.channel.send('tokenInfoUpdated', tokenInfo),
+      sendBroadcastSync: (message) => bridge.channel.send('broadcastSyncMessage', message),
     };
     registry.registerWebView({ id, mode, url, path: '/' }, handle);
     return () => registry.unregisterWebView(id);
@@ -351,6 +352,11 @@ export default function WebViewContainer({ url, mode }: Props) {
       // web's logout signal — clear the native copy too.
       channel.on('syncTokenInfo', (tokenInfo) => {
         void (tokenInfo.accessToken ? saveTokenInfo(tokenInfo) : clearTokenInfo());
+      }),
+      // Multi-WebView state sync fallback/second path (see WebViewContext's
+      // `relayBroadcastSync` doc comment): relay to every other mounted WebView.
+      channel.on('relayBroadcastSync', (message) => {
+        registry.relayBroadcastSync(message, id);
       }),
       channel.on('routeChange', (path) => {
         setCurrentPath(path || '/');
