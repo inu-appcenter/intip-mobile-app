@@ -7,11 +7,21 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: Platform to build a signed release for
+        description: Native release build to run (none = OTA only)
         required: true
         type: choice
-        options: [android, ios, both]
-        default: both
+        options: [none, android, ios, both]
+        default: none
+      publish_ota:
+        description: Publish an EAS Update to the production channel
+        required: false
+        type: boolean
+        default: true
+      force_ota:
+        description: Publish even if native-affecting files changed (see ota-publish guard)
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -49,6 +59,165 @@ jobs:
 
       - name: Test
         run: npm test -- --ci
+
+  ota-publish:
+    # OTA first: every merge to main ships as an EAS Update, so a JS-only fix
+    # reaches users without a store round-trip. Native release builds stay
+    # manual (workflow_dispatch) and are only needed when something *native*
+    # changed — which is exactly what the guard below refuses to OTA past.
+    #
+    # Channel/runtime pairing (see 6f781b4): this repo does not use `eas build`,
+    # so app.json pins the channel header to "production" and resolves
+    # runtimeVersion from `expo.version` via the appVersion policy. An update
+    # therefore only ever reaches installed binaries built from the *same*
+    # app.json version — bump `version` and an update stops reaching anyone
+    # until a native release ships that version.
+    # `needs: verify` already gates this on a green lint/typecheck/test run —
+    # a failing job skips its dependents regardless of this condition.
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_ota)
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      skipped: ${{ steps.native_guard.outputs.changed }}
+    steps:
+      - name: Checkout (with intip-bridge submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
+          # Full history: the guard below diffs the range this push brought in.
+          fetch-depth: 0
+
+      # An OTA can only carry JS/assets. If a change needs new native code —
+      # a config plugin, an app.json native key, a dependency with a native
+      # module — then publishing it to binaries that don't have that code is
+      # how you brick an installed app (the JS calls a module that isn't there,
+      # on every launch, with no way back except a store release).
+      #
+      # `app.json` also covers the version bump case: bumping `expo.version`
+      # moves runtimeVersion, so the update would silently reach nobody.
+      #
+      # This is a per-push diff, so it catches the change at the moment it
+      # lands. If you need something sharper later, `npx expo-updates
+      # fingerprint:generate` hashes the real native inputs — it needs the
+      # gitignored google-services.json / GoogleService-Info.plist decoded
+      # first, or the hash won't match what the release builds produced.
+      - name: Guard against native-affecting changes
+        id: native_guard
+        env:
+          FORCED: ${{ github.event_name == 'workflow_dispatch' && inputs.force_ota }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          if [ "$FORCED" = "true" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ force_ota — native-change guard bypassed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # On a push, diff everything the push brought onto main. On a manual
+          # dispatch (or a first/force push with no usable `before`), fall back
+          # to the last commit.
+          if [ -n "${BEFORE:-}" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            BASE="$BEFORE"
+          else
+            BASE="$(git rev-parse HEAD~1)"
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE" "$GITHUB_SHA" -- app.json plugins package.json)
+
+          if [ -n "$CHANGED" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## ⏭️ OTA 발행 건너뜀"
+              echo
+              echo "네이티브 빌드에 영향을 주는 파일이 \`$BASE\`..\`$GITHUB_SHA\` 범위에서 변경됐습니다:"
+              echo
+              echo '```'
+              echo "$CHANGED"
+              echo '```'
+              echo
+              echo "JS 변경만이라면 **Run workflow → force_ota** 로 다시 발행하세요."
+              echo "네이티브 변경이라면 \`app.json\`의 \`version\`을 올리고 네이티브 릴리스 빌드를 돌려야 합니다."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        if: steps.native_guard.outputs.changed != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.native_guard.outputs.changed != 'true'
+        run: npm ci
+
+      # app.json points `googleServicesFile` at these on both platforms and
+      # they're gitignored, so the app config can't resolve without them.
+      # Removed again below, same as the release jobs do.
+      - name: Decode Firebase config files
+        if: steps.native_guard.outputs.changed != 'true'
+        run: |
+          echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > google-services.json
+          echo "${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}" | base64 --decode > GoogleService-Info.plist
+
+      # eas-cli reads EXPO_TOKEN directly, so no interactive login is needed.
+      # Create one at https://expo.dev/settings/access-tokens (the account must
+      # own gang_03/intip-mobile-app) and add it as the EXPO_TOKEN repo secret.
+      - name: Publish EAS Update
+        if: steps.native_guard.outputs.changed != 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "::error::EXPO_TOKEN secret is not set — cannot publish an EAS Update."
+            exit 1
+          fi
+
+          RUNTIME_VERSION=$(node -p "require('./app.json').expo.version")
+          MESSAGE=$(git log -1 --pretty=%s | cut -c1-100)
+
+          # `eas update` creates the *branch* but never the *channel*, and a
+          # channel is what the installed app actually asks for (app.json pins
+          # the expo-channel-name header to "production"). Publishing to a
+          # branch no channel points at succeeds and reaches nobody — so make
+          # sure the channel exists first. Idempotent: create only if absent.
+          if ! npx eas-cli@latest channel:view production --non-interactive >/dev/null 2>&1; then
+            echo "Channel 'production' does not exist — creating it (branch: production)."
+            npx eas-cli@latest channel:create production --non-interactive
+          fi
+
+          echo "Publishing to channel 'production' (runtimeVersion $RUNTIME_VERSION)"
+          npx eas-cli@latest update \
+            --branch production \
+            --platform all \
+            --message "$MESSAGE" \
+            --non-interactive
+
+          {
+            echo "## 🚀 EAS Update 발행됨"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| 채널 | \`production\` |"
+            echo "| runtimeVersion | \`$RUNTIME_VERSION\` |"
+            echo "| 메세지 | $MESSAGE |"
+            echo
+            echo "이 업데이트는 \`version\` 이 \`$RUNTIME_VERSION\` 인 설치본에만 도달합니다."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove decoded secrets
+        if: always()
+        run: rm -f google-services.json GoogleService-Info.plist
 
   android-release:
     # Manual only — a signed release build shouldn't fire on every PR/push.
@@ -276,21 +445,31 @@ jobs:
           retention-days: 14
 
   notify-discord:
-    if: always() && github.event_name == 'workflow_dispatch'
-    needs: [verify, android-release, ios-release]
+    # Manual releases, plus every OTA publish on main (which is now the normal
+    # way a change reaches users, so it's worth announcing).
+    if: |
+      always() && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      )
+    needs: [verify, ota-publish, android-release, ios-release]
     runs-on: ubuntu-latest
     steps:
       - name: Send Discord notification
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           VERIFY_RESULT: ${{ needs.verify.result }}
+          OTA_RESULT: ${{ needs.ota-publish.result }}
+          # The guard sets this to "true" when it refused to publish; the job
+          # itself still succeeds, so the result alone can't tell them apart.
+          OTA_GUARDED: ${{ needs.ota-publish.outputs.skipped }}
           ANDROID_RESULT: ${{ needs.android-release.result }}
           IOS_RESULT: ${{ needs.ios-release.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_MSG: ${{ github.event.head_commit.message || github.sha }}
           ACTOR: ${{ github.actor }}
           REF_NAME: ${{ github.ref_name }}
-          PLATFORM_INPUT: ${{ inputs.platform || 'both' }}
+          PLATFORM_INPUT: ${{ inputs.platform || 'none' }}
         run: |
           if [ -z "$DISCORD_WEBHOOK" ]; then
             echo "DISCORD_WEBHOOK secret is not set. Skipping Discord notification."
@@ -311,11 +490,17 @@ jobs:
           IOS_STATUS=$(map_status "$IOS_RESULT")
           VERIFY_STATUS=$(map_status "$VERIFY_RESULT")
 
+          if [ "$OTA_GUARDED" = "true" ]; then
+            OTA_STATUS="⏭️ 건너뜀 (네이티브 변경 감지)"
+          else
+            OTA_STATUS=$(map_status "$OTA_RESULT")
+          fi
+
           COLOR=3066993
           TITLE_EMOJI="🎉"
           TITLE_TEXT="모바일 앱 배포 파이프라인 완료"
 
-          if [ "$ANDROID_RESULT" = "failure" ] || [ "$IOS_RESULT" = "failure" ] || [ "$VERIFY_RESULT" = "failure" ]; then
+          if [ "$OTA_RESULT" = "failure" ] || [ "$ANDROID_RESULT" = "failure" ] || [ "$IOS_RESULT" = "failure" ] || [ "$VERIFY_RESULT" = "failure" ]; then
             COLOR=15158332
             TITLE_EMOJI="❌"
             TITLE_TEXT="모바일 앱 배포 파이프라인 실패"
@@ -335,6 +520,11 @@ jobs:
                 "url": "${RUN_URL}",
                 "color": ${COLOR},
                 "fields": [
+                  {
+                    "name": "📡 OTA (EAS Update / production)",
+                    "value": "${OTA_STATUS}",
+                    "inline": true
+                  },
                   {
                     "name": "🤖 Android (APK & AAB)",
                     "value": "${ANDROID_STATUS}",
