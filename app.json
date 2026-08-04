@@ -16,7 +16,10 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification", "fetch"],
+        "UIBackgroundModes": [
+          "remote-notification",
+          "fetch"
+        ],
         "NSCameraUsageDescription": "이 앱은 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
         "NSPhotoLibraryUsageDescription": "이 앱은 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
         "NSPhotoLibraryAddUsageDescription": "이 앱은 촬영한 사진을 저장하기 위해 사진첩 접근 권한이 필요합니다.",
@@ -86,11 +89,28 @@
             "Notifications"
           ]
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/4dd31317-0fde-484b-bbe5-c445f82ae718",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4dd31317-0fde-484b-bbe5-c445f82ae718"
+      }
+    },
+    "owner": "gang_03"
   }
 }

@@ -18,6 +18,7 @@ import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import { ensureAndroidPostNotifications } from '../native/permissions';
 import { resolveNavIntent, type NavIntent } from './navIntent';
 import { consumePending, deliver, isDuplicate, subscribe } from './pendingIntent';
+import { registerFcmTokenRotationListener } from './fcmTokenSync';
 
 export type { NavIntent };
 
@@ -158,6 +159,10 @@ let backgroundRegistered = false;
 export function registerBackgroundHandlers(): void {
   if (backgroundRegistered) return;
   backgroundRegistered = true;
+
+  // Reissued/rotated FCM tokens must reach the backend even with no WebView
+  // mounted (background or killed) — see fcmTokenSync.ts.
+  registerFcmTokenRotationListener();
 
   // Data-only messages while backgrounded. The OS renders `notification`
   // payloads itself; nothing extra to do here, but the handler must exist.
