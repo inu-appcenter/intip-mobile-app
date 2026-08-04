@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import WebViewControllerPanel from '../components/WebViewControllerPanel';
 import { registerBackgroundHandlers, requestNotificationPermission } from '../push/messaging';
+import { checkForUpdate } from '../native/updateCheck';
 import { WebViewProvider } from '../webview/WebViewContext';
 import { backgroundColorFor } from '../theme';
 
@@ -23,6 +24,8 @@ export default function RootLayout() {
   useEffect(() => {
     // Ask for notification permission on first launch (alert + badge + sound).
     void requestNotificationPermission();
+    // Check for OTA updates (non-blocking; shows a prompt if one is available).
+    void checkForUpdate();
   }, []);
 
   return (
