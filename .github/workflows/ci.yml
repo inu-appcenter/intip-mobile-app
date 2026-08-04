@@ -199,8 +199,7 @@ jobs:
           echo "Publishing to channel 'production' (runtimeVersion $RUNTIME_VERSION)"
           npx eas-cli@latest update \
             --branch production \
-            --platform ios \
-            --platform android \
+            --platform ios,android \
             --message "$MESSAGE" \
             --non-interactive
 
