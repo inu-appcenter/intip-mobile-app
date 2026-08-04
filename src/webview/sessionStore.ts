@@ -16,7 +16,18 @@ import {
   type SnapshotEntry,
 } from './sessionSnapshot';
 
-const FILE_PATH = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/intip-devsession.json`;
+// Lazy, not a module-level const: `expo export` (which `eas update` runs to
+// build the OTA bundle) statically evaluates every route module — including
+// this one, via `_layout.tsx` -> `WebViewControllerPanel` -> `WebViewContext`
+// -> here — in a server/Node pass that has no native modules loaded. Reading
+// `ReactNativeBlobUtil.fs.dirs` eagerly at import time threw there
+// ("Cannot read properties of undefined (reading 'dirs')") and failed the
+// whole export. None of these functions run during that pass — only a live
+// dev-controller action calls them — so deferring the read to call time is
+// enough to dodge it.
+function filePath(): string {
+  return `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/intip-devsession.json`;
+}
 
 /** Serialize the live stack + session and write it to disk. */
 export async function writeSnapshot(
@@ -24,16 +35,16 @@ export async function writeSnapshot(
   session: SessionState,
 ): Promise<SessionSnapshot> {
   const snapshot = serializeSnapshot(stack, session);
-  await ReactNativeBlobUtil.fs.writeFile(FILE_PATH, JSON.stringify(snapshot), 'utf8');
+  await ReactNativeBlobUtil.fs.writeFile(filePath(), JSON.stringify(snapshot), 'utf8');
   return snapshot;
 }
 
 /** Read the saved snapshot, or `null` if none exists / it is unreadable. */
 export async function readSnapshot(): Promise<SessionSnapshot | null> {
   try {
-    const exists = await ReactNativeBlobUtil.fs.exists(FILE_PATH);
+    const exists = await ReactNativeBlobUtil.fs.exists(filePath());
     if (!exists) return null;
-    const raw = await ReactNativeBlobUtil.fs.readFile(FILE_PATH, 'utf8');
+    const raw = await ReactNativeBlobUtil.fs.readFile(filePath(), 'utf8');
     return parseSnapshot(typeof raw === 'string' ? raw : String(raw));
   } catch (err) {
     console.warn('[devsession] read failed', err);
@@ -44,8 +55,8 @@ export async function readSnapshot(): Promise<SessionSnapshot | null> {
 /** Delete the saved snapshot, if present. */
 export async function clearSnapshot(): Promise<void> {
   try {
-    if (await ReactNativeBlobUtil.fs.exists(FILE_PATH)) {
-      await ReactNativeBlobUtil.fs.unlink(FILE_PATH);
+    if (await ReactNativeBlobUtil.fs.exists(filePath())) {
+      await ReactNativeBlobUtil.fs.unlink(filePath());
     }
   } catch (err) {
     console.warn('[devsession] clear failed', err);

@@ -157,6 +157,16 @@ let backgroundRegistered = false;
  * (before React renders) so it survives a background/quit launch.
  */
 export function registerBackgroundHandlers(): void {
+  // This app has no real web target (it's a native WebView shell; app.json's
+  // `web.output` is an unused leftover default) — Firebase/notifee are native
+  // modules with nothing initialized under `Platform.OS === 'web'`. That
+  // matters beyond an actual browser run: `_layout.tsx` calls this at module
+  // load, and `expo export`'s static-rendering pass (which `eas update` runs
+  // internally to build the OTA bundle) evaluates every route module's
+  // top-level code once for a "web" render target, in a Node process with no
+  // Firebase app initialized — hitting this unguarded crashed the whole
+  // export with "No Firebase App '[DEFAULT]' has been created".
+  if (Platform.OS === 'web') return;
   if (backgroundRegistered) return;
   backgroundRegistered = true;
 
