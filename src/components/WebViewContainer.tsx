@@ -83,6 +83,12 @@ const DOWNLOAD_EXTENSIONS = [
 /** Hard cap on how long the launch overlay waits for the web cleanup signal. */
 const CLEANUP_OVERLAY_TIMEOUT_MS = 4000;
 
+/** Hard cap on how long a sub-page holds its reveal overlay waiting for load. */
+const REVEAL_OVERLAY_TIMEOUT_MS = 4000;
+
+/** Cross-fade used to reveal the WebView once its content is ready. */
+const OVERLAY_FADE_MS = 250;
+
 /** Bridge shim is platform-specific (see injectedScript.ts). */
 const BRIDGE_SHIM_SCRIPT = buildBridgeShimScript(Platform.OS === 'ios' ? 'ios' : 'android');
 
@@ -154,10 +160,17 @@ export default function WebViewContainer({ url, mode }: Props) {
   // (which the security guard would otherwise divert to the system browser).
   const devLoadUrlRef = useRef<string | null>(null);
 
-  // Launch overlay (root only): a branded screen held over the WebView until
-  // the web cleanup loop reports back, masking the service-worker/cache purge.
-  const [overlayVisible, setOverlayVisible] = useState(isRoot);
+  // Reveal overlay: a flat themed screen held over the WebView until its
+  // content is ready, then cross-faded out. Without it a pushed sub-page slides
+  // in as a bare background-coloured card and the page *pops* in whenever the
+  // cold load happens to finish — the visible "black (dark) / white (light)
+  // flash" during the native-stack transition. Root reuses the same overlay to
+  // additionally mask the launch service-worker/cache purge.
+  //  - root: lifted by `onLaunchWebCleanupFinished` (or CLEANUP_OVERLAY_TIMEOUT_MS)
+  //  - sub:  lifted by `onLoadEnd` (or REVEAL_OVERLAY_TIMEOUT_MS)
+  const [overlayVisible, setOverlayVisible] = useState(true);
   const [overlayOpacity] = useState(() => new Animated.Value(1));
+  const overlayDismissedRef = useRef(false);
 
   // Prime camera (photo upload) + location (campus map) once logged in.
   const primeWebPermissions = useCallback(() => {
@@ -181,14 +194,17 @@ export default function WebViewContainer({ url, mode }: Props) {
     bridge.channel.send('navigate', path);
   }, [bridge]);
 
+  // Idempotent: the load signal and the safety timeout race, and whichever
+  // lands first owns the fade.
   const dismissOverlay = useCallback(() => {
-    if (!isRoot) return;
+    if (overlayDismissedRef.current) return;
+    overlayDismissedRef.current = true;
     Animated.timing(overlayOpacity, {
       toValue: 0,
-      duration: 250,
+      duration: OVERLAY_FADE_MS,
       useNativeDriver: true,
     }).start(() => setOverlayVisible(false));
-  }, [isRoot, overlayOpacity]);
+  }, [overlayOpacity]);
 
   // Collapse the native sub-stack back to root, then drive root's SPA to a
   // main-tab path. Root is always mounted (the index screen), so `driveRoot`
@@ -249,6 +265,14 @@ export default function WebViewContainer({ url, mode }: Props) {
       clearTimeout(timeout);
     };
   }, [dismissOverlay, handleNavIntent, isRoot, postFcmToken]);
+
+  // Sub-pages lift the reveal overlay from `onLoadEnd`; this is the safety net
+  // for a load that errors out or never ends (root has its own above).
+  useEffect(() => {
+    if (isRoot) return;
+    const timeout = setTimeout(dismissOverlay, REVEAL_OVERLAY_TIMEOUT_MS);
+    return () => clearTimeout(timeout);
+  }, [dismissOverlay, isRoot]);
 
   // --- Orchestrator: register this container + expose its imperative handle --
   useEffect(() => {
@@ -455,8 +479,13 @@ export default function WebViewContainer({ url, mode }: Props) {
         navigateSpa(pendingNavRef.current);
         pendingNavRef.current = null;
       }
+    } else {
+      // Sub-page: the document is loaded, so the page has (or is one frame from)
+      // its first paint — cross-fade the reveal overlay away instead of letting
+      // the content pop in on top of the slide-in transition.
+      dismissOverlay();
     }
-  }, [isRoot, navigateSpa, postFcmToken]);
+  }, [dismissOverlay, isRoot, navigateSpa, postFcmToken]);
 
   // Jetsam recovery (iOS content-process termination / Android render-process
   // gone): a visible container just reloads itself in place.
@@ -475,8 +504,13 @@ export default function WebViewContainer({ url, mode }: Props) {
       style={[styles.fill, { backgroundColor }]}
       // Identify as the official app so the web enables multi-WebView routing.
       applicationNameForUserAgent={APP_UA_SUFFIX}
-      // Cache: never serve from cache; we also clearCache() on mount.
-      cacheEnabled={false}
+      // Cache: ON. Freshness is enforced *once per launch* — the root clears the
+      // HTTP cache on mount and the cleanup script purges service workers +
+      // CacheStorage — so nothing stale survives a launch. Keeping the HTTP
+      // cache disabled for the whole session instead made every pushed sub-page
+      // re-download the entire SPA bundle over the network, which is what
+      // stretched the blank reveal gap on push (spec §5.B still holds).
+      cacheEnabled
       // Dev builds only: chrome://inspect (Android) / Safari Web Inspector (iOS).
       webviewDebuggingEnabled={__DEV__}
       // Bridge wiring: shims + alert override before content, observers after.
