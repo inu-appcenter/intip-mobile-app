@@ -19,7 +19,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   AppState,
   BackHandler,
@@ -43,6 +42,7 @@ import * as WebBrowser from 'expo-web-browser';
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
 import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
+import { nativeAlert } from '../../modules/intip-native-dialog';
 import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
@@ -443,7 +443,7 @@ export default function WebViewContainer({ url, mode }: Props) {
         registry.updateWebView(id, { path: path || '/' });
       }),
       channel.on('requestAppUpdate', () => {
-        Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
+        nativeAlert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
           { text: STRINGS.appUpdate.cancel, style: 'cancel' },
           {
             text: STRINGS.appUpdate.confirm,
@@ -465,7 +465,8 @@ export default function WebViewContainer({ url, mode }: Props) {
         dismissOverlay();
       }),
       channel.on('jsAlert', (message) => {
-        Alert.alert('', message, [{ text: STRINGS.appUpdate.confirm }]);
+        // Web `alert()` has no title, so this is message-only.
+        nativeAlert('', message, [{ text: STRINGS.common.confirm }]);
       }),
     ];
     return () => {

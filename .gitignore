@@ -49,4 +49,7 @@ example
 /ios
 /android
 
+# gradle output of the local Expo modules (the sources next to it are tracked)
+/modules/*/android/build/
+
 ios_distribution.cer

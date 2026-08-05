@@ -9,13 +9,14 @@
  *          calls `saveDownload`, which hands off to the system DownloadManager
  *          (scoped storage, with a progress notification).
  */
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import ReactNativeBlobUtil from 'react-native-blob-util';
+import { nativeAlert } from '../../modules/intip-native-dialog';
 import { STRINGS } from '../webview/constants';
 import { fileNameFromUrl } from './fileName';
 
 function notifyComplete(): void {
-  Alert.alert(STRINGS.download.title, STRINGS.download.message);
+  nativeAlert(STRINGS.download.title, STRINGS.download.message);
 }
 
 /**

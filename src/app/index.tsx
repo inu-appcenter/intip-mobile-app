@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   BackHandler,
   Platform,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
   View,
 } from 'react-native';
 
+import { nativeAlert } from '../../modules/intip-native-dialog';
 import WebViewContainer from '../components/WebViewContainer';
 import { isConnected } from '../native/network';
 import { ROOT_URL, STRINGS } from '../webview/constants';
@@ -39,7 +39,7 @@ export default function Index() {
       return;
     }
     setStatus('offline');
-    Alert.alert(STRINGS.network.title, STRINGS.network.message, [
+    nativeAlert(STRINGS.network.title, STRINGS.network.message, [
       { text: STRINGS.network.retry, onPress: () => void check() },
       Platform.OS === 'ios'
         ? { text: STRINGS.network.exit, style: 'destructive' }
