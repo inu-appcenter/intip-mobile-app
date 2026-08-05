@@ -30,7 +30,7 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import WebView, {
   type WebViewMessageEvent,
@@ -46,13 +46,13 @@ import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
   STRINGS,
-  isEdgeToEdgePath,
   isMainTabPath,
 } from '../webview/constants';
 import {
   INJECTED_SCRIPT,
   LAUNCH_CLEANUP_SCRIPT,
   buildBridgeShimScript,
+  buildSafeAreaInsetsScript,
 } from '../webview/injectedScript';
 import { relayWebConsoleMessage, WEB_CONSOLE_SCRIPT } from '../webview/webConsole';
 import { clearWebViewCache, clearCacheAndReload } from '../native/cache';
@@ -134,16 +134,23 @@ export default function WebViewContainer({ url, mode }: Props) {
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
   const isRoot = mode === 'root';
-  // Stable for the container's lifetime — `url` never changes after mount, so
-  // this can't flip mid-session and remount the WebView (losing its JS context).
-  const edgeToEdge = useMemo(() => {
-    if (isRoot) return true;
-    try {
-      return isEdgeToEdgePath(new URL(url).pathname);
-    } catch {
-      return false;
-    }
-  }, [isRoot, url]);
+  // Root reserves no inset natively (the web owns all four via
+  // env(safe-area-inset-*) + the injected --native-safe-area-inset-* below).
+  // Sub-pages still let native reserve left/right (notch/landscape), but never
+  // the top — every pushed page now pads its own header itself, the same way
+  // the migrated pages used to (see the insets injection below).
+  const insets = useSafeAreaInsets();
+  // Combined with the static bridge-shim script so the very first paint
+  // already has the native insets available as CSS vars — before content
+  // loads, ahead of the page's own layout. Re-injected live below whenever
+  // insets change (rotation, foldable), since this only re-runs on a fresh
+  // navigation, not a live prop change. `insets` is reference-stable across
+  // no-op re-renders (react-native-safe-area-context only swaps the object
+  // when a value actually changes), so depending on it directly is safe.
+  const beforeContentScript = useMemo(
+    () => BEFORE_CONTENT_SCRIPT + buildSafeAreaInsetsScript(insets),
+    [insets],
+  );
 
   // Connect this container to the WebView orchestrator (shared dev controller).
   const registry = useWebViewRegistry();
@@ -273,6 +280,18 @@ export default function WebViewContainer({ url, mode }: Props) {
     const timeout = setTimeout(dismissOverlay, REVEAL_OVERLAY_TIMEOUT_MS);
     return () => clearTimeout(timeout);
   }, [dismissOverlay, isRoot]);
+
+  // Keep the page's safe-area CSS vars current across an insets change after
+  // the initial load (rotation, foldable fold/unfold). The initial value is
+  // covered by `beforeContentScript` above, so skip the redundant first run.
+  const skipFirstInsetsPushRef = useRef(true);
+  useEffect(() => {
+    if (skipFirstInsetsPushRef.current) {
+      skipFirstInsetsPushRef.current = false;
+      return;
+    }
+    webViewRef.current?.injectJavaScript(buildSafeAreaInsetsScript(insets));
+  }, [insets]);
 
   // --- Orchestrator: register this container + expose its imperative handle --
   useEffect(() => {
@@ -515,7 +534,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       webviewDebuggingEnabled={__DEV__}
       // Bridge wiring: shims + alert override before content, observers after.
       onMessage={onWebViewMessage}
-      injectedJavaScriptBeforeContentLoaded={BEFORE_CONTENT_SCRIPT}
+      injectedJavaScriptBeforeContentLoaded={beforeContentScript}
       injectedJavaScript={INJECTED_SCRIPT}
       onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
       onNavigationStateChange={onNavigationStateChange}
@@ -539,12 +558,15 @@ export default function WebViewContainer({ url, mode }: Props) {
   return (
     // Fill the screen; ignore the bottom inset so content reaches the edge.
     <View style={[styles.fill, { backgroundColor }]}>
-      {edgeToEdge ? (
-        // Root (and sub-pages migrated to own their top inset via
-        // env(safe-area-inset-*)) go fully edge-to-edge; the web owns the insets.
+      {isRoot ? (
+        // Root goes fully edge-to-edge on every side; the web owns all four
+        // insets via env(safe-area-inset-*) / the injected CSS vars above.
         webView
       ) : (
-        <SafeAreaView style={styles.fill} edges={['top', 'left', 'right']}>
+        // Sub-pages keep native left/right (notch/landscape) reservation, but
+        // no longer reserve the top inset — every pushed page pads its own
+        // header itself using the safe-area values injected above.
+        <SafeAreaView style={styles.fill} edges={['left', 'right']}>
           {webView}
         </SafeAreaView>
       )}
