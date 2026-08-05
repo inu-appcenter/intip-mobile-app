@@ -31,6 +31,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useFocusEffect, useRouter } from 'expo-router';
 import WebView, {
   type WebViewMessageEvent,
@@ -88,6 +89,16 @@ const REVEAL_OVERLAY_TIMEOUT_MS = 4000;
 
 /** Cross-fade used to reveal the WebView once its content is ready. */
 const OVERLAY_FADE_MS = 250;
+
+/**
+ * Width (dp) of the band along each screen edge that Android reserves for the
+ * system back gesture. AOSP's inset is 20dp; OEM skins (One UI) can widen it,
+ * so guard slightly more than the platform minimum.
+ */
+const SYSTEM_BACK_GESTURE_EDGE_DP = 24;
+
+/** Travel (dp) that commits a touch to being a swipe rather than a tap. */
+const EDGE_GUARD_SLOP_DP = 8;
 
 /** Bridge shim is platform-specific (see injectedScript.ts). */
 const BRIDGE_SHIM_SCRIPT = buildBridgeShimScript(Platform.OS === 'ios' ? 'ios' : 'android');
@@ -516,6 +527,37 @@ export default function WebViewContainer({ url, mode }: Props) {
   // native stack own the swipe so it pops the screen (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
 
+  // Android's system back gesture starts inside a narrow band at each screen
+  // edge, and the app keeps receiving those touches until SystemUI decides the
+  // swipe really is a back gesture. The WebView acts on them in the meantime:
+  // hold near the edge for the long-press timeout and the page kicks off a text
+  // selection / image drag *while the user is swiping back*, so the content
+  // visibly smears under the transition.
+  //
+  // These two pans live only in that band and deliberately do nothing — the
+  // point is the activation itself, which makes gesture-handler cancel the
+  // touch stream in the WebView underneath, so the long-press never fires. They
+  // only claim the touch once it travels inward horizontally (the direction the
+  // back gesture pulls) and bail on a vertical drag, so tapping and scrolling
+  // near the edge still reach the page exactly as before. A touch that just
+  // rests at the edge never activates them and still long-presses normally —
+  // that mis-grab is rare enough not to be worth blocking.
+  const backGestureGuard = useMemo(() => {
+    const guard = (edge: 'left' | 'right') =>
+      Gesture.Pan()
+        .hitSlop(
+          edge === 'left'
+            ? { left: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP }
+            : { right: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP },
+        )
+        .activeOffsetX(edge === 'left' ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP)
+        .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
+        // iOS has no equivalent problem: the native stack owns the edge swipe
+        // and WKWebView does not start a selection mid-gesture.
+        .enabled(Platform.OS === 'android');
+    return Gesture.Race(guard('left'), guard('right'));
+  }, []);
+
   const webView = (
     <WebView
       ref={webViewRef}
@@ -555,19 +597,29 @@ export default function WebViewContainer({ url, mode }: Props) {
     />
   );
 
+  // The guard wraps the WebView in its own host view rather than attaching to
+  // the WebView directly, so gesture-handler's ref does not fight `webViewRef`.
+  const guardedWebView = (
+    <GestureDetector gesture={backGestureGuard}>
+      <View style={styles.fill} collapsable={false}>
+        {webView}
+      </View>
+    </GestureDetector>
+  );
+
   return (
     // Fill the screen; ignore the bottom inset so content reaches the edge.
     <View style={[styles.fill, { backgroundColor }]}>
       {isRoot ? (
         // Root goes fully edge-to-edge on every side; the web owns all four
         // insets via env(safe-area-inset-*) / the injected CSS vars above.
-        webView
+        guardedWebView
       ) : (
         // Sub-pages keep native left/right (notch/landscape) reservation, but
         // no longer reserve the top inset — every pushed page pads its own
         // header itself using the safe-area values injected above.
         <SafeAreaView style={styles.fill} edges={['left', 'right']}>
-          {webView}
+          {guardedWebView}
         </SafeAreaView>
       )}
 
