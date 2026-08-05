@@ -80,6 +80,10 @@ export function portalUrlFor(path: string): string {
 
 /** Korean dialog copy, carried over verbatim from the native app. */
 export const STRINGS = {
+  /** Button copy for dialogs with nothing app-specific to say (e.g. web `alert()`). */
+  common: {
+    confirm: "확인",
+  },
   appUpdate: {
     title: "화면 업데이트",
     message: "로그인 정보는 유지되며, 최신 화면으로 업데이트를 진행합니다.",

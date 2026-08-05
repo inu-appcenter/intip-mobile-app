@@ -19,7 +19,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   AppState,
   BackHandler,
@@ -32,7 +31,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useNavigationContainerRef, useRouter } from 'expo-router';
 import WebView, {
   type WebViewMessageEvent,
   type WebViewNavigation,
@@ -43,6 +42,7 @@ import * as WebBrowser from 'expo-web-browser';
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
 import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
+import { nativeAlert } from '../../modules/intip-native-dialog';
 import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
@@ -55,6 +55,7 @@ import {
   buildBridgeShimScript,
   buildSafeAreaInsetsScript,
 } from '../webview/injectedScript';
+import { openSubPageDepth } from '../webview/subPageStack';
 import { relayWebConsoleMessage, WEB_CONSOLE_SCRIPT } from '../webview/webConsole';
 import { clearWebViewCache, clearCacheAndReload } from '../native/cache';
 import { saveDownload } from '../native/downloads';
@@ -150,6 +151,9 @@ export default function WebViewContainer({ url, mode }: Props) {
     [bridge, url],
   );
   const router = useRouter();
+  // Read-only access to the live navigation state (push-tap dedupe below).
+  // Stable across renders — expo-router hands out the store's single ref.
+  const navigationRef = useNavigationContainerRef();
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
   const isRoot = mode === 'root';
@@ -252,8 +256,22 @@ export default function WebViewContainer({ url, mode }: Props) {
       if (intent.kind === 'external') {
         WebBrowser.openBrowserAsync(intent.url).catch(() => {});
       } else if (intent.kind === 'push') {
-        // Land ON TOP of whatever is open (don't collapse the user's stack).
-        router.push({ pathname: '/webview', params: { url: intent.url, path: intent.path } });
+        // Land ON TOP of whatever is open (don't collapse the user's stack) —
+        // but never stack a second copy of a page that is already open. Chat
+        // notifications for one room arrive as separate notifications with
+        // separate ids, so `pendingIntent`'s id dedupe doesn't cover this:
+        // without the stack lookup, tapping n of them opened n identical chat
+        // screens the user then had to back out of one by one.
+        const depth = navigationRef.isReady()
+          ? openSubPageDepth(navigationRef.getRootState(), intent.url)
+          : null;
+        if (depth === null) {
+          router.push({ pathname: '/webview', params: { url: intent.url, path: intent.path } });
+        } else if (depth > 0) {
+          // Already open underneath: come back to it instead of duplicating it.
+          router.dismiss(depth);
+        }
+        // depth === 0: it is the top-most screen already — nothing to do.
       } else {
         // spa: a main-tab destination — collapse to root and drive it there.
         // Also queue for the cold-start case where root's SPA hasn't loaded
@@ -262,7 +280,7 @@ export default function WebViewContainer({ url, mode }: Props) {
         pendingNavRef.current = intent.path;
       }
     },
-    [goHome, router],
+    [goHome, navigationRef, router],
   );
 
   // --- Lifecycle: cache + notifications (root only) --------------------------
@@ -425,7 +443,7 @@ export default function WebViewContainer({ url, mode }: Props) {
         registry.updateWebView(id, { path: path || '/' });
       }),
       channel.on('requestAppUpdate', () => {
-        Alert.alert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
+        nativeAlert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
           { text: STRINGS.appUpdate.cancel, style: 'cancel' },
           {
             text: STRINGS.appUpdate.confirm,
@@ -447,7 +465,8 @@ export default function WebViewContainer({ url, mode }: Props) {
         dismissOverlay();
       }),
       channel.on('jsAlert', (message) => {
-        Alert.alert('', message, [{ text: STRINGS.appUpdate.confirm }]);
+        // Web `alert()` has no title, so this is message-only.
+        nativeAlert('', message, [{ text: STRINGS.common.confirm }]);
       }),
     ];
     return () => {

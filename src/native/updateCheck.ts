@@ -3,8 +3,10 @@
  * Runs once per app launch; informs the user if a new version is available
  * and offers to download + reload.
  */
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import * as Updates from 'expo-updates';
+
+import { nativeAlert } from '../../modules/intip-native-dialog';
 
 let checkStarted = false;
 
@@ -29,7 +31,7 @@ export async function checkForUpdate(): Promise<void> {
     if (update.isAvailable === false) return;
 
     // New version found. Prompt the user to download + reload.
-    Alert.alert(
+    nativeAlert(
       '새 버전 업데이트',
       '새 버전이 있습니다. 지금 업데이트 하시겠어요?',
       [
@@ -46,7 +48,7 @@ export async function checkForUpdate(): Promise<void> {
               await Updates.reloadAsync();
             } catch (err) {
               console.error('[update] fetch/reload failed', err);
-              Alert.alert('업데이트 실패', '새 버전을 받을 수 없습니다. 나중에 다시 시도해주세요.');
+              nativeAlert('업데이트 실패', '새 버전을 받을 수 없습니다. 나중에 다시 시도해주세요.');
             }
           },
         },
