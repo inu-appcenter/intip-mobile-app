@@ -113,8 +113,16 @@ export default function WebViewContainer({ url, mode }: Props) {
   const webViewRef = useRef<WebView>(null);
   // PlatformChannel over the single react-native-webview channel. `onMessage`
   // is wired to the WebView prop; Web->Native handlers are registered below.
+  //
+  // The cast below papers over a duplicate-install quirk, not a real type
+  // mismatch: the bridge submodule (packages/intip-bridge) has its own
+  // node_modules/react-native-webview (13.17.0) separate from the app's root
+  // one (13.16.1), so TS resolves two structurally-different `WebView`
+  // classes (their default generic differs: `{}` vs `undefined`) for what is
+  // the exact same runtime ref at build/run time.
+  const nativeChannelRef = webViewRef as unknown as Parameters<typeof createNativeChannel>[0];
   // eslint-disable-next-line react-hooks/refs
-  const bridge = useMemo(() => createNativeChannel(webViewRef), []);
+  const bridge = useMemo(() => createNativeChannel(nativeChannelRef), [nativeChannelRef]);
   // Dev only: peel relayed web console messages off before the bridge channel
   // parses the stream (they're not part of the intip-bridge contract).
   const onWebViewMessage = useCallback(
