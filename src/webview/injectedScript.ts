@@ -13,7 +13,10 @@
  *     - the route observer (`routeChange`), login detection (`loginSuccess`),
  *       and the `window.__intipNavigate` deep-link helper.
  *
- * All scripts are guarded so re-injection is a no-op.
+ * All scripts above are guarded so re-injection is a no-op. Separately,
+ * `buildSafeAreaInsetsScript` is re-injected (imperatively, via
+ * `webViewRef.current.injectJavaScript`) on every insets change — it's a pure
+ * CSS-variable write, so re-running it is always safe.
  */
 
 /**
@@ -196,6 +199,45 @@ export const LAUNCH_CLEANUP_SCRIPT = `
 })();
 true;
 `;
+
+/**
+ * Native safe-area insets (dp), mirrored into the page as CSS custom
+ * properties so it can pad itself without relying solely on the WebView
+ * engine's own `env(safe-area-inset-*)` support (inconsistent on Android).
+ * Every pushed sub-page skips the native top-inset reservation (see
+ * `WebViewContainer`), so the page needs this value to pad its own header.
+ *
+ * Pure property writes, safe to inject repeatedly (initial load + every
+ * insets change, e.g. rotation/foldable) with no re-entrancy guard needed.
+ */
+export function buildSafeAreaInsetsScript(insets: {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}): string {
+  const vars = JSON.stringify({
+    '--native-safe-area-inset-top': `${insets.top}px`,
+    '--native-safe-area-inset-bottom': `${insets.bottom}px`,
+    '--native-safe-area-inset-left': `${insets.left}px`,
+    '--native-safe-area-inset-right': `${insets.right}px`,
+  });
+  return `
+(function () {
+  var vars = ${vars};
+  function apply() {
+    var root = document.documentElement;
+    if (!root) return;
+    for (var k in vars) root.style.setProperty(k, vars[k]);
+  }
+  apply();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', apply, { once: true });
+  }
+})();
+true;
+`;
+}
 
 /** Build the call that hands an FCM token to the web context (Native -> Web). */
 export function buildReceiveFcmTokenScript(token: string): string {

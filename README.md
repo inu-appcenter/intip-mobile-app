@@ -117,6 +117,49 @@ notification → path mapping, download filename derivation):
 npm test
 ```
 
+## Release: OTA first, native builds on demand
+
+`.github/workflows/ci.yml` ships changes in two lanes.
+
+**OTA (EAS Update)** — automatic. Every merge to `main` runs `verify`, then
+publishes an update to the `production` channel. JS and asset changes reach
+users without a store submission.
+
+**Native release** — manual. Run the workflow from the Actions tab and pick a
+`platform` (`android` / `ios` / `both`); the default is `none`, so a dispatch
+publishes an OTA only. Needed whenever native code changes, or whenever
+`expo.version` is bumped.
+
+### Why a version bump forces a native build
+
+`app.json` sets `runtimeVersion.policy: "appVersion"`, so an update only reaches
+installed binaries whose `expo.version` matches the one it was published from.
+Bump `3.0.6` → `3.0.7` and the next OTA reaches **nobody** until a native
+release of `3.0.7` is out. This is the intended safety property, not a bug: it
+is what stops a JS bundle from landing on a binary that lacks the native code
+it expects.
+
+The `ota-publish` job guards this automatically — if `app.json`, `plugins/`, or
+`package.json` changed in the push, it **skips** the publish and says so in the
+job summary and the Discord notification. Re-dispatch with `force_ota` if you
+know the change was JS-only.
+
+### One-time setup
+
+| Secret | Purpose |
+| ------ | ------- |
+| `EXPO_TOKEN` | Robot/personal access token from [expo.dev access tokens](https://expo.dev/settings/access-tokens), for an account with access to `gang_03/intip-mobile-app`. |
+
+The `production` channel already exists and maps to the `production` branch.
+The job re-creates it only if it's missing, which matters because `eas update`
+creates *branches*, never *channels*, while the app requests a channel by name
+(`updates.requestHeaders["expo-channel-name"]`) — an update published with no
+matching channel succeeds and silently reaches no one. To inspect the mapping:
+
+```bash
+eas channel:view production
+```
+
 ## Runtime permissions
 
 - **Notifications** — requested on first launch. On **Android 13+** the

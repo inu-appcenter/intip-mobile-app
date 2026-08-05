@@ -78,24 +78,6 @@ export function portalUrlFor(path: string): string {
   return new URL(path, ROOT_URL).toString();
 }
 
-/**
- * Paths whose page has been migrated to own its top inset itself via
- * `env(safe-area-inset-top)` (see `MobileHeader.tsx`). Instances loading one
- * of these go fully edge-to-edge (native skips the top `SafeAreaView`
- * reservation) instead of the default native-reserved top inset. Root always
- * qualifies regardless of this list; this is for *sub*-pages migrated the
- * same way — currently just the V2 home experience, pushed as a sub since
- * `/home/v2` isn't a main-tab path.
- */
-export const EDGE_TO_EDGE_PATHS = ["/home", "/home/v2"] as const;
-
-/** True when the pathname's page owns its own top inset (see above). */
-export function isEdgeToEdgePath(pathname: string): boolean {
-  return (EDGE_TO_EDGE_PATHS as readonly string[]).includes(
-    normalizePath(pathname),
-  );
-}
-
 /** Korean dialog copy, carried over verbatim from the native app. */
 export const STRINGS = {
   appUpdate: {
