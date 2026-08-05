@@ -92,9 +92,15 @@ jobs:
 
       # An OTA can only carry JS/assets. If a change needs new native code —
       # a config plugin, an app.json native key, a dependency with a native
-      # module — then publishing it to binaries that don't have that code is
-      # how you brick an installed app (the JS calls a module that isn't there,
-      # on every launch, with no way back except a store release).
+      # module, a local Expo module under `modules/` — then publishing it to
+      # binaries that don't have that code is how you brick an installed app
+      # (the JS calls a module that isn't there, on every launch, with no way
+      # back except a store release).
+      #
+      # `modules` earns its place the hard way: PR #9 added
+      # `modules/intip-native-dialog` (Kotlin) without touching any of the
+      # other three paths, so the guard did not fire and only a manually
+      # cancelled run kept that JS off the 3.0.7 binaries.
       #
       # `app.json` also covers the version bump case: bumping `expo.version`
       # moves runtimeVersion, so the update would silently reach nobody.
@@ -127,7 +133,7 @@ jobs:
             BASE="$(git rev-parse HEAD~1)"
           fi
 
-          CHANGED=$(git diff --name-only "$BASE" "$GITHUB_SHA" -- app.json plugins package.json)
+          CHANGED=$(git diff --name-only "$BASE" "$GITHUB_SHA" -- app.json plugins package.json modules)
 
           if [ -n "$CHANGED" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
