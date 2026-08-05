@@ -374,9 +374,11 @@ jobs:
       # Matches the AuthKey_<id>.p8 filename — not itself a secret.
       APP_STORE_CONNECT_KEY_ID: "45D3A26734"
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      # RUNNER_TEMP 아래: GitHub-hosted에서만 존재하는 /Users/runner 를 쓰면
-      # self-hosted에서는 mkdir부터 실패한다. 잡이 끝나면 함께 정리된다.
-      APP_STORE_CONNECT_KEY_PATH: ${{ runner.temp }}/AuthKey_45D3A26734.p8
+      # APP_STORE_CONNECT_KEY_PATH는 여기 둘 수 없다: 잡 레벨 env에서 쓸 수
+      # 있는 컨텍스트는 github/needs/strategy/matrix/vars/secrets/inputs뿐
+      # 이라 `runner.temp`를 참조하면 워크플로 파일 검증 자체가 깨진다.
+      # 아래 "Decode App Store Connect API key"에서 $RUNNER_TEMP로 만들어
+      # $GITHUB_ENV에 실어 이후 스텝에 넘긴다.
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -454,8 +456,14 @@ jobs:
         env:
           APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
         run: |
-          mkdir -p "$(dirname "$APP_STORE_CONNECT_KEY_PATH")"
-          echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode -o "$APP_STORE_CONNECT_KEY_PATH"
+          set -euo pipefail
+
+          # 파일명은 AuthKey_<id>.p8 규칙을 지켜야 한다(xcodebuild가 그렇게 찾는다).
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode -o "$KEY_PATH"
+
+          # 이후 스텝(Archive / Export / Upload / 정리)이 참조한다.
+          echo "APP_STORE_CONNECT_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
       # CODE_SIGN_STYLE=Manual + PROVISIONING_PROFILE_SPECIFIER as command-line
       # overrides apply to *every* target in the workspace, not just the app —
@@ -521,7 +529,8 @@ jobs:
           fi
           security delete-keychain "$RUNNER_TEMP/ios-ci.keychain-db" 2>/dev/null || true
           rm -f GoogleService-Info.plist
-          rm -f "$APP_STORE_CONNECT_KEY_PATH"
+          # 디코드 스텝 전에 실패했다면 비어 있을 수 있다.
+          rm -f "${APP_STORE_CONNECT_KEY_PATH:-}"
           rm -f ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
       - name: Upload IPA
