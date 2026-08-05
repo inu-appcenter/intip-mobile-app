@@ -20,6 +20,18 @@ name: CI
 # 왜 1번이 먼저인가: runtimeVersion 정책이 appVersion이라, version을 올리는
 # 순간 이후의 OTA는 그 버전으로 빌드된 설치본에만 도달한다. 즉 네이티브
 # 코드가 없는 구버전 앱으로 그 코드를 호출하는 JS가 흘러갈 수 없다.
+#
+# ── 러너 ──────────────────────────────────────────────────────────────
+# 모든 잡이 self-hosted 러너(gangbook-air, macOS ARM64) 하나에서 돈다.
+# 이 저장소는 private이라 GitHub-hosted 러너는 분 단위로 과금되고,
+# 특히 macOS는 단가가 10배다 — iOS 빌드 한 번이 무료 분을 크게 깎아먹었다.
+# self-hosted는 실행 시간에 대한 과금이 없다.
+#
+# 대가로 알아둘 것:
+#   - 러너(맥)가 꺼져 있거나 오프라인이면 잡은 실패하지 않고 큐에서 대기한다
+#   - 러너가 하나뿐이라 잡은 순차 실행된다 (Android + iOS면 하나씩)
+#   - 아티팩트 스토리지는 self-hosted로 옮겨도 여전히 GitHub 쿼터를 쓴다
+#     (그래서 retention-days를 짧게 유지할 것)
 # ─────────────────────────────────────────────────────────────────────────
 
 on:
@@ -55,7 +67,7 @@ concurrency:
 jobs:
   verify:
     name: 검증 (lint · 타입체크 · 테스트)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -108,7 +120,7 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.task, 'OTA 발행'))
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       skipped: ${{ steps.native_guard.outputs.changed }}
     steps:
@@ -350,17 +362,21 @@ jobs:
   ios-release:
     name: iOS 릴리스 빌드 (IPA → TestFlight)
     # Manual only — a signed, uploaded release build shouldn't fire on every
-    # PR/push, and macOS runners are far more expensive than Linux ones.
+    # PR/push.
     # "Android + iOS 릴리스 빌드"도 이 조건에 함께 걸린다.
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'iOS')
-    runs-on: macos-26
+    # self-hosted(gangbook-air): GitHub-hosted macOS는 분 단가가 10배라
+    # 이 잡 하나가 무료 분을 다 태웠다. self-hosted는 분 과금이 없다.
+    runs-on: self-hosted
     env:
       # Matches the AuthKey_<id>.p8 filename — not itself a secret.
       APP_STORE_CONNECT_KEY_ID: "45D3A26734"
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      APP_STORE_CONNECT_KEY_PATH: "/Users/runner/.appstoreconnect/private_keys/AuthKey_45D3A26734.p8"
+      # RUNNER_TEMP 아래: GitHub-hosted에서만 존재하는 /Users/runner 를 쓰면
+      # self-hosted에서는 mkdir부터 실패한다. 잡이 끝나면 함께 정리된다.
+      APP_STORE_CONNECT_KEY_PATH: ${{ runner.temp }}/AuthKey_45D3A26734.p8
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -374,11 +390,12 @@ jobs:
           node-version: 20
           cache: npm
 
-      # SDK 56 requires a newer Xcode than some macos-26 images default to.
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      # setup-xcode는 `sudo xcode-select -s`로 머신 전역의 활성 Xcode를 바꾼다.
+      # 매 실행 폐기되는 GitHub-hosted 이미지에서는 무해했지만 self-hosted는
+      # 개인 머신이라 그대로 남는다(게다가 무인 sudo가 필요하다). 설치돼 있는
+      # Xcode를 그대로 쓰고, 버전만 로그에 남겨 실패 시 원인을 알 수 있게 한다.
+      - name: Xcode 버전 확인
+        run: xcodebuild -version
 
       - name: Install dependencies
         run: npm ci
@@ -395,6 +412,11 @@ jobs:
       # keychain scoped to this job (created fresh, deleted at the end).
       # The .p12 / provisioning profile / API key are decoded fresh every
       # run and never written to a cache or artifact.
+      #
+      # self-hosted에서는 이 잡이 개인 머신의 로그인 세션을 건드린다는 점이
+      # 달라진다. 그래서 원래 키체인 검색 목록을 파일로 남겨두고 정리 단계에서
+      # 되돌린다 — 안 그러면 삭제된 CI 키체인이 목록에 남아 Xcode/security가
+      # 매번 없는 키체인을 찾는다.
       - name: Import signing credentials
         env:
           IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
@@ -415,7 +437,10 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security import "$CERT_PATH" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+
+          # 되돌릴 수 있도록 원래 목록을 먼저 저장한 뒤 CI 키체인을 앞에 붙인다.
+          security list-keychains -d user | sed 's/"//g' | xargs > "$RUNNER_TEMP/keychains.before"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(cat "$RUNNER_TEMP/keychains.before")
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
@@ -490,6 +515,10 @@ jobs:
       - name: Clean up keychain and decoded secrets
         if: always()
         run: |
+          # 검색 목록을 CI 키체인 없는 원래 상태로 되돌린 뒤 삭제한다.
+          if [ -s "$RUNNER_TEMP/keychains.before" ]; then
+            security list-keychain -d user -s $(cat "$RUNNER_TEMP/keychains.before") || true
+          fi
           security delete-keychain "$RUNNER_TEMP/ios-ci.keychain-db" 2>/dev/null || true
           rm -f GoogleService-Info.plist
           rm -f "$APP_STORE_CONNECT_KEY_PATH"
@@ -512,7 +541,7 @@ jobs:
         (github.event_name == 'push' && github.ref == 'refs/heads/main')
       )
     needs: [verify, ota-publish, android-release, ios-release]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Send Discord notification
         env:
