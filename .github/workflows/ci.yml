@@ -1,24 +1,49 @@
 name: CI
 
+# ─────────────────────────────────────────────────────────────────────────
+# 언제 무엇이 도는가
+#
+#   PR 올림      →  검증만 (lint · 타입체크 · 테스트)
+#   main 머지    →  검증 → OTA 자동 발행
+#                   단, 네이티브가 바뀐 머지면 가드가 OTA를 막는다
+#   수동 실행    →  아래 "실행할 작업" 드롭다운에서 고른 것만
+#
+# OTA(EAS Update)가 실어 나를 수 있는 건 JS 번들과 에셋뿐이다. Kotlin/Swift,
+# 네이티브 의존성, app.json의 네이티브 키, modules/ 아래 로컬 Expo 모듈이
+# 바뀌었다면 스토어 릴리스 빌드를 돌려야 한다.
+#
+# 네이티브를 바꿨을 때의 순서:
+#   1. app.json의 version(+ android.versionCode)을 올린다
+#   2. 수동 실행 → "Android/iOS 릴리스 빌드"
+#   3. 스토어 배포가 끝난 뒤부터 그 버전 대상 OTA가 다시 의미를 갖는다
+#
+# 왜 1번이 먼저인가: runtimeVersion 정책이 appVersion이라, version을 올리는
+# 순간 이후의 OTA는 그 버전으로 빌드된 설치본에만 도달한다. 즉 네이티브
+# 코드가 없는 구버전 앱으로 그 코드를 호출하는 JS가 흘러갈 수 없다.
+# ─────────────────────────────────────────────────────────────────────────
+
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
-      platform:
-        description: Native release build to run (none = OTA only)
+      # 선택지 문자열 앞쪽 단어로 각 잡의 실행 여부를 판정한다(아래 if 참고).
+      # 설명을 뒤에 붙여둔 건 드롭다운에 값이 그대로 보이기 때문 — 여기서
+      # 무엇을 고르는지 알 수 있어야 한다.
+      task:
+        description: "실행할 작업"
         required: true
         type: choice
-        options: [none, android, ios, both]
-        default: none
-      publish_ota:
-        description: Publish an EAS Update to the production channel
-        required: false
-        type: boolean
-        default: true
+        default: "OTA 발행 · JS·에셋만 바뀐 경우 — 설치된 앱에 즉시 반영"
+        options:
+          - "OTA 발행 · JS·에셋만 바뀐 경우 — 설치된 앱에 즉시 반영"
+          - "Android 릴리스 빌드 · 네이티브가 바뀐 경우 — 서명된 AAB·APK"
+          - "iOS 릴리스 빌드 · 네이티브가 바뀐 경우 — TestFlight 업로드"
+          - "Android + iOS 릴리스 빌드 · 둘 다"
+          - "검증만 · lint·타입체크·테스트"
       force_ota:
-        description: Publish even if native-affecting files changed (see ota-publish guard)
+        description: "⚠️ 네이티브 변경이 감지돼도 OTA를 강제 발행 (평소엔 끄세요)"
         required: false
         type: boolean
         default: false
@@ -29,6 +54,7 @@ concurrency:
 
 jobs:
   verify:
+    name: 검증 (lint · 타입체크 · 테스트)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (with intip-bridge submodule)
@@ -61,6 +87,7 @@ jobs:
         run: npm test -- --ci
 
   ota-publish:
+    name: OTA 발행 (EAS Update → production)
     # OTA first: every merge to main ships as an EAS Update, so a JS-only fix
     # reaches users without a store round-trip. Native release builds stay
     # manual (workflow_dispatch) and are only needed when something *native*
@@ -74,9 +101,12 @@ jobs:
     # until a native release ships that version.
     # `needs: verify` already gates this on a green lint/typecheck/test run —
     # a failing job skips its dependents regardless of this condition.
+    #
+    # 수동 실행에서 릴리스 빌드를 고르면 OTA는 돌지 않는다: 네이티브를 바꾼
+    # 상황이라 version이 올라가 있고, 그 OTA는 어차피 아무에게도 닿지 않는다.
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && inputs.publish_ota)
+      (github.event_name == 'workflow_dispatch' && startsWith(inputs.task, 'OTA 발행'))
     needs: verify
     runs-on: ubuntu-latest
     outputs:
@@ -120,7 +150,11 @@ jobs:
 
           if [ "$FORCED" = "true" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ force_ota — native-change guard bypassed." >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo "## ⚠️ 네이티브 변경 가드 우회됨"
+              echo
+              echo "\`force_ota\`가 켜진 채로 실행돼 네이티브 변경 검사를 건너뛰고 발행합니다."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -138,16 +172,25 @@ jobs:
           if [ -n "$CHANGED" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             {
-              echo "## ⏭️ OTA 발행 건너뜀"
+              echo "## ⏭️ OTA를 발행하지 않았습니다"
               echo
-              echo "네이티브 빌드에 영향을 주는 파일이 \`$BASE\`..\`$GITHUB_SHA\` 범위에서 변경됐습니다:"
+              echo "네이티브 빌드에 영향을 주는 파일이 \`$BASE\`..\`$GITHUB_SHA\` 범위에서 바뀌었습니다:"
               echo
               echo '```'
               echo "$CHANGED"
               echo '```'
               echo
-              echo "JS 변경만이라면 **Run workflow → force_ota** 로 다시 발행하세요."
-              echo "네이티브 변경이라면 \`app.json\`의 \`version\`을 올리고 네이티브 릴리스 빌드를 돌려야 합니다."
+              echo "OTA는 JS와 에셋만 실어 나릅니다. 위 변경을 담은 JS를 그대로 발행하면"
+              echo "그 네이티브 코드가 없는 설치본이 매 실행마다 없는 모듈을 호출하게 됩니다."
+              echo
+              echo "### 다음에 할 일"
+              echo
+              echo "**네이티브가 실제로 바뀐 경우** — 스토어 배포가 필요합니다."
+              echo "1. \`app.json\`의 \`version\`(과 \`android.versionCode\`)을 올려 커밋"
+              echo "2. **Run workflow → 실행할 작업: \`Android/iOS 릴리스 빌드\`**"
+              echo
+              echo "**JS만 바뀌었는데 경로에 걸린 경우**(예: \`modules/\` 안의 .ts만 수정)"
+              echo "— **Run workflow → 실행할 작업: \`OTA 발행\` + \`force_ota\` 체크** 로 발행하세요."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -219,6 +262,7 @@ jobs:
             echo "| 메세지 | $MESSAGE |"
             echo
             echo "이 업데이트는 \`version\` 이 \`$RUNTIME_VERSION\` 인 설치본에만 도달합니다."
+            echo "그 버전의 스토어 배포가 아직 안 나갔다면, 지금은 아무에게도 닿지 않습니다."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove decoded secrets
@@ -226,10 +270,12 @@ jobs:
         run: rm -f google-services.json GoogleService-Info.plist
 
   android-release:
+    name: Android 릴리스 빌드 (AAB · APK)
     # Manual only — a signed release build shouldn't fire on every PR/push.
+    # "Android + iOS 릴리스 빌드"도 이 조건에 함께 걸린다.
     if: |
       github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.platform == 'android' || github.event.inputs.platform == 'both')
+      contains(inputs.task, 'Android')
     runs-on: self-hosted
     steps:
       - name: Checkout (with intip-bridge submodule)
@@ -302,11 +348,13 @@ jobs:
           retention-days: 14
 
   ios-release:
+    name: iOS 릴리스 빌드 (IPA → TestFlight)
     # Manual only — a signed, uploaded release build shouldn't fire on every
     # PR/push, and macOS runners are far more expensive than Linux ones.
+    # "Android + iOS 릴리스 빌드"도 이 조건에 함께 걸린다.
     if: |
       github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'both')
+      contains(inputs.task, 'iOS')
     runs-on: macos-26
     env:
       # Matches the AuthKey_<id>.p8 filename — not itself a secret.
@@ -455,6 +503,7 @@ jobs:
           retention-days: 14
 
   notify-discord:
+    name: Discord 알림
     # Manual releases, plus every OTA publish on main (which is now the normal
     # way a change reaches users, so it's worth announcing).
     if: |
@@ -479,7 +528,8 @@ jobs:
           COMMIT_MSG: ${{ github.event.head_commit.message || github.sha }}
           ACTOR: ${{ github.actor }}
           REF_NAME: ${{ github.ref_name }}
-          PLATFORM_INPUT: ${{ inputs.platform || 'none' }}
+          # 수동 실행이면 고른 작업, main 머지면 자동 OTA 경로.
+          TASK_INPUT: ${{ inputs.task || 'main 머지 → 자동 OTA' }}
         run: |
           if [ -z "$DISCORD_WEBHOOK" ]; then
             echo "DISCORD_WEBHOOK secret is not set. Skipping Discord notification."
@@ -551,8 +601,8 @@ jobs:
                     "inline": true
                   },
                   {
-                    "name": "📌 요청 플랫폼",
-                    "value": "${PLATFORM_INPUT}",
+                    "name": "📌 실행한 작업",
+                    "value": "${TASK_INPUT}",
                     "inline": true
                   },
                   {

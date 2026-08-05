@@ -125,10 +125,20 @@ npm test
 publishes an update to the `production` channel. JS and asset changes reach
 users without a store submission.
 
-**Native release** — manual. Run the workflow from the Actions tab and pick a
-`platform` (`android` / `ios` / `both`); the default is `none`, so a dispatch
-publishes an OTA only. Needed whenever native code changes, or whenever
-`expo.version` is bumped.
+**Native release** — manual. Run the workflow from the Actions tab and pick one
+entry from the **실행할 작업** dropdown:
+
+| 실행할 작업 | Runs |
+| ----------- | ---- |
+| `OTA 발행 · JS·에셋만 바뀐 경우` (default) | `verify` → `ota-publish` |
+| `Android 릴리스 빌드 · 네이티브가 바뀐 경우` | `android-release` (signed AAB + APK artifacts) |
+| `iOS 릴리스 빌드 · 네이티브가 바뀐 경우` | `ios-release` (IPA → TestFlight) |
+| `Android + iOS 릴리스 빌드 · 둘 다` | both release jobs |
+| `검증만 · lint·타입체크·테스트` | `verify` only |
+
+Picking a release build does **not** also publish an OTA: a native change means
+`expo.version` has been bumped, so that update would reach nobody anyway (see
+below). `verify` runs on every dispatch regardless of the choice.
 
 ### Why a version bump forces a native build
 
@@ -139,10 +149,11 @@ release of `3.0.7` is out. This is the intended safety property, not a bug: it
 is what stops a JS bundle from landing on a binary that lacks the native code
 it expects.
 
-The `ota-publish` job guards this automatically — if `app.json`, `plugins/`, or
-`package.json` changed in the push, it **skips** the publish and says so in the
-job summary and the Discord notification. Re-dispatch with `force_ota` if you
-know the change was JS-only.
+The `ota-publish` job guards this automatically — if `app.json`, `plugins/`,
+`package.json`, or `modules/` (local Expo modules) changed in the push, it
+**skips** the publish and says so in the job summary and the Discord
+notification. Re-dispatch with `force_ota` if you know the change was JS-only
+(e.g. only the `.ts` side of a module under `modules/`).
 
 ### One-time setup
 
