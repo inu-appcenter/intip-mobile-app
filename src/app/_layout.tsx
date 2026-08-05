@@ -45,14 +45,31 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ gestureEnabled: false }} />
           {/* Sub-pages pushed by `navigateTo`: slide in from the right and allow
               the native swipe-back gesture to pop the screen (spec §3.C).
-              `ios_from_right` forces the iOS-style "new screen covers the old
-              one" card animation on Android too — plain `slide_from_right`
-              maps to Android's native transition, which translates both
-              screens together instead of covering. */}
+
+              `default` is deliberate, and on Android it is the cheap option as
+              well as the native-feeling one. How far the *outgoing* screen
+              travels decides the cost here: it holds a live WebView, and RNS
+              refuses to put a screen containing one into a hardware layer
+              (Screen.kt `hasWebView`), because Android WebView draws to its own
+              surface and renders blank when snapshotted into a parent layer. So
+              the outgoing page is genuinely re-rasterized on every frame of the
+              transition, and its travel distance is the frame budget.
+
+              Measured from RNS's own animation resources:
+                ios_from_right    -30%   (previous value; iOS parallax)
+                slide_from_right -100%   (tried before, rejected — worst)
+                default           -10%   with alpha pinned at 1.0
+
+              On API 33+ `default` also resolves to the Material 3 transition
+              (res/v33: `fast_out_extra_slow_in` + `extend`), which is what One
+              UI's stack animation is built on — so it reads as the new screen
+              *covering* the old one rather than shoving it aside. Below API 33
+              `default` is a zoom/fade instead; that is acceptable, and no
+              supported device we ship to is on it. */}
           <Stack.Screen
             name="webview"
             options={{
-              animation: 'ios_from_right',
+              animation: 'default',
               gestureEnabled: true,
               fullScreenGestureEnabled: true,
             }}
