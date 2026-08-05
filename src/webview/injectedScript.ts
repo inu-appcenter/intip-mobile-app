@@ -67,16 +67,30 @@ export function buildBridgeShimScript(platform: 'android' | 'ios'): string {
   // native accessor — adding properties to it (`mh.navigateTo = …`) is silently
   // dropped even though it reports `isExtensible: true`. So we cannot extend it.
   // Instead we rebuild `window.webkit` as a plain object whose `messageHandlers`
-  // keeps react-native-webview's own `ReactNativeWebView` handler (the single
-  // real native channel that `post()` ultimately flows through) and adds the
-  // INTIP bridge handlers the web frontend calls.
+  // adds the INTIP bridge handlers the web frontend calls.
+  //
+  // The rebuild MUST keep the original `messageHandlers` reachable, hence
+  // `Object.create(__nativeMH)`: own properties are the INTIP handlers, and any
+  // other lookup falls through to the real native accessor.
+  //
+  // react-native-webview registers TWO native handlers, not one:
+  // `ReactNativeWebView` (postMessage) and `ReactNativeHistoryShim`. The latter
+  // is used by RNW's own document-start user script, which patches
+  // history.pushState/replaceState and does
+  //   window.webkit.messageHandlers.ReactNativeHistoryShim.postMessage(type)
+  // on every history operation (that is how RNW detects SPA navigation and fires
+  // onLoadingFinish). A plain object that copied only `ReactNativeWebView` hid it,
+  // so every SPA navigation threw a TypeError inside RNW's injected script —
+  // reported by WebKit as a bare "Script error." with no file/stack (injected code
+  // has no script origin), and RNW's SPA navigation callback silently stopped
+  // firing. Keep the prototype link so both handlers stay reachable.
   const iosShim = `
     var __nativeMH = (window.webkit && window.webkit.messageHandlers) || {};
     function makeHandler(type, transform) {
       return { postMessage: function (body) { post(type, transform ? transform(body) : body); } };
     }
     window.webkit = {
-      messageHandlers: {
+      messageHandlers: Object.assign(Object.create(__nativeMH), {
         ReactNativeWebView: __nativeMH.ReactNativeWebView,
         navigateTo: makeHandler('navigateTo', function (b) {
           b = b || {};
@@ -89,7 +103,7 @@ export function buildBridgeShimScript(platform: 'android' | 'ios'): string {
         requestPermissionSettings: makeHandler('requestPermissionSettings'),
         logWebDiagnostics: makeHandler('logWebDiagnostics', function (b) { return b == null ? '' : String(b); }),
         onLaunchWebCleanupFinished: makeHandler('onLaunchWebCleanupFinished', function (b) { return b == null ? '' : String(b); })
-      }
+      })
     };
   `;
 
