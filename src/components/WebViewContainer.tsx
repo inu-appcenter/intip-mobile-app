@@ -605,6 +605,7 @@ export default function WebViewContainer({ url, mode }: Props) {
 
   const webView = (
     <WebView
+      hideKeyboardAccessoryView
       ref={webViewRef}
       source={{ uri: url }}
       style={[styles.fill, { backgroundColor }]}
