@@ -472,8 +472,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 파일명은 AuthKey_<id>.p8 규칙을 지켜야 한다(altool이 그렇게 찾는다).
-          KEY_PATH="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          # xcodebuild -authenticationKeyPath와 달리 altool --apiKey는 경로를
+          # 안 받는다 — AuthKey_<id>.p8이라는 파일명으로 고정된 몇몇 위치
+          # (~/private_keys 등)에서만 찾는다. $RUNNER_TEMP에 둬선 못 찾는다.
+          KEY_DIR="$HOME/private_keys"
+          mkdir -p "$KEY_DIR"
+          KEY_PATH="$KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode -o "$KEY_PATH"
 
           # 정리 스텝이 참조한다.
