@@ -102,6 +102,17 @@ const SYSTEM_BACK_GESTURE_EDGE_DP = 24;
 /** Travel (dp) that commits a touch to being a swipe rather than a tap. */
 const EDGE_GUARD_SLOP_DP = 8;
 
+/**
+ * Camera/location permission priming happens at most once per app session —
+ * module-scoped, not per `WebViewContainer` instance. `INJECTED_SCRIPT` posts
+ * `loginSuccess` unconditionally on every page load whenever a token is
+ * already in localStorage (not just on a fresh login), so every freshly
+ * pushed sub-page's own `loginSuccess` handler would otherwise re-prime on
+ * its first load — surfacing as a permission dialog popping up out of
+ * nowhere when entering e.g. the timetable edit page.
+ */
+let permissionsPrimed = false;
+
 /** Bridge shim is platform-specific (see injectedScript.ts). */
 const BRIDGE_SHIM_SCRIPT = buildBridgeShimScript(Platform.OS === 'ios' ? 'ios' : 'android');
 
@@ -184,7 +195,6 @@ export default function WebViewContainer({ url, mode }: Props) {
   const canGoBackRef = useRef(false);
   const lastBackPressRef = useRef(0);
   const pendingNavRef = useRef<string | null>(null);
-  const permissionsPrimedRef = useRef(false);
   const cleanupStartedRef = useRef(false);
   // Dev controller "load full URL": the URL a developer asked to load in place.
   // Lets `onShouldStartLoadWithRequest` allow that one navigation even off-portal
@@ -203,12 +213,19 @@ export default function WebViewContainer({ url, mode }: Props) {
   const [overlayOpacity] = useState(() => new Animated.Value(1));
   const overlayDismissedRef = useRef(false);
 
-  // Prime camera (photo upload) + location (campus map) once logged in.
+  // Prime camera (photo upload) + location (campus map) once logged in, at
+  // most once per app session (see `permissionsPrimed` above). Requested
+  // sequentially — firing both `request()` calls concurrently races two
+  // system permission dialogs, and the OS auto-dismisses/cancels one of
+  // them, which then silently re-requests later. Await each one before
+  // starting the next.
   const primeWebPermissions = useCallback(() => {
-    if (permissionsPrimedRef.current) return;
-    permissionsPrimedRef.current = true;
-    void ensureCameraPermission();
-    void ensureLocationPermission();
+    if (permissionsPrimed) return;
+    permissionsPrimed = true;
+    void (async () => {
+      await ensureCameraPermission();
+      await ensureLocationPermission();
+    })();
   }, []);
 
   // --- Native -> Web helpers -------------------------------------------------
