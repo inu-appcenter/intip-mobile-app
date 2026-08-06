@@ -10,3 +10,6 @@ export const BACKGROUND_COLORS = {
 export function backgroundColorFor(scheme: string | null | undefined): string {
   return scheme === 'dark' ? BACKGROUND_COLORS.dark : BACKGROUND_COLORS.light;
 }
+
+/** Loading-indicator tint shown over the background color above. */
+export const INDICATOR_COLOR = '#8E8E93';

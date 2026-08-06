@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   AppState,
   BackHandler,
@@ -69,7 +70,7 @@ import {
   type NavIntent,
 } from '../push/messaging';
 import { flushPendingFcmToken } from '../push/fcmTokenSync';
-import { backgroundColorFor } from '../theme';
+import { backgroundColorFor, INDICATOR_COLOR } from '../theme';
 import {
   nextWebViewSeq,
   useWebViewRegistry,
@@ -654,7 +655,9 @@ export default function WebViewContainer({ url, mode }: Props) {
         <Animated.View
           pointerEvents="none"
           style={[styles.overlay, { backgroundColor, opacity: overlayOpacity }]}
-        />
+        >
+          <ActivityIndicator size="large" color={INDICATOR_COLOR} />
+        </Animated.View>
       )}
     </View>
   );
@@ -662,5 +665,13 @@ export default function WebViewContainer({ url, mode }: Props) {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
