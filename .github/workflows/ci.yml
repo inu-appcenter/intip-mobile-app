@@ -407,9 +407,11 @@ jobs:
       - name: Decode GoogleService-Info.plist
         run: echo "${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}" | base64 --decode -o GoogleService-Info.plist
 
-      - name: Prebuild (ios)
-        run: npx expo prebuild --platform ios
-
+      # Prebuild보다 먼저 와야 한다 — withIOSManualSigning 플러그인이
+      # IOS_PROVISIONING_PROFILE_NAME을 prebuild 시점 process.env에서 읽어
+      # INTIP 타깃(Release만)을 Manual 서명으로 고정한다. 순서가 바뀌면
+      # 플러그인이 그냥 조용히 no-op으로 지나가고 다시 Automatic으로 빌드된다.
+      #
       # Everything below builds and signs the archive using a throwaway
       # keychain scoped to this job (created fresh, deleted at the end).
       # The .p12 / provisioning profile / API key are decoded fresh every
@@ -448,29 +450,39 @@ jobs:
           mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
           cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
-      # Decoded here (not just in the upload step) because xcodebuild also
-      # needs it below: -allowProvisioningUpdates has it talk to App Store
-      # Connect directly to resolve/renew the provisioning profile, instead
-      # of us pinning PROVISIONING_PROFILE_SPECIFIER on the command line.
+          # withIOSManualSigning이 PROVISIONING_PROFILE_SPECIFIER로 쓸 수 있게
+          # 프로파일 자체에 박힌 표시 이름(Name)을 꺼낸다 — 파일명
+          # (INTIP.mobileprovision)이 아니라 이 Name으로 Xcode가 매칭한다.
+          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/profile.plist")
+          if [ -z "$PROFILE_NAME" ]; then
+            echo "::error::프로비저닝 프로파일에서 Name을 못 읽었다 — IOS_PROVISIONING_PROFILE_BASE64 확인 필요"
+            exit 1
+          fi
+          echo "IOS_PROVISIONING_PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+
+      - name: Prebuild (ios)
+        run: npx expo prebuild --platform ios
+
+      # Manual 서명으로 고정했으니 xcodebuild가 Apple과 통신할 이유가 없다 —
+      # 이 키는 마지막 "Upload to App Store Connect"(altool)에서만 쓰인다.
       - name: Decode App Store Connect API key
         env:
           APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
         run: |
           set -euo pipefail
 
-          # 파일명은 AuthKey_<id>.p8 규칙을 지켜야 한다(xcodebuild가 그렇게 찾는다).
+          # 파일명은 AuthKey_<id>.p8 규칙을 지켜야 한다(altool이 그렇게 찾는다).
           KEY_PATH="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode -o "$KEY_PATH"
 
-          # 이후 스텝(Archive / Export / Upload / 정리)이 참조한다.
+          # 정리 스텝이 참조한다.
           echo "APP_STORE_CONNECT_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
-      # CODE_SIGN_STYLE=Manual + PROVISIONING_PROFILE_SPECIFIER as command-line
-      # overrides apply to *every* target in the workspace, not just the app —
-      # including CocoaPods' framework/library targets, which can't carry a
-      # provisioning profile at all and fail with "does not support
-      # provisioning profiles". -allowProvisioningUpdates (automatic signing,
-      # authenticated via the API key) only touches the actual app target.
+      # -allowProvisioningUpdates 없음: withIOSManualSigning이 prebuild 때
+      # 이미 INTIP 타깃(Release)을 Manual + 위에서 넣은 프로파일/인증서로
+      # 고정했다. Xcode가 서명을 스스로 관리하지 않으니 인증서를 새로 만들
+      # 일도, 그래서 계정 인증서 한도를 채울 일도 없다.
       - name: Archive
         working-directory: ios
         run: |
@@ -479,16 +491,11 @@ jobs:
             -scheme INTIP \
             -configuration Release \
             -archivePath "$RUNNER_TEMP/INTIP.xcarchive" \
-            -destination "generic/platform=iOS" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
-            DEVELOPMENT_TEAM=AANGG4Q668
+            -destination "generic/platform=iOS"
 
       - name: Export IPA
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<'EOF'
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -498,7 +505,14 @@ jobs:
             <key>teamID</key>
             <string>AANGG4Q668</string>
             <key>signingStyle</key>
-            <string>automatic</string>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>iPhone Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>kr.inuappcenter.intip</key>
+              <string>${IOS_PROVISIONING_PROFILE_NAME}</string>
+            </dict>
           </dict>
           </plist>
           EOF
@@ -506,11 +520,7 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/INTIP.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
       - name: Upload to App Store Connect
         run: |
@@ -531,6 +541,7 @@ jobs:
           rm -f GoogleService-Info.plist
           # 디코드 스텝 전에 실패했다면 비어 있을 수 있다.
           rm -f "${APP_STORE_CONNECT_KEY_PATH:-}"
+          rm -f "$RUNNER_TEMP/profile.plist"
           rm -f ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
       - name: Upload IPA
