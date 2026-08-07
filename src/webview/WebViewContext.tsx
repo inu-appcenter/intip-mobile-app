@@ -35,7 +35,6 @@ import {
 import { readSnapshot, writeSnapshot } from './sessionStore';
 import { onNativeTokenRefresh } from '../native/authTokens';
 import type { TokenInfo } from '../native/secureTokenStore';
-import type { BroadcastSyncPayload } from '../../packages/intip-bridge/src/messages';
 
 /** A live entry in the native stack, as tracked by the orchestrator. */
 export type WebViewEntry = {
@@ -60,8 +59,6 @@ export type WebViewHandle = {
   refreshFcmToken: () => void;
   /** Push a native-initiated token refresh result into this container's web page. */
   sendTokenInfo: (tokenInfo: TokenInfo) => void;
-  /** Deliver a relayed multi-WebView state-sync snapshot into this container's web page. */
-  sendBroadcastSync: (message: BroadcastSyncPayload) => void;
 };
 
 /** Native-stack navigation, registered by the root container (owns the router). */
@@ -95,15 +92,6 @@ export type WebViewRegistry = {
    * WebView (root + pushed subs), so the web store/localStorage stays in
    * sync with whatever the native shell just refreshed on its own. */
   broadcastTokenInfo: (tokenInfo: TokenInfo) => void;
-  /**
-   * Relay a web-originated state-sync snapshot (zustand store / query cache)
-   * to every OTHER mounted WebView, excluding the one that sent it. This is
-   * the native-bridge fallback/second path for the web's BroadcastChannel
-   * sync — needed because BroadcastChannel has no global on WKWebView below
-   * iOS 15.4, and its cross-instance delivery on WebKit has been reported as
-   * unreliable even on newer versions.
-   */
-  relayBroadcastSync: (message: BroadcastSyncPayload, senderId: string) => void;
 };
 
 /** Reactive controller API consumed by the dev menu + controller panel. */
@@ -198,11 +186,6 @@ export function WebViewProvider({ children }: { children: ReactNode }) {
       },
       broadcastTokenInfo(tokenInfo) {
         for (const handle of handlesRef.current.values()) handle.sendTokenInfo(tokenInfo);
-      },
-      relayBroadcastSync(message, senderId) {
-        for (const [id, handle] of handlesRef.current) {
-          if (id !== senderId) handle.sendBroadcastSync(message);
-        }
       },
     }),
     [],
