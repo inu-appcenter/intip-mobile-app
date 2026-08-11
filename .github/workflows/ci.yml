@@ -7,6 +7,13 @@ name: CI
 #   main 머지    →  검증 → OTA 자동 발행
 #                   단, 네이티브가 바뀐 머지면 가드가 OTA를 막는다
 #   수동 실행    →  아래 "실행할 작업" 드롭다운에서 고른 것만
+#                   ("Android only release" / "iOS only release" /
+#                   "Android + iOS release"만 고르면 검증(verify)은
+#                   스킵된다 — 그 커밋은 이미 push/PR 때 검증을 통과했을
+#                   것이므로, 느린 검증 컨테이너를 릴리스 때 다시 띄우지
+#                   않는다. 검증이 릴리스 job을 막는 게이트는 아니라는
+#                   뜻이기도 하다 — 릴리스 전엔 별도로 "Verify only"를 먼저
+#                   돌려 확인하는 걸 권장)
 #
 # OTA(EAS Update)가 실어 나를 수 있는 건 JS 번들과 에셋뿐이다. Kotlin/Swift,
 # 네이티브 의존성, app.json의 네이티브 키, modules/ 아래 로컬 Expo 모듈이
@@ -14,7 +21,7 @@ name: CI
 #
 # 네이티브를 바꿨을 때의 순서:
 #   1. app.json의 version(+ android.versionCode)을 올린다
-#   2. 수동 실행 → "Android/iOS 릴리스 빌드"
+#   2. 수동 실행 → "Android only release" / "iOS only release"
 #   3. 스토어 배포가 끝난 뒤부터 그 버전 대상 OTA가 다시 의미를 갖는다
 #
 # 왜 1번이 먼저인가: runtimeVersion 정책이 appVersion이라, version을 올리는
@@ -40,34 +47,52 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      # 선택지 문자열 앞쪽 단어로 각 잡의 실행 여부를 판정한다(아래 if 참고).
-      # 설명을 뒤에 붙여둔 건 드롭다운에 값이 그대로 보이기 때문 — 여기서
-      # 무엇을 고르는지 알 수 있어야 한다.
+      # GitHub UI 드롭다운에 이 문자열이 그대로 노출되니 짧게 유지한다. 각
+      # 잡의 if는 이 문자열 앞부분(startsWith/contains)으로 실행 여부를
+      # 판정하므로(아래 참고), 값을 바꿀 땐 그 참조도 같이 맞춰야 한다.
       task:
         description: "실행할 작업"
         required: true
         type: choice
-        default: "OTA 발행 · JS·에셋만 바뀐 경우 — 설치된 앱에 즉시 반영"
+        default: "OTA publish"
         options:
-          - "OTA 발행 · JS·에셋만 바뀐 경우 — 설치된 앱에 즉시 반영"
-          - "Android 릴리스 빌드 · 네이티브가 바뀐 경우 — 서명된 AAB·APK"
-          - "iOS 릴리스 빌드 · 네이티브가 바뀐 경우 — TestFlight 업로드"
-          - "Android + iOS 릴리스 빌드 · 둘 다"
-          - "검증만 · lint·타입체크·테스트"
+          - "OTA publish"
+          - "Android only release"
+          - "iOS only release"
+          - "Android + iOS release"
+          - "Verify only"
       force_ota:
         description: "⚠️ 네이티브 변경이 감지돼도 OTA를 강제 발행 (평소엔 끄세요)"
         required: false
         type: boolean
         default: false
 
+# 수동 실행(workflow_dispatch)은 run_id를 섞어 항상 자기 혼자만의 그룹이 된다.
+# 안 그러면 main에 push된 자동 파이프라인(검증→OTA)이 도는 중에 수동으로
+# 릴리스 빌드나 검증만을 걸었을 때, 같은 ref를 대상으로 하는 두 실행이
+# cancel-in-progress로 서로를 취소시킨다. push/PR 쪽은 그대로 ref 단위로
+# 묶어 최신 커밋만 살아남게 둔다(원래 의도).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: >-
+    ci-${{ github.workflow }}-${{ github.ref }}-${{
+      github.event_name == 'workflow_dispatch' && github.run_id || ''
+    }}
   cancel-in-progress: true
 
 jobs:
   verify:
     name: 검증 (lint · 타입체크 · 테스트)
     runs-on: self-hosted
+    # push/PR은 항상 돈다. 수동 실행은 "OTA publish"(→ 아래 needs: verify로
+    # 실제 게이트가 됨)이나 "Verify only"를 골랐을 때만 돈다 — "Android only
+    # release" / "iOS only release" / "Android + iOS release"만 고른 경우엔
+    # 스킵한다: 그 커밋은 이미 push/PR 시점에 검증을 통과했고, 이 job의
+    # 결과가 릴리스 job을 막지도 않으니(아래 참고) 느린 컨테이너를 다시
+    # 띄워 lint·tsc·test를 반복할 이유가 없다.
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      startsWith(inputs.task, 'OTA publish') ||
+      startsWith(inputs.task, 'Verify only')
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -118,7 +143,7 @@ jobs:
     # 상황이라 version이 올라가 있고, 그 OTA는 어차피 아무에게도 닿지 않는다.
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && startsWith(inputs.task, 'OTA 발행'))
+      (github.event_name == 'workflow_dispatch' && startsWith(inputs.task, 'OTA publish'))
     needs: verify
     runs-on: self-hosted
     outputs:
@@ -199,10 +224,10 @@ jobs:
               echo
               echo "**네이티브가 실제로 바뀐 경우** — 스토어 배포가 필요합니다."
               echo "1. \`app.json\`의 \`version\`(과 \`android.versionCode\`)을 올려 커밋"
-              echo "2. **Run workflow → 실행할 작업: \`Android/iOS 릴리스 빌드\`**"
+              echo "2. **Run workflow → 실행할 작업: \`Android only release\` / \`iOS only release\`**"
               echo
               echo "**JS만 바뀌었는데 경로에 걸린 경우**(예: \`modules/\` 안의 .ts만 수정)"
-              echo "— **Run workflow → 실행할 작업: \`OTA 발행\` + \`force_ota\` 체크** 로 발행하세요."
+              echo "— **Run workflow → 실행할 작업: \`OTA publish\` + \`force_ota\` 체크** 로 발행하세요."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -284,7 +309,7 @@ jobs:
   android-release:
     name: Android 릴리스 빌드 (AAB · APK)
     # Manual only — a signed release build shouldn't fire on every PR/push.
-    # "Android + iOS 릴리스 빌드"도 이 조건에 함께 걸린다.
+    # "Android + iOS release"도 이 조건에 함께 걸린다.
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'Android')
@@ -363,7 +388,7 @@ jobs:
     name: iOS 릴리스 빌드 (IPA → TestFlight)
     # Manual only — a signed, uploaded release build shouldn't fire on every
     # PR/push.
-    # "Android + iOS 릴리스 빌드"도 이 조건에 함께 걸린다.
+    # "Android + iOS release"도 이 조건에 함께 걸린다.
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'iOS')
