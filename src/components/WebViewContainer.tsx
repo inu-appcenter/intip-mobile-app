@@ -39,6 +39,7 @@ import WebView, {
 } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import * as WebBrowser from 'expo-web-browser';
+import { useShareIntentContext } from 'expo-share-intent';
 
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
@@ -70,6 +71,7 @@ import {
   type NavIntent,
 } from '../push/messaging';
 import { flushPendingFcmToken } from '../push/fcmTokenSync';
+import { resolveGradeShareIntent } from '../share/gradeShareIntent';
 import { backgroundColorFor, INDICATOR_COLOR } from '../theme';
 import {
   nextWebViewSeq,
@@ -268,7 +270,9 @@ export default function WebViewContainer({ url, mode }: Props) {
     registry.driveRoot(path);
   }, [registry, router]);
 
-  // Push-notification tap / cold-start routing (root only).
+  // Nav-intent routing (root only): push-notification tap / cold-start, and
+  // (below) an incoming OS Share Sheet grade-import. Both resolve to the same
+  // `NavIntent` union, so they share this one dispatcher.
   const handleNavIntent = useCallback(
     (intent: NavIntent) => {
       if (intent.kind === 'external') {
@@ -300,6 +304,22 @@ export default function WebViewContainer({ url, mode }: Props) {
     },
     [goHome, navigationRef, router],
   );
+
+  // OS Share Sheet grade-import (Android only for now — app.json's
+  // `disableIOS` skips building the iOS share extension, so `hasShareIntent`
+  // never turns true there). The hook itself resolves both a cold-start
+  // launch (app opened via the share) and a live share while already
+  // running, so — unlike push notifications — there's no separate
+  // `getInitial…` to poll here.
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+  useEffect(() => {
+    if (!isRoot || !hasShareIntent) return;
+    const intent = resolveGradeShareIntent(shareIntent);
+    // Consume it either way — a share with nothing usable (e.g. blank text)
+    // shouldn't be re-offered on the next render.
+    resetShareIntent();
+    if (intent) handleNavIntent(intent);
+  }, [handleNavIntent, hasShareIntent, isRoot, resetShareIntent, shareIntent]);
 
   // --- Lifecycle: cache + notifications (root only) --------------------------
   useEffect(() => {
