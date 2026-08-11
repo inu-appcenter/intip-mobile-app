@@ -43,8 +43,18 @@ export default function RootLayout() {
           {/* Root portal: main tabs live here via SPA routing. Swipe-back is
               disabled so it never conflicts with the bottom tab navigation. */}
           <Stack.Screen name="index" options={{ gestureEnabled: false }} />
-          {/* Sub-pages pushed by `navigateTo`: slide in from the right and allow
-              the native swipe-back gesture to pop the screen (spec §3.C).
+          {/* Sub-pages pushed by `navigateTo`: slide in from the right.
+
+              Swipe-back is off on BOTH platforms. The edge gesture pops a screen
+              natively, without ever consulting the page inside it, so it closed
+              the whole sub-page while the web only wanted its `pushState`-backed
+              modal closed (issue #15). Android's edge swipe *is* the system back,
+              so leaving it native would also make it disagree with the hardware
+              button, which now delegates to the page (`checkBack` in
+              WebViewContainer); `predictiveBackGestureEnabled` is off in app.json
+              for the same reason, so the gesture reaches `BackHandler`. On iOS
+              there is no hardware button, so back is the web header's own back
+              button (which asks the page first and falls back to `goBack`).
 
               `default` is deliberate, and on Android it is the cheap option as
               well as the native-feeling one. How far the *outgoing* screen
@@ -70,8 +80,7 @@ export default function RootLayout() {
             name="webview"
             options={{
               animation: 'default',
-              gestureEnabled: true,
-              fullScreenGestureEnabled: true,
+              gestureEnabled: false,
             }}
           />
         </Stack>
