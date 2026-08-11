@@ -10,6 +10,10 @@
     "ios": {
       "bundleIdentifier": "kr.inuappcenter.intip",
       "supportsTablet": true,
+      "associatedDomains": [
+        "applinks:intip.inuappcenter.kr",
+        "applinks:intip-test.pages.dev"
+      ],
       "googleServicesFile": "./GoogleService-Info.plist",
       "entitlements": {
         "aps-environment": "production"
@@ -35,6 +39,23 @@
         "foregroundImage": "./assets/images/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": true,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "intip.inuappcenter.kr"
+            },
+            {
+              "scheme": "https",
+              "host": "intip-test.pages.dev"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.POST_NOTIFICATIONS",
