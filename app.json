@@ -11,12 +11,12 @@
       "bundleIdentifier": "kr.inuappcenter.intip",
       "supportsTablet": true,
       "googleServicesFile": "./GoogleService-Info.plist",
+      "associatedDomains": [
+        "applinks:intip.inuappcenter.kr",
+        "applinks:intip-test.pages.dev"
+      ],
       "entitlements": {
-        "aps-environment": "production",
-        "com.apple.developer.associated-domains": [
-          "applinks:intip-test.pages.dev",
-          "applinks:intip.inuappcenter.kr"
-        ]
+        "aps-environment": "production"
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
