@@ -87,7 +87,7 @@ concurrency:
 jobs:
   verify:
     name: 검증 (lint · 타입체크 · 테스트)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     # push/PR은 항상 돈다. 수동 실행은 "OTA publish"(→ 아래 needs: verify로
     # 실제 게이트가 됨)이나 "Verify only"를 골랐을 때만 돈다 — "Android only
     # release" / "iOS only release" / "Android + iOS release"만 고른 경우엔
@@ -150,7 +150,7 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.task, 'OTA publish'))
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       skipped: ${{ steps.native_guard.outputs.changed }}
     steps:
@@ -318,7 +318,7 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'Android')
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -400,7 +400,7 @@ jobs:
     # TEMP: self-hosted(gangbook-air)가 오프라인이라 macos-26으로 임시 전환
     # (335cbe4 이전 값). GitHub-hosted macOS는 분 단가가 10배라 이 잡 하나가
     # 무료 분을 크게 깎아먹는다 — 러너가 돌아오면 self-hosted로 되돌릴 것.
-    runs-on: macos-26
+    runs-on: self-hosted
     env:
       # Matches the AuthKey_<id>.p8 filename — not itself a secret.
       APP_STORE_CONNECT_KEY_ID: "45D3A26734"
@@ -608,7 +608,7 @@ jobs:
         (github.event_name == 'push' && github.ref == 'refs/heads/main')
       )
     needs: [verify, ota-publish, android-release, ios-release]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Send Discord notification
         env:
