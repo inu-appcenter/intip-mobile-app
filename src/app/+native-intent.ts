@@ -17,7 +17,13 @@
 import { resolveDeepLink } from '../links/deepLink';
 import { deliver } from '../push/pendingIntent';
 
-export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
+export function redirectSystemPath({
+  path,
+  initial,
+}: {
+  path: string;
+  initial: boolean;
+}): string {
   // Expo Router's own warning: never throw in here — a crash on this path
   // takes down app launch. `path` is not guaranteed to be a URL or even a
   // path, so every step is defensive and falls back to "not our link".
