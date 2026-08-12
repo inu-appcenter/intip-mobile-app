@@ -24,10 +24,10 @@
           "remote-notification",
           "fetch"
         ],
-        "NSCameraUsageDescription": "이 앱은 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
-        "NSPhotoLibraryUsageDescription": "이 앱은 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
-        "NSPhotoLibraryAddUsageDescription": "이 앱은 촬영한 사진을 저장하기 위해 사진첩 접근 권한이 필요합니다.",
-        "NSLocationWhenInUseUsageDescription": "캠퍼스맵 내 위치 표시를 위해 위치 권한이 필요합니다."
+        "NSCameraUsageDescription": "게시판 및 채팅 업로드용 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
+        "NSPhotoLibraryUsageDescription": "게시판 및 채팅 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
+        "NSPhotoLibraryAddUsageDescription": "촬영한 사진을 저장하기 위해 사진첩 접근 권한이 필요합니다.",
+        "NSLocationWhenInUseUsageDescription": "캠퍼스맵 내 위치 표시 및 주변친구 찾기 기능을 위해 위치 권한이 필요합니다."
       }
     },
     "android": {
