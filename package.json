@@ -1,7 +1,7 @@
 {
   "name": "intip-mobile-app",
   "main": "expo-router/entry",
-  "version": "3.0.9",
+  "version": "3.0.10",
   "dependencies": {
     "@expo/ui": "~56.0.18",
     "@notifee/react-native": "^9.1.8",
