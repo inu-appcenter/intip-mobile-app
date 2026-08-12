@@ -504,11 +504,11 @@ jobs:
 
           import_profile IOS_PROVISIONING_PROFILE_BASE64 INTIP.mobileprovision IOS_PROVISIONING_PROFILE_NAME
 
-      - name: Prebuild (ios)
-        run: npx expo prebuild --platform ios
-
-      # Manual 서명으로 고정했으니 xcodebuild가 Apple과 통신할 이유가 없다 —
-      # 이 키는 마지막 "Upload to App Store Connect"(altool)에서만 쓰인다.
+      # Prebuild보다 먼저 옮겨왔다 — 원래는 "이 키는 업로드에서만 쓰인다"는
+      # 이유로 Archive 직전에 있었지만, 이제 바로 아래 "다음 buildNumber
+      # 계산" 스텝이 prebuild보다 먼저 App Store Connect API를 호출해야
+      # 해서 키가 그보다 먼저 필요해졌다. 정리 스텝은 여전히
+      # APP_STORE_CONNECT_KEY_PATH를 참조한다.
       - name: Decode App Store Connect API key
         env:
           APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
@@ -525,6 +525,19 @@ jobs:
 
           # 정리 스텝이 참조한다.
           echo "APP_STORE_CONNECT_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      # App Store Connect에 이미 올라간 최대 buildNumber+1을 계산해 prebuild에
+      # 넘긴다 — app.json의 ios.buildNumber를 커밋마다 손으로 올리지 않아도
+      # -19232/DUPLICATE가 나지 않게 하기 위함. app.config.js가 이 환경변수를
+      # app.json의 값보다 우선한다.
+      - name: Compute next iOS build number
+        run: |
+          set -euo pipefail
+          NEXT_BUILD_NUMBER=$(node scripts/ios-next-build-number.js)
+          echo "EXPO_IOS_BUILD_NUMBER=$NEXT_BUILD_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Prebuild (ios)
+        run: npx expo prebuild --platform ios
 
       # -allowProvisioningUpdates 없음: withIOSManualSigning이 prebuild 때
       # 이미 INTIP 타깃(Release)을 Manual + 위에서 넣은 프로파일/인증서로
