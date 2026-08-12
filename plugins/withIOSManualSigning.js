@@ -1,6 +1,7 @@
 /**
- * Pins the INTIP app target (Release config only) to manual code signing
- * instead of Xcode's automatic signing.
+ * Pins app targets (Release config only) to manual code signing instead of
+ * Xcode's automatic signing — the INTIP app target, and (if present) the
+ * expo-share-intent `ShareExtension` app-extension target.
  *
  * Why this exists: the CI Archive step used to pass `-allowProvisioningUpdates`
  * so Xcode would resolve/create the signing identity itself via the App Store
@@ -20,50 +21,78 @@
  * of this — Automatic signing ignores them. This plugin makes the target use
  * them instead, so no certificate ever gets created at build time.
  *
+ * `ShareExtension` needs the exact same treatment: expo-share-intent's own
+ * plugin (`node_modules/expo-share-intent/plugin/build/ios/
+ * withIosShareExtensionXcodeTarget.js`) hardcodes that target's
+ * `CODE_SIGN_STYLE` to `Automatic` when it creates it, which would reproduce
+ * CI#53 for that target specifically if left alone. This plugin must run
+ * *after* expo-share-intent's own `withXcodeProject` mod creates the target —
+ * which means this plugin must come *before* `expo-share-intent` in
+ * `app.json`'s `plugins` array. Counter-intuitively, mods of the same type
+ * (`withXcodeProject` here) execute in the *reverse* of plugin-array order —
+ * each later entry wraps around the earlier ones and runs first (see
+ * `@expo/config-plugins`' `withBaseMod`/`nextMod` chaining, and Expo's own
+ * "add last to run first" convention for dangerous mods, same mechanism:
+ * https://docs.expo.dev/config-plugins/development-and-debugging/). So being
+ * earlier in the array is what makes this plugin run later, after the target
+ * exists.
+ *
  * `ios/` is gitignored and rebuilt by `expo prebuild` every time, so
  * hand-editing the Xcode project doesn't stick — same reasoning as
  * `withAndroidReleaseSigning.js` for the Android side.
  *
- * Activation: only when `IOS_PROVISIONING_PROFILE_NAME` is set in the
- * environment at prebuild time (CI decodes the profile and extracts its
- * `Name` before running `expo prebuild --platform ios` — see
- * `.github/workflows/ci.yml`, "Import signing credentials"). Without it this
- * plugin is a no-op, so local `expo prebuild` / `expo run:ios` is unaffected
- * and keeps using Xcode's normal Automatic signing.
+ * Activation: per target, only when its profile-name env var is set at
+ * prebuild time (CI decodes each profile and extracts its `Name` before
+ * running `expo prebuild --platform ios` — see `.github/workflows/ci.yml`,
+ * "Import signing credentials"). A target whose env var isn't set is left
+ * alone — e.g. local `expo prebuild` / `expo run:ios` sets neither, so both
+ * targets keep using Xcode's normal Automatic signing. `ShareExtension` not
+ * existing in the project at all (e.g. expo-share-intent's `disableIOS` is
+ * back on) is likewise a silent no-op for that target.
  */
 const { withXcodeProject } = require("expo/config-plugins");
 
-const TARGET_NAME = "INTIP";
 const BUILD_CONFIG = "Release";
+const TARGETS = [
+  { name: "INTIP", profileNameEnvVar: "IOS_PROVISIONING_PROFILE_NAME" },
+  { name: "ShareExtension", profileNameEnvVar: "IOS_SHARE_EXTENSION_PROVISIONING_PROFILE_NAME" },
+];
 
 module.exports = function withIOSManualSigning(config) {
   return withXcodeProject(config, (cfg) => {
-    const profileName = process.env.IOS_PROVISIONING_PROFILE_NAME;
-    if (!profileName) {
-      return cfg;
-    }
+    const proj = cfg.modResults;
     const team = process.env.IOS_DEVELOPMENT_TEAM || "AANGG4Q668";
 
-    const proj = cfg.modResults;
-    proj.updateBuildProperty("CODE_SIGN_STYLE", "Manual", BUILD_CONFIG, TARGET_NAME);
-    proj.updateBuildProperty(
-      "PROVISIONING_PROFILE_SPECIFIER",
-      `"${profileName}"`,
-      BUILD_CONFIG,
-      TARGET_NAME,
-    );
-    // "iPhone Distribution" is the generic identity string Xcode has always
-    // matched against — it resolves to whichever cert is actually installed,
-    // old-style "iPhone Distribution: ..." or the current "Apple
-    // Distribution: ...", so this doesn't need to know which one the
-    // imported .p12 actually contains.
-    proj.updateBuildProperty(
-      "CODE_SIGN_IDENTITY",
-      '"iPhone Distribution"',
-      BUILD_CONFIG,
-      TARGET_NAME,
-    );
-    proj.updateBuildProperty("DEVELOPMENT_TEAM", team, BUILD_CONFIG, TARGET_NAME);
+    for (const { name: targetName, profileNameEnvVar } of TARGETS) {
+      const profileName = process.env[profileNameEnvVar];
+      if (!profileName) {
+        continue;
+      }
+      if (!proj.pbxTargetByName(targetName)) {
+        // e.g. ShareExtension when expo-share-intent's disableIOS is on.
+        continue;
+      }
+
+      proj.updateBuildProperty("CODE_SIGN_STYLE", "Manual", BUILD_CONFIG, targetName);
+      proj.updateBuildProperty(
+        "PROVISIONING_PROFILE_SPECIFIER",
+        `"${profileName}"`,
+        BUILD_CONFIG,
+        targetName,
+      );
+      // "iPhone Distribution" is the generic identity string Xcode has always
+      // matched against — it resolves to whichever cert is actually installed,
+      // old-style "iPhone Distribution: ..." or the current "Apple
+      // Distribution: ...", so this doesn't need to know which one the
+      // imported .p12 actually contains.
+      proj.updateBuildProperty(
+        "CODE_SIGN_IDENTITY",
+        '"iPhone Distribution"',
+        BUILD_CONFIG,
+        targetName,
+      );
+      proj.updateBuildProperty("DEVELOPMENT_TEAM", team, BUILD_CONFIG, targetName);
+    }
 
     return cfg;
   });
