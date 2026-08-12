@@ -30,8 +30,14 @@ function isAllowedExternalHost(host: string): boolean {
  * *original* candidate (query string intact) — `isMainTabPath` normalizes its
  * own copy internally for the main-tab check only, it never truncates the
  * value we hand back.
+ *
+ * Exported because deep links (`src/links/deepLink.ts`) land on the same
+ * decision: a portal path is either a main tab the root WebView routes to
+ * itself, or a sub-page that gets its own native screen. Both entry points
+ * must answer that question identically, so they share this one function
+ * rather than each reimplementing the `isMainTabPath` branch.
  */
-function intentForPortalPath(path: string): NavIntent {
+export function intentForPortalPath(path: string): NavIntent {
   if (isMainTabPath(path)) return { kind: 'spa', path };
   return { kind: 'push', path, url: portalUrlFor(path) };
 }

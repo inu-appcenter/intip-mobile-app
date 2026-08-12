@@ -25,6 +25,40 @@ export const PORTAL_HOST = "intip-test.pages.dev";
 export const PUSH_EXTERNAL_HOSTS = ["inu.ac.kr"] as const;
 
 /**
+ * Hosts whose https links this app claims as deep links (iOS Universal Links /
+ * Android App Links). Both hosts serve the same portal — test and production —
+ * and a link can be shared from either, so both are claimed.
+ *
+ * Must stay in sync with `app.json` (`ios.associatedDomains`,
+ * `android.intentFilters`) and with the domain-association files the web repo
+ * serves (`inu-portal-web`, `public/app-links/`). The native side decides
+ * *whether* the app opens at all; this list is what the JS side then trusts.
+ */
+export const DEEP_LINK_HOSTS = [
+  "intip.inuappcenter.kr",
+  "intip-test.pages.dev",
+] as const;
+
+/**
+ * Portal paths a deep link must never route into the app shell.
+ *
+ * These are static pages the store listings and external sites link to
+ * (privacy policy / terms) plus the domain-association files themselves.
+ * iOS honours the matching `exclude` rules in the web's
+ * `apple-app-site-association` and never hands them to us — but Android app
+ * links match at host granularity (intent filters can only *include* paths),
+ * so on Android the app does get opened for them and has to hand them back to
+ * a browser itself. Keep this list and the AASA `exclude` components equal.
+ */
+export const DEEP_LINK_EXCLUDED_PATHS = [
+  "/privacy-policy.html",
+  "/terms-of-use.html",
+] as const;
+
+/** Prefix form of the same exclusion (everything under `/.well-known/`). */
+export const DEEP_LINK_EXCLUDED_PREFIXES = ["/.well-known/"] as const;
+
+/**
  * Suffix appended to the WebView User-Agent so the web frontend detects the
  * official app and switches to the multi-WebView routing protocol (spec §2.A).
  * The WebView's `applicationNameForUserAgent` joins it with a single space,
