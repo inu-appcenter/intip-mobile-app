@@ -12,7 +12,11 @@
       "supportsTablet": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "entitlements": {
-        "aps-environment": "production"
+        "aps-environment": "production",
+        "com.apple.developer.associated-domains": [
+          "applinks:intip-test.pages.dev",
+          "applinks:intip.inuappcenter.kr"
+        ]
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
