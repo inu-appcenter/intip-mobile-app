@@ -64,6 +64,16 @@
       "./plugins/withAndroidReleaseSigning",
       "./plugins/withIOSManualSigning",
       [
+        "expo-share-intent",
+        {
+          "disableIOS": true,
+          "androidIntentFilters": ["text/*"],
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true
+          }
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "ios": {

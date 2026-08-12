@@ -456,11 +456,9 @@ jobs:
           set -euo pipefail
 
           CERT_PATH="$RUNNER_TEMP/ios_distribution.p12"
-          PROFILE_PATH="$RUNNER_TEMP/INTIP.mobileprovision"
           KEYCHAIN_PATH="$RUNNER_TEMP/ios-ci.keychain-db"
 
           echo -n "$IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64" | base64 --decode -o "$CERT_PATH"
-          echo -n "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PROFILE_PATH"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -473,18 +471,32 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
-          cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
           # withIOSManualSigning이 PROVISIONING_PROFILE_SPECIFIER로 쓸 수 있게
-          # 프로파일 자체에 박힌 표시 이름(Name)을 꺼낸다 — 파일명
-          # (INTIP.mobileprovision)이 아니라 이 Name으로 Xcode가 매칭한다.
-          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
-          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/profile.plist")
-          if [ -z "$PROFILE_NAME" ]; then
-            echo "::error::프로비저닝 프로파일에서 Name을 못 읽었다 — IOS_PROVISIONING_PROFILE_BASE64 확인 필요"
-            exit 1
-          fi
-          echo "IOS_PROVISIONING_PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          # 프로파일 자체에 박힌 표시 이름(Name)을 꺼낸다 — 파일명이 아니라 이
+          # Name으로 Xcode가 매칭한다.
+          import_profile() {
+            local base64_var_name="$1" install_filename="$2" profile_name_env_var="$3"
+            local base64_value="${!base64_var_name}"
+            if [ -z "$base64_value" ]; then
+              echo "::error::$base64_var_name 시크릿이 비어 있다"
+              exit 1
+            fi
+            local profile_path="$RUNNER_TEMP/$install_filename"
+            echo -n "$base64_value" | base64 --decode -o "$profile_path"
+            cp "$profile_path" ~/Library/MobileDevice/"Provisioning Profiles"/"$install_filename"
+
+            security cms -D -i "$profile_path" > "$RUNNER_TEMP/${install_filename}.plist"
+            local profile_name
+            profile_name=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/${install_filename}.plist")
+            if [ -z "$profile_name" ]; then
+              echo "::error::$install_filename 에서 Name을 못 읽었다 — $base64_var_name 확인 필요"
+              exit 1
+            fi
+            echo "$profile_name_env_var=$profile_name" >> "$GITHUB_ENV"
+          }
+
+          import_profile IOS_PROVISIONING_PROFILE_BASE64 INTIP.mobileprovision IOS_PROVISIONING_PROFILE_NAME
 
       - name: Prebuild (ios)
         run: npx expo prebuild --platform ios
@@ -570,7 +582,7 @@ jobs:
           rm -f GoogleService-Info.plist
           # 디코드 스텝 전에 실패했다면 비어 있을 수 있다.
           rm -f "${APP_STORE_CONNECT_KEY_PATH:-}"
-          rm -f "$RUNNER_TEMP/profile.plist"
+          rm -f "$RUNNER_TEMP/INTIP.mobileprovision.plist"
           rm -f ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
       - name: Upload IPA
