@@ -39,6 +39,11 @@ name: CI
 #   - 러너가 하나뿐이라 잡은 순차 실행된다 (Android + iOS면 하나씩)
 #   - 아티팩트 스토리지는 self-hosted로 옮겨도 여전히 GitHub 쿼터를 쓴다
 #     (그래서 retention-days를 짧게 유지할 것)
+#
+# TEMP(2026-08-12): gangbook-air가 오프라인이라 모든 잡을 GitHub-hosted로
+# 임시 전환(verify/ota-publish/android-release/notify-discord →
+# ubuntu-latest, ios-release → macos-26, 335cbe4 이전 값 그대로). 러너가
+# 다시 온라인이 되면 각 잡의 `runs-on: self-hosted`로 되돌릴 것.
 # ─────────────────────────────────────────────────────────────────────────
 
 on:
@@ -82,7 +87,7 @@ concurrency:
 jobs:
   verify:
     name: 검증 (lint · 타입체크 · 테스트)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     # push/PR은 항상 돈다. 수동 실행은 "OTA publish"(→ 아래 needs: verify로
     # 실제 게이트가 됨)이나 "Verify only"를 골랐을 때만 돈다 — "Android only
     # release" / "iOS only release" / "Android + iOS release"만 고른 경우엔
@@ -145,7 +150,7 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.task, 'OTA publish'))
     needs: verify
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       skipped: ${{ steps.native_guard.outputs.changed }}
     steps:
@@ -313,7 +318,7 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'Android')
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -392,9 +397,10 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'iOS')
-    # self-hosted(gangbook-air): GitHub-hosted macOS는 분 단가가 10배라
-    # 이 잡 하나가 무료 분을 다 태웠다. self-hosted는 분 과금이 없다.
-    runs-on: self-hosted
+    # TEMP: self-hosted(gangbook-air)가 오프라인이라 macos-26으로 임시 전환
+    # (335cbe4 이전 값). GitHub-hosted macOS는 분 단가가 10배라 이 잡 하나가
+    # 무료 분을 크게 깎아먹는다 — 러너가 돌아오면 self-hosted로 되돌릴 것.
+    runs-on: macos-26
     env:
       # Matches the AuthKey_<id>.p8 filename — not itself a secret.
       APP_STORE_CONNECT_KEY_ID: "45D3A26734"
@@ -602,7 +608,7 @@ jobs:
         (github.event_name == 'push' && github.ref == 'refs/heads/main')
       )
     needs: [verify, ota-publish, android-release, ios-release]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Send Discord notification
         env:
