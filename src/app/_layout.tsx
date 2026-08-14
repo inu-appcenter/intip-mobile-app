@@ -34,6 +34,7 @@ export default function RootLayout() {
     // (the dev controller panel) work; native-stack transitions/swipe-back are
     // handled natively by react-native-screens and don't depend on it.
     <GestureHandlerRootView style={{ flex: 1 }}>
+
       {/* Must wrap everything else (per expo-share-intent's own docs) so the
           native module's deep-link-triggered cold start is caught before any
           other provider mounts. Android only for now — the plugin config
@@ -41,43 +42,20 @@ export default function RootLayout() {
       <ShareIntentProvider>
         {/* WebViewProvider orchestrates every WebView container (root + pushed
             sub-pages) and backs the debug controller (dev menu + panel). */}
-        <WebViewProvider>
-          <StatusBar style="auto" />
-          <Stack
-            screenOptions={{ headerShown: false, contentStyle: { backgroundColor: contentBackgroundColor } }}
-          >
-            {/* Root portal: main tabs live here via SPA routing. Swipe-back is
-                disabled so it never conflicts with the bottom tab navigation. */}
-            <Stack.Screen name="index" options={{ gestureEnabled: false }} />
-            {/* Sub-pages pushed by `navigateTo`: slide in from the right and allow
-                the native swipe-back gesture to pop the screen (spec §3.C).
-
-                `default` is deliberate, and on Android it is the cheap option as
-                well as the native-feeling one. How far the *outgoing* screen
-                travels decides the cost here: it holds a live WebView, and RNS
-                refuses to put a screen containing one into a hardware layer
-                (Screen.kt `hasWebView`), because Android WebView draws to its own
-                surface and renders blank when snapshotted into a parent layer. So
-                the outgoing page is genuinely re-rasterized on every frame of the
-                transition, and its travel distance is the frame budget.
-
-                Measured from RNS's own animation resources:
-                  ios_from_right    -30%   (previous value; iOS parallax)
-                  slide_from_right -100%   (tried before, rejected — worst)
-                  default           -10%   with alpha pinned at 1.0
-
-                On API 33+ `default` also resolves to the Material 3 transition
-                (res/v33: `fast_out_extra_slow_in` + `extend`), which is what One
-                UI's stack animation is built on — so it reads as the new screen
-                *covering* the old one rather than shoving it aside. Below API 33
-                `default` is a zoom/fade instead; that is acceptable, and no
-                supported device we ship to is on it. */}
+              <WebViewProvider>
+        <StatusBar style="auto" />
+        <Stack
+          screenOptions={{ headerShown: false, contentStyle: { backgroundColor: contentBackgroundColor } }}
+        >
+          {/* Root portal: main tabs live here via SPA routing. Swipe-back is
+              disabled so it never conflicts with the bottom tab navigation. */}
+          <Stack.Screen name="index" options={{ gestureEnabled: false }} />
             <Stack.Screen
               name="webview"
               options={{
                 animation: 'default',
                 gestureEnabled: true,
-                fullScreenGestureEnabled: true,
+
               }}
             />
           </Stack>
