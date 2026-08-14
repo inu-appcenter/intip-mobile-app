@@ -11,13 +11,38 @@
  *
  *  2. At document end (`injectedJavaScript`):
  *     - the route observer (`routeChange`), login detection (`loginSuccess`),
- *       and the `window.__intipNavigate` deep-link helper.
+ *       a lazy geolocation-permission priming ping (`GEO_REQUEST_MARKER`), and
+ *       the `window.__intipNavigate` deep-link helper.
  *
  * All scripts above are guarded so re-injection is a no-op. Separately,
  * `buildSafeAreaInsetsScript` is re-injected (imperatively, via
  * `webViewRef.current.injectJavaScript`) on every insets change — it's a pure
  * CSS-variable write, so re-running it is always safe.
  */
+
+/**
+ * Out-of-band marker for a lazy location-permission-priming ping. Deliberately
+ * NOT an `@inu-appcenter/intip-bridge` event (see `webConsole.ts`'s
+ * `WEB_CONSOLE_MARKER` for the same reasoning): it's a native-only signal, so
+ * adding it to the bridge contract would force a cross-repo schema bump for
+ * something the web side never needs to know about. Intercepted (and
+ * swallowed) in `WebViewContainer`'s `onMessage` before the channel sees it.
+ */
+export const GEO_REQUEST_MARKER = '__intipGeoRequested';
+
+/**
+ * True when `raw` is the geolocation-priming ping posted by the patch
+ * installed in `INJECTED_SCRIPT` below.
+ */
+export function isGeoPermissionRequest(raw: string): boolean {
+  if (!raw.includes(GEO_REQUEST_MARKER)) return false;
+  try {
+    const data = JSON.parse(raw);
+    return typeof data === 'object' && data !== null && GEO_REQUEST_MARKER in data;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Shared `post()` helper source — reused by every injected script fragment.
@@ -158,6 +183,34 @@ export const INJECTED_SCRIPT = `
   try {
     if (window.localStorage && localStorage.getItem('tokenInfo')) {
       post('loginSuccess', 'ok');
+    }
+  } catch (e) {}
+
+  // --- lazy location-permission priming --------------------------------------
+  // iOS WKWebView's geolocation runs on the app's own CoreLocation
+  // authorization and won't prompt for it itself (unlike camera/mic, which
+  // both WKWebView and Android WebView prompt for on demand — see
+  // native/permissions.ts). Rather than ask for location up front on every
+  // login, ping native the moment a page actually calls the geolocation API,
+  // so the OS permission dialog only ever appears on a page that genuinely
+  // needs it.
+  try {
+    if (navigator.geolocation) {
+      var origGetCurrentPosition = navigator.geolocation.getCurrentPosition.bind(navigator.geolocation);
+      var origWatchPosition = navigator.geolocation.watchPosition.bind(navigator.geolocation);
+      var notifyGeoRequested = function () {
+        try {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ '${GEO_REQUEST_MARKER}': true }));
+        } catch (e) {}
+      };
+      navigator.geolocation.getCurrentPosition = function () {
+        notifyGeoRequested();
+        return origGetCurrentPosition.apply(navigator.geolocation, arguments);
+      };
+      navigator.geolocation.watchPosition = function () {
+        notifyGeoRequested();
+        return origWatchPosition.apply(navigator.geolocation, arguments);
+      };
     }
   } catch (e) {}
 

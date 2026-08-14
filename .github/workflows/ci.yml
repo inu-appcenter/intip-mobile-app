@@ -39,6 +39,11 @@ name: CI
 #   - 러너가 하나뿐이라 잡은 순차 실행된다 (Android + iOS면 하나씩)
 #   - 아티팩트 스토리지는 self-hosted로 옮겨도 여전히 GitHub 쿼터를 쓴다
 #     (그래서 retention-days를 짧게 유지할 것)
+#
+# TEMP(2026-08-12): gangbook-air가 오프라인이라 모든 잡을 GitHub-hosted로
+# 임시 전환(verify/ota-publish/android-release/notify-discord →
+# ubuntu-latest, ios-release → macos-26, 335cbe4 이전 값 그대로). 러너가
+# 다시 온라인이 되면 각 잡의 `runs-on: self-hosted`로 되돌릴 것.
 # ─────────────────────────────────────────────────────────────────────────
 
 on:
@@ -392,8 +397,9 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'iOS')
-    # self-hosted(gangbook-air): GitHub-hosted macOS는 분 단가가 10배라
-    # 이 잡 하나가 무료 분을 다 태웠다. self-hosted는 분 과금이 없다.
+    # TEMP: self-hosted(gangbook-air)가 오프라인이라 macos-26으로 임시 전환
+    # (335cbe4 이전 값). GitHub-hosted macOS는 분 단가가 10배라 이 잡 하나가
+    # 무료 분을 크게 깎아먹는다 — 러너가 돌아오면 self-hosted로 되돌릴 것.
     runs-on: self-hosted
     env:
       # Matches the AuthKey_<id>.p8 filename — not itself a secret.
@@ -456,11 +462,9 @@ jobs:
           set -euo pipefail
 
           CERT_PATH="$RUNNER_TEMP/ios_distribution.p12"
-          PROFILE_PATH="$RUNNER_TEMP/INTIP.mobileprovision"
           KEYCHAIN_PATH="$RUNNER_TEMP/ios-ci.keychain-db"
 
           echo -n "$IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64" | base64 --decode -o "$CERT_PATH"
-          echo -n "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PROFILE_PATH"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -473,24 +477,38 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
-          cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
           # withIOSManualSigning이 PROVISIONING_PROFILE_SPECIFIER로 쓸 수 있게
-          # 프로파일 자체에 박힌 표시 이름(Name)을 꺼낸다 — 파일명
-          # (INTIP.mobileprovision)이 아니라 이 Name으로 Xcode가 매칭한다.
-          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
-          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/profile.plist")
-          if [ -z "$PROFILE_NAME" ]; then
-            echo "::error::프로비저닝 프로파일에서 Name을 못 읽었다 — IOS_PROVISIONING_PROFILE_BASE64 확인 필요"
-            exit 1
-          fi
-          echo "IOS_PROVISIONING_PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          # 프로파일 자체에 박힌 표시 이름(Name)을 꺼낸다 — 파일명이 아니라 이
+          # Name으로 Xcode가 매칭한다.
+          import_profile() {
+            local base64_var_name="$1" install_filename="$2" profile_name_env_var="$3"
+            local base64_value="${!base64_var_name}"
+            if [ -z "$base64_value" ]; then
+              echo "::error::$base64_var_name 시크릿이 비어 있다"
+              exit 1
+            fi
+            local profile_path="$RUNNER_TEMP/$install_filename"
+            echo -n "$base64_value" | base64 --decode -o "$profile_path"
+            cp "$profile_path" ~/Library/MobileDevice/"Provisioning Profiles"/"$install_filename"
 
-      - name: Prebuild (ios)
-        run: npx expo prebuild --platform ios
+            security cms -D -i "$profile_path" > "$RUNNER_TEMP/${install_filename}.plist"
+            local profile_name
+            profile_name=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/${install_filename}.plist")
+            if [ -z "$profile_name" ]; then
+              echo "::error::$install_filename 에서 Name을 못 읽었다 — $base64_var_name 확인 필요"
+              exit 1
+            fi
+            echo "$profile_name_env_var=$profile_name" >> "$GITHUB_ENV"
+          }
 
-      # Manual 서명으로 고정했으니 xcodebuild가 Apple과 통신할 이유가 없다 —
-      # 이 키는 마지막 "Upload to App Store Connect"(altool)에서만 쓰인다.
+          import_profile IOS_PROVISIONING_PROFILE_BASE64 INTIP.mobileprovision IOS_PROVISIONING_PROFILE_NAME
+
+      # Prebuild보다 먼저 옮겨왔다 — 원래는 "이 키는 업로드에서만 쓰인다"는
+      # 이유로 Archive 직전에 있었지만, 이제 바로 아래 "다음 buildNumber
+      # 계산" 스텝이 prebuild보다 먼저 App Store Connect API를 호출해야
+      # 해서 키가 그보다 먼저 필요해졌다. 정리 스텝은 여전히
+      # APP_STORE_CONNECT_KEY_PATH를 참조한다.
       - name: Decode App Store Connect API key
         env:
           APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
@@ -507,6 +525,19 @@ jobs:
 
           # 정리 스텝이 참조한다.
           echo "APP_STORE_CONNECT_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      # App Store Connect에 이미 올라간 최대 buildNumber+1을 계산해 prebuild에
+      # 넘긴다 — app.json의 ios.buildNumber를 커밋마다 손으로 올리지 않아도
+      # -19232/DUPLICATE가 나지 않게 하기 위함. app.config.js가 이 환경변수를
+      # app.json의 값보다 우선한다.
+      - name: Compute next iOS build number
+        run: |
+          set -euo pipefail
+          NEXT_BUILD_NUMBER=$(node scripts/ios-next-build-number.js)
+          echo "EXPO_IOS_BUILD_NUMBER=$NEXT_BUILD_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Prebuild (ios)
+        run: npx expo prebuild --platform ios
 
       # -allowProvisioningUpdates 없음: withIOSManualSigning이 prebuild 때
       # 이미 INTIP 타깃(Release)을 Manual + 위에서 넣은 프로파일/인증서로
@@ -570,7 +601,7 @@ jobs:
           rm -f GoogleService-Info.plist
           # 디코드 스텝 전에 실패했다면 비어 있을 수 있다.
           rm -f "${APP_STORE_CONNECT_KEY_PATH:-}"
-          rm -f "$RUNNER_TEMP/profile.plist"
+          rm -f "$RUNNER_TEMP/INTIP.mobileprovision.plist"
           rm -f ~/Library/MobileDevice/"Provisioning Profiles"/INTIP.mobileprovision
 
       - name: Upload IPA

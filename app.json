@@ -2,15 +2,24 @@
   "expo": {
     "name": "INTIP",
     "slug": "intip-mobile-app",
-    "version": "3.0.9",
+    "version": "3.0.10",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "intipmobileapp",
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "kr.inuappcenter.intip",
+      "buildNumber": "23",
       "supportsTablet": true,
+      "associatedDomains": [
+        "applinks:intip.inuappcenter.kr",
+        "applinks:intip-test.pages.dev"
+      ],
       "googleServicesFile": "./GoogleService-Info.plist",
+      "associatedDomains": [
+        "applinks:intip.inuappcenter.kr",
+        "applinks:intip-test.pages.dev"
+      ],
       "entitlements": {
         "aps-environment": "production"
       },
@@ -20,21 +29,38 @@
           "remote-notification",
           "fetch"
         ],
-        "NSCameraUsageDescription": "이 앱은 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
-        "NSPhotoLibraryUsageDescription": "이 앱은 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
-        "NSPhotoLibraryAddUsageDescription": "이 앱은 촬영한 사진을 저장하기 위해 사진첩 접근 권한이 필요합니다.",
-        "NSLocationWhenInUseUsageDescription": "캠퍼스맵 내 위치 표시를 위해 위치 권한이 필요합니다."
+        "NSCameraUsageDescription": "게시판 및 채팅 업로드용 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
+        "NSPhotoLibraryUsageDescription": "게시판 및 채팅 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
+        "NSPhotoLibraryAddUsageDescription": "촬영한 사진을 저장하기 위해 사진첩 접근 권한이 필요합니다.",
+        "NSLocationWhenInUseUsageDescription": "캠퍼스맵 내 위치 표시 및 주변친구 찾기 기능을 위해 위치 권한이 필요합니다."
       }
     },
     "android": {
       "package": "inu.appcenter.intip_android",
-      "versionCode": 22,
+      "versionCode": 23,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "intip.inuappcenter.kr"
+            },
+            {
+              "scheme": "https",
+              "host": "intip-test.pages.dev"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.POST_NOTIFICATIONS",
@@ -63,6 +89,16 @@
       "./plugins/withDefaultNotificationChannel",
       "./plugins/withAndroidReleaseSigning",
       "./plugins/withIOSManualSigning",
+      [
+        "expo-share-intent",
+        {
+          "disableIOS": true,
+          "androidIntentFilters": ["text/*"],
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true
+          }
+        }
+      ],
       [
         "expo-build-properties",
         {

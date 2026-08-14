@@ -39,6 +39,7 @@ import WebView, {
 } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import * as WebBrowser from 'expo-web-browser';
+import { useShareIntentContext } from 'expo-share-intent';
 
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
@@ -55,13 +56,14 @@ import {
   LAUNCH_CLEANUP_SCRIPT,
   buildBridgeShimScript,
   buildSafeAreaInsetsScript,
+  isGeoPermissionRequest,
 } from '../webview/injectedScript';
 import { resolveBackAction } from '../webview/backPolicy';
 import { openSubPageDepth } from '../webview/subPageStack';
 import { relayWebConsoleMessage, WEB_CONSOLE_SCRIPT } from '../webview/webConsole';
 import { clearWebViewCache, clearCacheAndReload } from '../native/cache';
 import { saveDownload } from '../native/downloads';
-import { ensureCameraPermission, ensureLocationPermission } from '../native/permissions';
+import { ensureLocationPermission } from '../native/permissions';
 import { clearTokenInfo, saveTokenInfo } from '../native/secureTokenStore';
 import {
   getFcmTokenWithRetry,
@@ -71,6 +73,7 @@ import {
   type NavIntent,
 } from '../push/messaging';
 import { flushPendingFcmToken } from '../push/fcmTokenSync';
+import { resolveGradeShareIntent } from '../share/gradeShareIntent';
 import { backgroundColorFor, INDICATOR_COLOR } from '../theme';
 import {
   nextWebViewSeq,
@@ -120,8 +123,18 @@ const BACK_DELEGATION_TIMEOUT_MS = 350;
  * pushed sub-page's own `loginSuccess` handler would otherwise re-prime on
  * its first load — surfacing as a permission dialog popping up out of
  * nowhere when entering e.g. the timetable edit page.
+ * Location permission priming happens at most once per app session —
+ * module-scoped, not per `WebViewContainer` instance — and is triggered
+ * lazily by `GEO_REQUEST_MARKER` (the first time *any* mounted page actually
+ * calls `navigator.geolocation`), not by `loginSuccess`. `INJECTED_SCRIPT`
+ * posts `loginSuccess` unconditionally on every page load whenever a token is
+ * already in localStorage (not just on a fresh login), so tying priming to it
+ * used to re-prime on every freshly pushed sub-page's first load — surfacing
+ * as a permission dialog popping up out of nowhere on pages that never touch
+ * location (e.g. the timetable edit page). Camera needs no priming at all:
+ * both WebView engines request it from the OS on demand (see permissions.ts).
  */
-let permissionsPrimed = false;
+let locationPermissionPrimed = false;
 
 /** Bridge shim is platform-specific (see injectedScript.ts). */
 const BRIDGE_SHIM_SCRIPT = buildBridgeShimScript(Platform.OS === 'ios' ? 'ios' : 'android');
@@ -157,20 +170,39 @@ export default function WebViewContainer({ url, mode }: Props) {
   const nativeChannelRef = webViewRef as unknown as Parameters<typeof createNativeChannel>[0];
   // eslint-disable-next-line react-hooks/refs
   const bridge = useMemo(() => createNativeChannel(nativeChannelRef), [nativeChannelRef]);
-  // Dev only: peel relayed web console messages off before the bridge channel
-  // parses the stream (they're not part of the intip-bridge contract).
+
+  // Prime location (campus map) permission lazily — the first time any
+  // mounted page actually calls `navigator.geolocation` (see
+  // `GEO_REQUEST_MARKER`), not eagerly on login. At most once per app
+  // session (see `locationPermissionPrimed` above). Camera needs no
+  // equivalent: both WebView engines request it from the OS on demand.
+  const primeLocationPermission = useCallback(() => {
+    if (locationPermissionPrimed) return;
+    locationPermissionPrimed = true;
+    void ensureLocationPermission();
+  }, []);
+
+  // Dev builds also peel relayed web console messages off before the bridge
+  // channel parses the stream (they're not part of the intip-bridge
+  // contract); the geo-priming ping is intercepted the same way in every
+  // build.
   const onWebViewMessage = useCallback(
     (event: WebViewMessageEvent) => {
+      const raw = event.nativeEvent.data;
       if (__DEV__) {
         let tag = url;
         try {
           tag = new URL(url).pathname;
         } catch {}
-        if (relayWebConsoleMessage(event.nativeEvent.data, tag)) return;
+        if (relayWebConsoleMessage(raw, tag)) return;
+      }
+      if (isGeoPermissionRequest(raw)) {
+        primeLocationPermission();
+        return;
       }
       bridge.onMessage(event);
     },
-    [bridge, url],
+    [bridge, url, primeLocationPermission],
   );
   const router = useRouter();
   // Read-only access to the live navigation state (push-tap dedupe below).
@@ -223,21 +255,6 @@ export default function WebViewContainer({ url, mode }: Props) {
   const [overlayOpacity] = useState(() => new Animated.Value(1));
   const overlayDismissedRef = useRef(false);
 
-  // Prime camera (photo upload) + location (campus map) once logged in, at
-  // most once per app session (see `permissionsPrimed` above). Requested
-  // sequentially — firing both `request()` calls concurrently races two
-  // system permission dialogs, and the OS auto-dismisses/cancels one of
-  // them, which then silently re-requests later. Await each one before
-  // starting the next.
-  const primeWebPermissions = useCallback(() => {
-    if (permissionsPrimed) return;
-    permissionsPrimed = true;
-    void (async () => {
-      await ensureCameraPermission();
-      await ensureLocationPermission();
-    })();
-  }, []);
-
   // --- Native -> Web helpers -------------------------------------------------
   const postFcmToken = useCallback(async () => {
     const token = await getFcmTokenWithRetry();
@@ -278,7 +295,9 @@ export default function WebViewContainer({ url, mode }: Props) {
     registry.driveRoot(path);
   }, [registry, router]);
 
-  // Push-notification tap / cold-start routing (root only).
+  // Nav-intent routing (root only): push-notification tap / cold-start, and
+  // (below) an incoming OS Share Sheet grade-import. Both resolve to the same
+  // `NavIntent` union, so they share this one dispatcher.
   const handleNavIntent = useCallback(
     (intent: NavIntent) => {
       if (intent.kind === 'external') {
@@ -310,6 +329,22 @@ export default function WebViewContainer({ url, mode }: Props) {
     },
     [goHome, navigationRef, router],
   );
+
+  // OS Share Sheet grade-import (Android only for now — app.json's
+  // `disableIOS` skips building the iOS share extension, so `hasShareIntent`
+  // never turns true there). The hook itself resolves both a cold-start
+  // launch (app opened via the share) and a live share while already
+  // running, so — unlike push notifications — there's no separate
+  // `getInitial…` to poll here.
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+  useEffect(() => {
+    if (!isRoot || !hasShareIntent) return;
+    const intent = resolveGradeShareIntent(shareIntent);
+    // Consume it either way — a share with nothing usable (e.g. blank text)
+    // shouldn't be re-offered on the next render.
+    resetShareIntent();
+    if (intent) handleNavIntent(intent);
+  }, [handleNavIntent, hasShareIntent, isRoot, resetShareIntent, shareIntent]);
 
   // --- Lifecycle: cache + notifications (root only) --------------------------
   useEffect(() => {
@@ -505,7 +540,6 @@ export default function WebViewContainer({ url, mode }: Props) {
       }),
       channel.on('loginSuccess', () => {
         void postFcmToken();
-        primeWebPermissions();
         registry.mergeSession({ loggedIn: true, loginAt: Date.now() });
       }),
       // Mirror the web's JWT into SecureStore so the shell can call
@@ -554,7 +588,7 @@ export default function WebViewContainer({ url, mode }: Props) {
     return () => {
       for (const off of offs) off();
     };
-  }, [bridge, dismissOverlay, goHome, id, postFcmToken, primeWebPermissions, registry, router]);
+  }, [bridge, dismissOverlay, goHome, id, postFcmToken, registry, router]);
 
   // --- External links + Android downloads ------------------------------------
   const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {

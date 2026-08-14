@@ -2,13 +2,19 @@
  * Runtime permission helpers (react-native-permissions).
  *
  * The portal's WebView uses the camera (photo upload) and location (campus map).
- * `react-native-webview` already prompts for these natively on Android at the
- * moment `getUserMedia` / `navigator.geolocation` is called, but:
- *   - iOS WKWebView geolocation relies on the *app's* Core Location
- *     authorization and will NOT prompt on its own — the app must request it.
- *   - Priming the OS permission first lets the WebView grant the web origin
- *     silently (no double prompt), given `mediaCapturePermissionGrantType` and
- *     the native checkSelfPermission fast-paths.
+ * Both `react-native-webview`'s Android `WebChromeClient` and iOS WKWebView's
+ * `mediaCapturePermissionGrantType` already request the OS permission
+ * themselves, on demand, the moment `getUserMedia` is actually called — so
+ * `ensureCameraPermission` is not called proactively; the WebView engine
+ * handles camera entirely on its own on both platforms.
+ *
+ * Location is the one exception: iOS WKWebView's geolocation relies on the
+ * *app's* Core Location authorization and will NOT prompt on its own, so the
+ * app must request it. `WebViewContainer` calls `ensureLocationPermission`
+ * lazily — the first time a page actually calls `navigator.geolocation`
+ * (see `GEO_REQUEST_MARKER` in `webview/injectedScript.ts`) — rather than
+ * eagerly on every login, so the OS dialog only ever appears on a page that
+ * genuinely needs location.
  *
  * Notifications: Android 13+ (API 33) requires an explicit POST_NOTIFICATIONS
  * runtime grant; older Android grants it implicitly.
