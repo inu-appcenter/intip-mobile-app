@@ -151,7 +151,7 @@ it expects.
 
 The `ota-publish` job guards this automatically — if `app.json`, `plugins/`,
 `package.json`, or `modules/` (local Expo modules) changed in the push, it
-**skips** the publish and says so in the job summary and the Discord
+**skips** the publish and says so in the job summary and the Mattermost
 notification. Re-dispatch with `force_ota` if you know the change was JS-only
 (e.g. only the `.ts` side of a module under `modules/`).
 

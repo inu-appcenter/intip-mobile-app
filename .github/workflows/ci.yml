@@ -41,7 +41,7 @@ name: CI
 #     (그래서 retention-days를 짧게 유지할 것)
 #
 # TEMP(2026-08-12): gangbook-air가 오프라인이라 모든 잡을 GitHub-hosted로
-# 임시 전환(verify/ota-publish/android-release/notify-discord →
+# 임시 전환(verify/ota-publish/android-release/notify-mattermost →
 # ubuntu-latest, ios-release → macos-26, 335cbe4 이전 값 그대로). 러너가
 # 다시 온라인이 되면 각 잡의 `runs-on: self-hosted`로 되돌릴 것.
 # ─────────────────────────────────────────────────────────────────────────
@@ -611,8 +611,8 @@ jobs:
           path: ${{ runner.temp }}/export/INTIP.ipa
           retention-days: 14
 
-  notify-discord:
-    name: Discord 알림
+  notify-mattermost:
+    name: Mattermost 알림
     # Manual releases, plus every OTA publish on main (which is now the normal
     # way a change reaches users, so it's worth announcing).
     if: |
@@ -623,9 +623,14 @@ jobs:
     needs: [verify, ota-publish, android-release, ios-release]
     runs-on: self-hosted
     steps:
-      - name: Send Discord notification
+      # Incoming Webhook만 사용한다 (https://developers.mattermost.com/integrate/reference/bot-accounts/
+      # 의 Bot Account REST API가 아니라). 단순히 채널에 결과 메세지 하나
+      # 올리는 용도라 서버 base URL·채널 ID를 따로 관리해야 하는 봇 토큰
+      # 방식은 과하다 — Mattermost 관리 콘솔(Integrations > Incoming
+      # Webhooks)에서 채널을 고정해 만든 웹훅 URL을 그대로 쓴다.
+      - name: Send Mattermost notification
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          MATTERMOST_WEBHOOK: ${{ secrets.MATTERMOST_WEBHOOK }}
           VERIFY_RESULT: ${{ needs.verify.result }}
           OTA_RESULT: ${{ needs.ota-publish.result }}
           # The guard sets this to "true" when it refused to publish; the job
@@ -640,8 +645,8 @@ jobs:
           # 수동 실행이면 고른 작업, main 머지면 자동 OTA 경로.
           TASK_INPUT: ${{ inputs.task || 'main 머지 → 자동 OTA' }}
         run: |
-          if [ -z "$DISCORD_WEBHOOK" ]; then
-            echo "DISCORD_WEBHOOK secret is not set. Skipping Discord notification."
+          if [ -z "$MATTERMOST_WEBHOOK" ]; then
+            echo "MATTERMOST_WEBHOOK secret is not set. Skipping Mattermost notification."
             exit 0
           fi
 
@@ -665,83 +670,89 @@ jobs:
             OTA_STATUS=$(map_status "$OTA_RESULT")
           fi
 
-          COLOR=3066993
+          COLOR="#2ECC71"
           TITLE_EMOJI="🎉"
           TITLE_TEXT="모바일 앱 배포 파이프라인 완료"
 
           if [ "$OTA_RESULT" = "failure" ] || [ "$ANDROID_RESULT" = "failure" ] || [ "$IOS_RESULT" = "failure" ] || [ "$VERIFY_RESULT" = "failure" ]; then
-            COLOR=15158332
+            COLOR="#E74C3C"
             TITLE_EMOJI="❌"
             TITLE_TEXT="모바일 앱 배포 파이프라인 실패"
           elif [ "$ANDROID_RESULT" = "cancelled" ] || [ "$IOS_RESULT" = "cancelled" ]; then
-            COLOR=15105570
+            COLOR="#E67E22"
             TITLE_EMOJI="⚠️"
             TITLE_TEXT="모바일 앱 배포 중단/취소됨"
           fi
 
           CLEAN_COMMIT_MSG=$(echo "$COMMIT_MSG" | head -n 1 | sed 's/"/\\"/g')
 
+          # Mattermost incoming webhook payload — Slack-compatible message
+          # attachments (fields[].short은 Discord embed의 inline과 동일하게
+          # 나란히 배치되는지를 결정한다). https://developers.mattermost.com/integrate/reference/bot-accounts/
+          # 문서의 REST API(/api/v4/posts, Bot Account 토큰)는 여기선 안 쓴다
+          # — 위 "Incoming Webhook만 사용한다" 주석 참고.
           PAYLOAD=$(cat <<EOF
           {
-            "embeds": [
+            "attachments": [
               {
+                "fallback": "${TITLE_EMOJI} ${TITLE_TEXT}",
+                "color": "${COLOR}",
                 "title": "${TITLE_EMOJI} ${TITLE_TEXT}",
-                "url": "${RUN_URL}",
-                "color": ${COLOR},
+                "title_link": "${RUN_URL}",
                 "fields": [
                   {
-                    "name": "📡 OTA (EAS Update / production)",
+                    "title": "📡 OTA (EAS Update / production)",
                     "value": "${OTA_STATUS}",
-                    "inline": true
+                    "short": true
                   },
                   {
-                    "name": "🤖 Android (APK & AAB)",
+                    "title": "🤖 Android (APK & AAB)",
                     "value": "${ANDROID_STATUS}",
-                    "inline": true
+                    "short": true
                   },
                   {
-                    "name": "🍎 iOS (IPA / TestFlight)",
+                    "title": "🍎 iOS (IPA / TestFlight)",
                     "value": "${IOS_STATUS}",
-                    "inline": true
+                    "short": true
                   },
                   {
-                    "name": "🔍 사전 검증 (Verify)",
+                    "title": "🔍 사전 검증 (Verify)",
                     "value": "${VERIFY_STATUS}",
-                    "inline": true
+                    "short": true
                   },
                   {
-                    "name": "📌 실행한 작업",
+                    "title": "📌 실행한 작업",
                     "value": "${TASK_INPUT}",
-                    "inline": true
+                    "short": true
                   },
                   {
-                    "name": "🌿 브랜치",
+                    "title": "🌿 브랜치",
                     "value": "${REF_NAME}",
-                    "inline": true
+                    "short": true
                   },
                   {
-                    "name": "👤 실행자",
+                    "title": "👤 실행자",
                     "value": "${ACTOR}",
-                    "inline": true
+                    "short": true
                   },
                   {
-                    "name": "💬 커밋 메세지",
-                    "value": "${CLEAN_COMMIT_MSG}"
+                    "title": "💬 커밋 메세지",
+                    "value": "${CLEAN_COMMIT_MSG}",
+                    "short": false
                   },
                   {
-                    "name": "📦 빌드 결과물 및 아티팩트 다운로드",
-                    "value": "[👉 GitHub Actions 실행 페이지에서 AAB/IPA 다운로드하기](${RUN_URL}#artifacts)"
+                    "title": "📦 빌드 결과물 및 아티팩트 다운로드",
+                    "value": "[👉 GitHub Actions 실행 페이지에서 AAB/IPA 다운로드하기](${RUN_URL}#artifacts)",
+                    "short": false
                   }
                 ],
-                "footer": {
-                  "text": "INTIP Mobile Deployment Pipeline"
-                },
-                "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+                "footer": "INTIP Mobile Deployment Pipeline",
+                "ts": $(date -u +%s)
               }
             ]
           }
           EOF
           )
 
-          curl -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK"
+          curl -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$MATTERMOST_WEBHOOK"
 
