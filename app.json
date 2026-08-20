@@ -16,19 +16,13 @@
         "applinks:intip-test.pages.dev"
       ],
       "googleServicesFile": "./GoogleService-Info.plist",
-      "associatedDomains": [
-        "applinks:intip.inuappcenter.kr",
-        "applinks:intip-test.pages.dev"
-      ],
+
       "entitlements": {
         "aps-environment": "production"
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": [
-          "remote-notification",
-          "fetch"
-        ],
+        "UIBackgroundModes": ["remote-notification", "fetch"],
         "NSCameraUsageDescription": "게시판 및 채팅 업로드용 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
         "NSPhotoLibraryUsageDescription": "게시판 및 채팅 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
         "NSPhotoLibraryAddUsageDescription": "촬영한 사진을 저장하기 위해 사진첩 접근 권한이 필요합니다.",
@@ -123,7 +117,27 @@
           ]
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-widgets",
+        {
+          "bundleIdentifier": "kr.inuappcenter.intip.widget",
+          "groupIdentifier": "group.kr.inuappcenter.intip.container",
+          "enablePushNotifications": true,
+          "widgets": [
+            {
+              "name": "TestWidget",
+              "displayName": "인팁 테스트 위젯",
+              "description": "위젯 파이프라인 확인용 테스트 위젯이에요.",
+              "supportedFamilies": [
+                "systemSmall",
+                "systemMedium",
+                "systemLarge"
+              ]
+            }
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

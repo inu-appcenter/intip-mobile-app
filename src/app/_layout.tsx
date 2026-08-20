@@ -9,6 +9,7 @@ import WebViewControllerPanel from '../components/WebViewControllerPanel';
 import { registerBackgroundHandlers, requestNotificationPermission } from '../push/messaging';
 import { checkForUpdate } from '../native/updateCheck';
 import { WebViewProvider } from '../webview/WebViewContext';
+import { refreshTestWidget } from '../widgets/refresh';
 import { backgroundColorFor } from '../theme';
 
 // Background FCM/notifee handlers must be registered before React renders so
@@ -27,6 +28,8 @@ export default function RootLayout() {
     void requestNotificationPermission();
     // Check for OTA updates (non-blocking; shows a prompt if one is available).
     void checkForUpdate();
+    // Seed the home screen widget so it has something to draw after install.
+    refreshTestWidget();
   }, []);
 
   return (
