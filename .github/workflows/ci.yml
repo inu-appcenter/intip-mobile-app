@@ -374,8 +374,12 @@ jobs:
       - name: Decode google-services.json
         run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > google-services.json
 
+      # `--clean`: self-hosted 러너는 _work 디렉터리를 계속 재사용하므로 이전
+      # 실행이 남긴 android/ 가 그대로 있다. clean 없이 돌리면 mod 가 이미 패치된
+      # 파일 위에 다시 적용될 뿐 아니라, app.json 에서 **빼낸** 플러그인이
+      # 만들어 둔 타깃/entitlement 가 지워지지 않고 그대로 빌드에 들어간다.
       - name: Prebuild (android)
-        run: npx expo prebuild --platform android
+        run: npx expo prebuild --clean --platform android
 
       - name: Build signed release AAB and APK
         working-directory: android
@@ -560,8 +564,12 @@ jobs:
           NEXT_BUILD_NUMBER=$(node scripts/ios-next-build-number.js)
           echo "EXPO_IOS_BUILD_NUMBER=$NEXT_BUILD_NUMBER" >> "$GITHUB_ENV"
 
+      # `--clean`: self-hosted 러너는 _work 디렉터리를 계속 재사용하므로 이전
+      # 실행이 남긴 ios/ 가 그대로 있다. clean 없이 돌리면 mod 가 이미 패치된
+      # 파일 위에 다시 적용될 뿐 아니라, app.json 에서 **빼낸** 플러그인이
+      # 만들어 둔 타깃/entitlement 가 지워지지 않고 그대로 빌드에 들어간다.
       - name: Prebuild (ios)
-        run: npx expo prebuild --platform ios
+        run: npx expo prebuild --clean --platform ios
 
       # -allowProvisioningUpdates 없음: withIOSManualSigning이 prebuild 때
       # 이미 INTIP 타깃(Release)을 Manual + 위에서 넣은 프로파일/인증서로
