@@ -113,7 +113,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
+          # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
+          # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -243,7 +246,10 @@ jobs:
         if: steps.native_guard.outputs.changed != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
+          # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
+          # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -329,7 +335,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
+          # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
+          # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
+          node-version: 24
           cache: npm
 
       - name: Setup Java
@@ -420,7 +429,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
+          # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
+          # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
+          node-version: 24
           cache: npm
 
       # setup-xcode는 `sudo xcode-select -s`로 머신 전역의 활성 Xcode를 바꾼다.
