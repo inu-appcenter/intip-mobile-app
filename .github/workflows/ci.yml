@@ -117,7 +117,10 @@ jobs:
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
           node-version: 24
-          cache: npm
+          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
+          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
+          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
+          # 오래 걸린다.
 
       - name: Install dependencies
         run: npm ci
@@ -250,7 +253,10 @@ jobs:
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
           node-version: 24
-          cache: npm
+          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
+          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
+          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
+          # 오래 걸린다.
 
       - name: Install dependencies
         if: steps.native_guard.outputs.changed != 'true'
@@ -339,7 +345,10 @@ jobs:
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
           node-version: 24
-          cache: npm
+          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
+          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
+          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
+          # 오래 걸린다.
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -433,7 +442,10 @@ jobs:
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
           node-version: 24
-          cache: npm
+          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
+          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
+          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
+          # 오래 걸린다.
 
       # setup-xcode는 `sudo xcode-select -s`로 머신 전역의 활성 Xcode를 바꾼다.
       # 매 실행 폐기되는 GitHub-hosted 이미지에서는 무해했지만 self-hosted는
