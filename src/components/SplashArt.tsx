@@ -58,8 +58,10 @@ let entrancePlayed = false;
  * accepts a single flat background *color* plus a centre icon, so the honey
  * and the character have nowhere to live there. Instead the system splash
  * shows just the background + logo, and this view continues it with the full
- * artwork — same colour, same logo at the same fixed dp, so the hand-off reads
- * as one screen with the decorations arriving rather than as two screens.
+ * artwork — same colour, and the logo at whatever width the system splash
+ * actually put on screen (see `SPLASH_LOGO_WIDTH`, which is halved on Android
+ * for that reason), so the hand-off reads as one screen with the decorations
+ * arriving rather than as two screens.
  *
  * That hand-off is also why only the decorations animate. The logo is the one
  * element the system splash already drew, so it has to be sitting exactly where
