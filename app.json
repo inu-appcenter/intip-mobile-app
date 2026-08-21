@@ -16,7 +16,7 @@
         "applinks:intip-test.pages.dev"
       ],
       "googleServicesFile": "./GoogleService-Info.plist",
-
+      "icon": "./assets/expo.icon",
       "entitlements": {
         "aps-environment": "production"
       },
@@ -34,8 +34,9 @@
       "versionCode": 23,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
-        "foregroundImage": "./assets/images/android-icon-foreground.png"
+        "foregroundImage": "./assets/images/ic_launcher_foreground.png",
+        "backgroundImage": "./assets/images/ic_launcher_background.png",
+        "monochromeImage": "./assets/images/ic_launcher_monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
       "intentFilters": [
