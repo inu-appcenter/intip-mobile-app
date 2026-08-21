@@ -14,7 +14,6 @@ import {
 } from "../push/messaging";
 import { backgroundColorFor } from "../theme";
 import { WebViewProvider } from "../webview/WebViewContext";
-import { refreshTestWidget } from "../widgets/refresh";
 
 // Background FCM/notifee handlers must be registered before React renders so
 // they survive a background/quit launch.
@@ -40,8 +39,10 @@ export default function RootLayout() {
     void requestNotificationPermission();
     // Check for OTA updates (non-blocking; shows a prompt if one is available).
     void checkForUpdate();
-    // Seed the home screen widget so it has something to draw after install.
-    refreshTestWidget();
+    // The home screen widget is not part of this release — the expo-widgets
+    // plugin is off in app.json until the iOS App Group / provisioning profiles
+    // are in place, so there is no widget target to seed. `src/widgets/` stays
+    // for when it is turned back on.
   }, []);
 
   return (

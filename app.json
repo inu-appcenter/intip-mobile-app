@@ -118,27 +118,7 @@
           ]
         }
       ],
-      "expo-secure-store",
-      [
-        "expo-widgets",
-        {
-          "bundleIdentifier": "kr.inuappcenter.intip.widget",
-          "groupIdentifier": "group.kr.inuappcenter.intip.container",
-          "enablePushNotifications": true,
-          "widgets": [
-            {
-              "name": "TestWidget",
-              "displayName": "인팁 테스트 위젯",
-              "description": "위젯 파이프라인 확인용 테스트 위젯이에요.",
-              "supportedFamilies": [
-                "systemSmall",
-                "systemMedium",
-                "systemLarge"
-              ]
-            }
-          ]
-        }
-      ]
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
