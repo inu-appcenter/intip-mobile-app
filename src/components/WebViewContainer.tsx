@@ -45,6 +45,7 @@ import { useShareIntentContext } from 'expo-share-intent';
 // compiled from source (no npm package / registry). See AGENTS.md.
 import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
 import { nativeAlert } from '../../modules/intip-native-dialog';
+import SplashArt from './SplashArt';
 import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
@@ -770,9 +771,23 @@ export default function WebViewContainer({ url, mode }: Props) {
       {overlayVisible && (
         <Animated.View
           pointerEvents="none"
-          style={[styles.overlay, { backgroundColor, opacity: overlayOpacity }]}
+          style={[
+            styles.overlay,
+            { opacity: overlayOpacity },
+            // Root paints its own background inside SplashArt.
+            isRoot ? null : { backgroundColor },
+          ]}
         >
-          <ActivityIndicator size="large" color={INDICATOR_COLOR} />
+          {isRoot ? (
+            // Root's overlay *is* the launch screen: it continues the system
+            // splash (same background, same logo at the same fixed dp) and adds
+            // the artwork the system splash cannot draw, then cross-fades away
+            // once the web signals the launch cleanup is done. A spinner here
+            // would read as a second, unbranded loading screen.
+            <SplashArt />
+          ) : (
+            <ActivityIndicator size="large" color={INDICATOR_COLOR} />
+          )}
         </Animated.View>
       )}
     </View>

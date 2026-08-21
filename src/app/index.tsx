@@ -1,18 +1,11 @@
 import { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  BackHandler,
-  Platform,
-  StyleSheet,
-  useColorScheme,
-  View,
-} from 'react-native';
+import { BackHandler, Platform } from 'react-native';
 
 import { nativeAlert } from '../../modules/intip-native-dialog';
+import SplashArt from '../components/SplashArt';
 import WebViewContainer from '../components/WebViewContainer';
 import { isConnected } from '../native/network';
 import { ROOT_URL, STRINGS } from '../webview/constants';
-import { backgroundColorFor } from '../theme';
 
 type GateStatus = 'checking' | 'offline' | 'online';
 
@@ -25,9 +18,6 @@ type GateStatus = 'checking' | 'offline' | 'online';
  * container.
  */
 export default function Index() {
-  const scheme = useColorScheme();
-  const backgroundColor = backgroundColorFor(scheme);
-
   const [status, setStatus] = useState<GateStatus>('checking');
 
   // React Compiler is enabled (app.json), so this stays a plain function — no
@@ -56,14 +46,10 @@ export default function Index() {
     return <WebViewContainer mode="root" url={ROOT_URL} />;
   }
 
-  // Checking / offline: a plain branded background (no WebView yet).
-  return (
-    <View style={[styles.center, { backgroundColor }]}>
-      {status === 'checking' && <ActivityIndicator />}
-    </View>
-  );
+  // Checking / offline: keep the splash up. The connectivity check runs before
+  // the WebView exists, so anything else here (a themed blank + spinner, as
+  // this used to be) shows as a grey flash between the system splash and the
+  // container's own splash overlay. The offline case holds it behind the retry
+  // dialog for the same reason.
+  return <SplashArt />;
 }
-
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-});

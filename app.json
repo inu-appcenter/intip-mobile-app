@@ -72,11 +72,10 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
-          }
+          "backgroundColor": "#043799",
+          "image": "./assets/splash/logo-splash.png",
+          "imageWidth": 178,
+          "resizeMode": "contain"
         }
       ],
       "@react-native-firebase/app",
