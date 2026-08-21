@@ -83,6 +83,7 @@
       "./plugins/withDefaultNotificationChannel",
       "./plugins/withAndroidReleaseSigning",
       "./plugins/withIOSManualSigning",
+      "./plugins/withWorkManagerVersionAlign",
       [
         "expo-share-intent",
         {
