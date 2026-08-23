@@ -50,10 +50,12 @@ import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
   STRINGS,
+  SYSTEM_BACK_GESTURE_EDGE_DP,
   isMainTabPath,
 } from '../webview/constants';
 import {
   INJECTED_SCRIPT,
+  buildEdgeLongPressGuardScript,
   LAUNCH_CLEANUP_SCRIPT,
   buildBridgeShimScript,
   buildSafeAreaInsetsScript,
@@ -98,14 +100,12 @@ const REVEAL_OVERLAY_TIMEOUT_MS = 4000;
 const OVERLAY_FADE_MS = 250;
 
 /**
- * Width (dp) of the band along each screen edge that Android reserves for the
- * system back gesture. AOSP's inset is 20dp; OEM skins (One UI) can widen it,
- * so guard slightly more than the platform minimum.
+ * Travel (dp) that commits a touch to being a swipe rather than a tap. Kept
+ * well under gesture-handler's default pan slop (10dp) so a *slow* back swipe
+ * still hands the touch to the guard early, before the WebView's long-press
+ * timer can fire (issue #25).
  */
-const SYSTEM_BACK_GESTURE_EDGE_DP = 24;
-
-/** Travel (dp) that commits a touch to being a swipe rather than a tap. */
-const EDGE_GUARD_SLOP_DP = 8;
+const EDGE_GUARD_SLOP_DP = 4;
 
 /**
  * How long a back press waits for the page's `backResult` before the shell
@@ -228,6 +228,18 @@ export default function WebViewContainer({ url, mode }: Props) {
   const beforeContentScript = useMemo(
     () => BEFORE_CONTENT_SCRIPT + buildSafeAreaInsetsScript(insets),
     [insets],
+  );
+
+  // Document-end script + the in-page half of the back-gesture guard (issue
+  // #25): the native edge guard below can only cancel the WebView's touches
+  // once the finger has travelled, so the page also suppresses its long-press
+  // affordances for any touch that starts in the system back-gesture band.
+  // Module-constant, but built here so both halves share one edge width.
+  const documentEndScript = useMemo(
+    () =>
+      INJECTED_SCRIPT +
+      buildEdgeLongPressGuardScript(SYSTEM_BACK_GESTURE_EDGE_DP),
+    [],
   );
 
   // Connect this container to the WebView orchestrator (shared dev controller).
@@ -683,9 +695,10 @@ export default function WebViewContainer({ url, mode }: Props) {
   // touch stream in the WebView underneath, so the long-press never fires. They
   // only claim the touch once it travels inward horizontally (the direction the
   // back gesture pulls) and bail on a vertical drag, so tapping and scrolling
-  // near the edge still reach the page exactly as before. A touch that just
-  // rests at the edge never activates them and still long-presses normally —
-  // that mis-grab is rare enough not to be worth blocking.
+  // near the edge still reach the page exactly as before. A touch that only
+  // rests at the edge without travelling never activates them — that case is
+  // covered by the in-page guard (`buildEdgeLongPressGuardScript`), which
+  // suppresses the long-press affordances without cancelling the touch.
   const backGestureGuard = useMemo(() => {
     const guard = (edge: 'left' | 'right') =>
       Gesture.Pan()
@@ -722,7 +735,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       // Bridge wiring: shims + alert override before content, observers after.
       onMessage={onWebViewMessage}
       injectedJavaScriptBeforeContentLoaded={beforeContentScript}
-      injectedJavaScript={INJECTED_SCRIPT}
+      injectedJavaScript={documentEndScript}
       onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
       onNavigationStateChange={onNavigationStateChange}
       onLoadEnd={onLoadEnd}
