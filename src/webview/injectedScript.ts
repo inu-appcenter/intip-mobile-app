@@ -231,6 +231,104 @@ true;
 `;
 
 /**
+ * In-page half of the back-gesture guard (issue #25).
+ *
+ * A back swipe starts inside a narrow band at the screen edge, and the page
+ * keeps receiving those touches until the system decides the swipe really is a
+ * back gesture. If the finger lingers there for the long-press timeout (~500ms
+ * — i.e. any slightly slow swipe) the WebView starts a text selection / image
+ * drag *mid back gesture*: the selection handles and the context menu pop up
+ * and the content smears under the transition.
+ *
+ * The native edge guard in `WebViewContainer` only cancels the WebView's touch
+ * stream once the finger has actually travelled inward, which a slow gesture
+ * does *after* the long press has already fired. So we also suppress the
+ * long-press affordances in the page itself, for the duration of any touch that
+ * begins in the edge band:
+ *
+ *  - a stylesheet (toggled by a class on `<html>`) kills `user-select`,
+ *    `-webkit-touch-callout` and `-webkit-user-drag` everywhere, which is what
+ *    the engine consults when the long-press timer fires;
+ *  - `contextmenu` is swallowed while the guard is engaged, covering the
+ *    link/image menu that does not go through selection.
+ *
+ * Unlike cancelling the touch, this leaves the touch stream intact: a tap (even
+ * a slow one) near the edge still reaches the page and still clicks. Editable
+ * targets are exempt so long-pressing a text field at the edge keeps its caret
+ * handles. Everything is released on `touchend`/`touchcancel`, with a timer as
+ * a backstop in case the WebView eats the end event when the gesture commits.
+ */
+export function buildEdgeLongPressGuardScript(edgePx: number): string {
+  return `
+(function () {
+  if (window.__intipEdgeGuardReady) return;
+  window.__intipEdgeGuardReady = true;
+
+  var EDGE_PX = ${edgePx};
+  // Backstop only: a committed back gesture can swallow touchend.
+  var RELEASE_FALLBACK_MS = 2000;
+  var CLASS = '__intip-edge-guard';
+
+  try {
+    var style = document.createElement('style');
+    style.textContent =
+      'html.' + CLASS + ', html.' + CLASS + ' * {' +
+      '-webkit-user-select: none !important;' +
+      'user-select: none !important;' +
+      '-webkit-touch-callout: none !important;' +
+      '-webkit-user-drag: none !important;' +
+      '}';
+    (document.head || document.documentElement).appendChild(style);
+  } catch (e) {}
+
+  var engaged = false;
+  var releaseTimer = null;
+
+  function isEditable(node) {
+    for (var el = node; el && el.nodeType === 1; el = el.parentElement) {
+      var tag = el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      if (el.isContentEditable) return true;
+    }
+    return false;
+  }
+
+  function engage() {
+    if (releaseTimer) { clearTimeout(releaseTimer); releaseTimer = null; }
+    engaged = true;
+    try { document.documentElement.classList.add(CLASS); } catch (e) {}
+    releaseTimer = setTimeout(release, RELEASE_FALLBACK_MS);
+  }
+
+  function release() {
+    if (releaseTimer) { clearTimeout(releaseTimer); releaseTimer = null; }
+    if (!engaged) return;
+    engaged = false;
+    try { document.documentElement.classList.remove(CLASS); } catch (e) {}
+  }
+
+  document.addEventListener('touchstart', function (e) {
+    if (engaged) return;
+    var touch = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+    if (!touch) return;
+    var width = window.innerWidth || document.documentElement.clientWidth || 0;
+    var nearEdge = touch.clientX <= EDGE_PX || touch.clientX >= width - EDGE_PX;
+    if (!nearEdge || isEditable(e.target)) return;
+    engage();
+  }, true);
+
+  document.addEventListener('touchend', release, true);
+  document.addEventListener('touchcancel', release, true);
+
+  document.addEventListener('contextmenu', function (e) {
+    if (engaged) e.preventDefault();
+  }, true);
+})();
+true;
+`;
+}
+
+/**
  * Launch cleanup loop (spec §5.B). Unregisters service workers and clears the
  * CacheStorage, then signals completion through the bridge shim so the native
  * loading overlay can fade out. Injected once after the root page first loads.

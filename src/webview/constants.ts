@@ -136,3 +136,14 @@ export const STRINGS = {
     close: "닫기",
   },
 } as const;
+
+/**
+ * Width (dp / CSS px) of the band along each screen edge that the system
+ * reserves for its back gesture. AOSP's inset is 20dp; OEM skins (One UI) can
+ * widen it, so guard slightly more than the platform minimum.
+ *
+ * Shared by the native edge guard (`WebViewContainer`) and the in-page
+ * long-press suppressor (`buildEdgeLongPressGuardScript`) so both agree on
+ * exactly which touches belong to the back gesture.
+ */
+export const SYSTEM_BACK_GESTURE_EDGE_DP = 24;
