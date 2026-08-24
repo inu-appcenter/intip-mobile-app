@@ -11,10 +11,10 @@
  * origin cost every launch (and every `portalUrlFor` push) a wasted round-trip
  * before the first byte of HTML.
  */
-export const ROOT_URL = "https://intip-test.pages.dev";
+export const ROOT_URL = "https://intip.inuappcenter.kr";
 
 /** Host that is considered "internal". Anything else opens in the system browser. */
-export const PORTAL_HOST = "intip-test.pages.dev";
+export const PORTAL_HOST = "intip.inuappcenter.kr";
 
 /**
  * Hosts a push notification's payload is allowed to point off-portal to (e.g.

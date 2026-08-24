@@ -60,6 +60,7 @@
     "web": "expo start --web",
     "prebuild": "expo prebuild",
     "prebuild:clean": "expo prebuild --clean",
+    "build:android": "./scripts/android-release.sh",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest"
