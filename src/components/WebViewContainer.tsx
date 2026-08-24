@@ -32,6 +32,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useKeyboardState } from 'react-native-keyboard-controller';
 import { useFocusEffect, useNavigationContainerRef, useRouter } from 'expo-router';
 import WebView, {
   type WebViewMessageEvent,
@@ -667,6 +668,22 @@ export default function WebViewContainer({ url, mode }: Props) {
     webViewRef.current?.reload();
   }, []);
 
+  // Soft-keyboard avoidance (Android). The app runs edge-to-edge, and under
+  // edge-to-edge Android stops honouring `adjustResize`: the window keeps its
+  // full height when the IME opens, so the WebView viewport never shrinks and
+  // the keyboard simply covers whatever input sits at the bottom of the page.
+  //
+  // `KeyboardProvider` (see `app/_layout.tsx`) reports the real IME inset, and
+  // padding the container by it reproduces what `adjustResize` used to do:
+  // the WebView gets shorter, so the engine scrolls the focused input into the
+  // remaining viewport by itself.
+  //
+  // iOS is deliberately left at 0 — WKWebView already insets its own scroll
+  // view for the keyboard, so shrinking the host view too would double-count
+  // and push the focused input a keyboard's height too far up.
+  const keyboardHeight = useKeyboardState((state) => state.height);
+  const keyboardInset = Platform.OS === 'android' ? keyboardHeight : 0;
+
   // Root sits on the main tabs -> no WebView-level swipe-back; sub-pages let the
   // native stack own the swipe so it pops the screen (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
@@ -753,8 +770,11 @@ export default function WebViewContainer({ url, mode }: Props) {
   );
 
   return (
-    // Fill the screen; ignore the bottom inset so content reaches the edge.
-    <View style={[styles.fill, { backgroundColor }]}>
+    // Fill the screen; ignore the bottom inset so content reaches the edge —
+    // except for the soft keyboard, which the container gives up room to.
+    <View
+      style={[styles.fill, { backgroundColor, paddingBottom: keyboardInset }]}
+    >
       {isRoot ? (
         // Root goes fully edge-to-edge on every side; the web owns all four
         // insets via env(safe-area-inset-*) / the injected CSS vars above.

@@ -4,7 +4,7 @@
     "slug": "intip-mobile-app",
     "version": "3.0.11",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+
     "scheme": "intipmobileapp",
     "userInterfaceStyle": "light",
     "ios": {
@@ -34,9 +34,8 @@
       "versionCode": 24,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/ic_launcher_foreground.png",
-        "backgroundImage": "./assets/images/ic_launcher_background.png",
-        "monochromeImage": "./assets/images/ic_launcher_monochrome.png"
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png"
       },
       "predictiveBackGestureEnabled": false,
       "intentFilters": [
