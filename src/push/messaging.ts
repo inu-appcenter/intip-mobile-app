@@ -72,27 +72,57 @@ export async function getFcmTokenWithRetry(retries = 3, delayMs = 1000): Promise
   return null;
 }
 
+/** Helper to display a notification with grouping support. */
+async function handleDisplayNotification(remoteMessage: any): Promise<void> {
+  await ensureAndroidChannel();
+
+  const chatRoomId = remoteMessage.data?.chatRoomId;
+  const isChat = remoteMessage.data?.type === 'CHAT' && typeof chatRoomId === 'string' && chatRoomId !== '';
+
+  const title = remoteMessage.notification?.title || remoteMessage.data?.chatRoomName || remoteMessage.data?.title || '새 메시지';
+  const body = remoteMessage.notification?.body || remoteMessage.data?.messageText || remoteMessage.data?.body || '';
+
+  await notifee.displayNotification({
+    // Mirror the FCM messageId as notifee's own id so a later
+    // background/foreground PRESS on *this* notification and any
+    // independent RNFirebase "opened from notification" report share one
+    // dedupe key (see `pendingIntent.ts`) instead of living in two
+    // unrelated id spaces.
+    id: remoteMessage.messageId || String(Date.now()),
+    title,
+    body,
+    data: remoteMessage.data,
+    android: {
+      channelId: ANDROID_CHANNEL_ID,
+      pressAction: { id: 'default' },
+      sound: 'default',
+      ...(isChat ? { groupId: chatRoomId } : {}),
+    },
+    ios: {
+      sound: 'default',
+      ...(isChat ? { threadId: chatRoomId } : {}),
+    },
+  });
+
+  if (Platform.OS === 'android' && isChat) {
+    await notifee.displayNotification({
+      id: chatRoomId, // 요약본은 채팅방 고유 ID를 사용해 하나만 유지
+      title,
+      body: '새로운 메시지가 있습니다.',
+      android: {
+        channelId: ANDROID_CHANNEL_ID,
+        groupId: chatRoomId,
+        groupSummary: true,
+        pressAction: { id: 'default' },
+      },
+    });
+  }
+}
+
 /** Display foreground messages as banners. Returns an unsubscribe function. */
 export function setupForegroundNotifications(): () => void {
   return messaging().onMessage(async (remoteMessage) => {
-    await ensureAndroidChannel();
-    await notifee.displayNotification({
-      // Mirror the FCM messageId as notifee's own id so a later
-      // background/foreground PRESS on *this* notification and any
-      // independent RNFirebase "opened from notification" report share one
-      // dedupe key (see `pendingIntent.ts`) instead of living in two
-      // unrelated id spaces.
-      id: remoteMessage.messageId,
-      title: remoteMessage.notification?.title,
-      body: remoteMessage.notification?.body,
-      data: remoteMessage.data,
-      android: {
-        channelId: ANDROID_CHANNEL_ID,
-        pressAction: { id: 'default' },
-        sound: 'default',
-      },
-      ios: { sound: 'default' },
-    });
+    await handleDisplayNotification(remoteMessage);
   });
 }
 
@@ -176,7 +206,12 @@ export function registerBackgroundHandlers(): void {
 
   // Data-only messages while backgrounded. The OS renders `notification`
   // payloads itself; nothing extra to do here, but the handler must exist.
-  messaging().setBackgroundMessageHandler(async () => {});
+  // We manually handle data-only notifications (i.e. remoteMessage.notification is undefined).
+  messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+    if (!remoteMessage.notification) {
+      await handleDisplayNotification(remoteMessage);
+    }
+  });
 
   // Taps on notifee-displayed notifications while backgrounded (or after the
   // app was killed — notifee runs this via a headless task either way).
