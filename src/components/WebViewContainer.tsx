@@ -17,6 +17,9 @@
  * push-notification lifecycle, the native-stack navigator registration (for the
  * dev controller / `restoreSession`), and the launch cache-purge overlay.
  */
+import { useFocusEffect, useNavigationContainerRef, useRouter } from 'expo-router';
+import { useShareIntentContext } from 'expo-share-intent';
+import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -30,45 +33,24 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useKeyboardState } from 'react-native-keyboard-controller';
-import { useFocusEffect, useNavigationContainerRef, useRouter } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView, {
   type WebViewMessageEvent,
   type WebViewNavigation,
 } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
-import * as WebBrowser from 'expo-web-browser';
-import { useShareIntentContext } from 'expo-share-intent';
 
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
-import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
 import { nativeAlert } from '../../modules/intip-native-dialog';
-import SplashArt from './SplashArt';
-import {
-  APP_UA_SUFFIX,
-  PORTAL_HOST,
-  STRINGS,
-  SYSTEM_BACK_GESTURE_EDGE_DP,
-  isMainTabPath,
-} from '../webview/constants';
-import {
-  INJECTED_SCRIPT,
-  buildEdgeLongPressGuardScript,
-  LAUNCH_CLEANUP_SCRIPT,
-  buildBridgeShimScript,
-  buildSafeAreaInsetsScript,
-  isGeoPermissionRequest,
-} from '../webview/injectedScript';
-import { resolveBackAction } from '../webview/backPolicy';
-import { openSubPageDepth } from '../webview/subPageStack';
-import { relayWebConsoleMessage, WEB_CONSOLE_SCRIPT } from '../webview/webConsole';
-import { clearWebViewCache, clearCacheAndReload } from '../native/cache';
+import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
+import { clearCacheAndReload, clearWebViewCache } from '../native/cache';
 import { saveDownload } from '../native/downloads';
 import { ensureLocationPermission } from '../native/permissions';
 import { clearTokenInfo, saveTokenInfo } from '../native/secureTokenStore';
+import { flushPendingFcmToken } from '../push/fcmTokenSync';
 import {
   getFcmTokenWithRetry,
   getInitialNavIntent,
@@ -76,14 +58,32 @@ import {
   subscribeNotificationOpen,
   type NavIntent,
 } from '../push/messaging';
-import { flushPendingFcmToken } from '../push/fcmTokenSync';
 import { resolveGradeShareIntent } from '../share/gradeShareIntent';
 import { backgroundColorFor, INDICATOR_COLOR } from '../theme';
+import { resolveBackAction } from '../webview/backPolicy';
+import {
+  APP_UA_SUFFIX,
+  isMainTabPath,
+  PORTAL_HOST,
+  STRINGS,
+  SYSTEM_BACK_GESTURE_EDGE_DP,
+} from '../webview/constants';
+import {
+  buildBridgeShimScript,
+  buildEdgeLongPressGuardScript,
+  buildSafeAreaInsetsScript,
+  INJECTED_SCRIPT,
+  isGeoPermissionRequest,
+  LAUNCH_CLEANUP_SCRIPT,
+} from '../webview/injectedScript';
+import { openSubPageDepth } from '../webview/subPageStack';
+import { relayWebConsoleMessage, WEB_CONSOLE_SCRIPT } from '../webview/webConsole';
 import {
   nextWebViewSeq,
   useWebViewRegistry,
   type WebViewHandle,
 } from '../webview/WebViewContext';
+import SplashArt from './SplashArt';
 
 /** Extensions we treat as downloads on Android (iOS uses onFileDownload). */
 const DOWNLOAD_EXTENSIONS = [
@@ -309,6 +309,9 @@ export default function WebViewContainer({ url, mode }: Props) {
     registry.driveRoot(path);
   }, [registry, router]);
 
+      // 1. push 인텐트를 임시 저장할 Ref 추가
+    const pendingPushRef = useRef<NavIntent | null>(null);
+
   // Nav-intent routing (root only): push-notification tap / cold-start, and
   // (below) an incoming OS Share Sheet grade-import. Both resolve to the same
   // `NavIntent` union, so they share this one dispatcher.
@@ -317,6 +320,11 @@ export default function WebViewContainer({ url, mode }: Props) {
       if (intent.kind === 'external') {
         WebBrowser.openBrowserAsync(intent.url).catch(() => {});
       } else if (intent.kind === 'push') {
+             const isReady = navigationRef.isReady() && !!navigationRef.getCurrentRoute();
+      if (!isReady) {
+        pendingPushRef.current = intent; // 네비게이션이 준비될 때까지 대기
+        return;
+      }
         // Land ON TOP of whatever is open (don't collapse the user's stack) —
         // but never stack a second copy of a page that is already open. Chat
         // notifications for one room arrive as separate notifications with
@@ -386,6 +394,28 @@ export default function WebViewContainer({ url, mode }: Props) {
       clearTimeout(timeout);
     };
   }, [dismissOverlay, handleNavIntent, isRoot, postFcmToken]);
+
+  
+    // 3. 네비게이션 준비 상태를 관찰하는 useEffect
+    useEffect(() => {
+      if (!isRoot) return;
+    
+      const checkPendingPush = () => {
+        const isReady = navigationRef.isReady() && !!navigationRef.getCurrentRoute();
+        if (pendingPushRef.current && isReady) {
+          const intent = pendingPushRef.current;
+          pendingPushRef.current = null;
+          handleNavIntent(intent);
+        }
+      };
+    
+      // 마운트 직후 이미 준비 완료된 상태일 수 있으므로 즉시 검사
+      checkPendingPush();
+    
+      // 네비게이션 상태 변화 감지 리스너 등록
+      const unsub = navigationRef.addListener('state', checkPendingPush);
+      return unsub;
+    }, [isRoot, navigationRef, handleNavIntent]);
 
   // Sub-pages lift the reveal overlay from `onLoadEnd`; this is the safety net
   // for a load that errors out or never ends (root has its own above).

@@ -61,7 +61,9 @@
     "prebuild": "expo prebuild",
     "prebuild:clean": "expo prebuild --clean",
     "build:android": "./scripts/android-release.sh",
-    "lint": "expo lint",
+        "submodule:init": "git submodule update --init --recursive || test -d packages/intip-bridge/src || git clone https://github.com/inu-appcenter/intip-bridge.git packages/intip-bridge",
+    "postinstall": "npm run submodule:init",
+        "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest"
   },
