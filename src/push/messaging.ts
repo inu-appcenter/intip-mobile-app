@@ -14,32 +14,64 @@
  */
 import { Platform } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
-import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
+import notifee, {
+  AndroidGroupAlertBehavior,
+  AndroidImportance,
+  EventType,
+} from '@notifee/react-native';
 import { ensureAndroidPostNotifications } from '../native/permissions';
 import { resolveNavIntent, type NavIntent } from './navIntent';
-import { consumePending, deliver, isDuplicate, subscribe } from './pendingIntent';
+import {
+  GROUP_SUMMARY_ID_PREFIX,
+  consumePending,
+  deliver,
+  isDuplicate,
+  subscribe,
+} from './pendingIntent';
 import { registerFcmTokenRotationListener } from './fcmTokenSync';
 
 export type { NavIntent };
 
 const ANDROID_CHANNEL_ID = 'default';
+/**
+ * Chat channels. The server used to name these in the FCM `notification`
+ * block and let the OS render the banner; chat messages are now sent to
+ * Android as data-only (the only way our grouping code gets to run while
+ * backgrounded), so the channel is picked here instead — from `data.muted` —
+ * and both channels have to actually exist on the device.
+ */
+const CHAT_CHANNEL_ID = 'chat_channel_default';
+const CHAT_MUTED_CHANNEL_ID = 'chat_channel_muted';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Create the Android notification channel used for foreground banners. */
-async function ensureAndroidChannel(): Promise<string> {
-  if (Platform.OS !== 'android') return ANDROID_CHANNEL_ID;
-  return notifee.createChannel({
+/** Create the Android notification channels used for banners. */
+async function ensureAndroidChannels(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await notifee.createChannel({
     id: ANDROID_CHANNEL_ID,
     name: '알림',
     importance: AndroidImportance.HIGH,
     sound: 'default',
   });
+  await notifee.createChannel({
+    id: CHAT_CHANNEL_ID,
+    name: '채팅',
+    importance: AndroidImportance.HIGH,
+    sound: 'default',
+  });
+  await notifee.createChannel({
+    id: CHAT_MUTED_CHANNEL_ID,
+    name: '채팅 (무음)',
+    // LOW: still lands in the tray, but no sound, vibration or heads-up —
+    // what "이 채팅방 알림 끄기" means for a per-room mute.
+    importance: AndroidImportance.LOW,
+  });
 }
 
 /** Ask for notification permission (alert + badge + sound) and register APNs. */
 export async function requestNotificationPermission(): Promise<boolean> {
-  await ensureAndroidChannel();
+  await ensureAndroidChannels();
 
   if (Platform.OS === 'android') {
     // Android 13+ (API 33) requires an explicit POST_NOTIFICATIONS grant.
@@ -72,15 +104,31 @@ export async function getFcmTokenWithRetry(retries = 3, delayMs = 1000): Promise
   return null;
 }
 
+/** The chat room this payload belongs to, or null if it isn't a chat push. */
+function chatRoomIdOf(data?: Record<string, unknown>): string | null {
+  if (!data || data.type !== 'CHAT') return null;
+  const chatRoomId = data.chatRoomId;
+  return typeof chatRoomId === 'string' && chatRoomId !== '' ? chatRoomId : null;
+}
+
 /** Helper to display a notification with grouping support. */
 async function handleDisplayNotification(remoteMessage: any): Promise<void> {
-  await ensureAndroidChannel();
+  await ensureAndroidChannels();
 
-  const chatRoomId = remoteMessage.data?.chatRoomId;
-  const isChat = remoteMessage.data?.type === 'CHAT' && typeof chatRoomId === 'string' && chatRoomId !== '';
+  const data = remoteMessage.data as Record<string, unknown> | undefined;
+  const chatRoomId = chatRoomIdOf(data);
+  // Per-room mute: the server sends chat as data-only on Android, so the
+  // quiet-vs-noisy choice it used to make by naming a channel arrives here.
+  const muted = data?.muted === 'true';
+  const channelId = chatRoomId
+    ? muted
+      ? CHAT_MUTED_CHANNEL_ID
+      : CHAT_CHANNEL_ID
+    : ANDROID_CHANNEL_ID;
 
-  const title = remoteMessage.notification?.title || remoteMessage.data?.chatRoomName || remoteMessage.data?.title || '새 메시지';
-  const body = remoteMessage.notification?.body || remoteMessage.data?.messageText || remoteMessage.data?.body || '';
+  const title =
+    remoteMessage.notification?.title || data?.chatRoomName || data?.title || '새 메시지';
+  const body = remoteMessage.notification?.body || data?.messageText || data?.body || '';
 
   await notifee.displayNotification({
     // Mirror the FCM messageId as notifee's own id so a later
@@ -93,29 +141,59 @@ async function handleDisplayNotification(remoteMessage: any): Promise<void> {
     body,
     data: remoteMessage.data,
     android: {
-      channelId: ANDROID_CHANNEL_ID,
+      channelId,
       pressAction: { id: 'default' },
-      sound: 'default',
-      ...(isChat ? { groupId: chatRoomId } : {}),
+      ...(muted ? {} : { sound: 'default' }),
+      ...(chatRoomId ? { groupId: chatRoomId } : {}),
     },
     ios: {
-      sound: 'default',
-      ...(isChat ? { threadId: chatRoomId } : {}),
+      ...(muted ? {} : { sound: 'default' }),
+      ...(chatRoomId ? { threadId: chatRoomId } : {}),
     },
   });
 
-  if (Platform.OS === 'android' && isChat) {
+  if (Platform.OS === 'android' && chatRoomId) {
     await notifee.displayNotification({
-      id: chatRoomId, // 요약본은 채팅방 고유 ID를 사용해 하나만 유지
+      // Stable per room so the tray keeps exactly one summary, and prefixed so
+      // the tap-dedupe ring lets a repeat tap on it through (pendingIntent.ts).
+      id: `${GROUP_SUMMARY_ID_PREFIX}${chatRoomId}`,
       title,
       body: '새로운 메시지가 있습니다.',
+      // The summary is what the user actually taps once the room's messages
+      // collapse, so it needs the same routing payload as its children —
+      // without it `resolveNavIntent` gets `undefined` and the tap goes nowhere.
+      data: remoteMessage.data,
       android: {
-        channelId: ANDROID_CHANNEL_ID,
+        channelId,
         groupId: chatRoomId,
         groupSummary: true,
+        // Children already alert; without this the summary alerts too and one
+        // message buzzes twice.
+        groupAlertBehavior: AndroidGroupAlertBehavior.CHILDREN,
         pressAction: { id: 'default' },
       },
     });
+  }
+}
+
+/**
+ * Clear every notification still showing for a chat room once one of them is
+ * tapped. The children auto-cancel themselves, but the summary we posted by
+ * hand does not — left alone it keeps "새로운 메시지가 있습니다." in the tray
+ * for a room the user has already opened.
+ */
+async function clearChatGroup(data?: Record<string, unknown>): Promise<void> {
+  const chatRoomId = chatRoomIdOf(data);
+  if (!chatRoomId) return;
+  try {
+    const displayed = await notifee.getDisplayedNotifications();
+    const ids = displayed
+      .filter((d) => chatRoomIdOf(d.notification.data) === chatRoomId)
+      .map((d) => d.id)
+      .filter((id): id is string => !!id);
+    if (ids.length > 0) await notifee.cancelDisplayedNotifications(ids);
+  } catch (err) {
+    console.warn('[fcm] failed to clear chat notification group', err);
   }
 }
 
@@ -169,6 +247,7 @@ export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () =
   const unsubNotifee = notifee.onForegroundEvent(({ type, detail }) => {
     if (type === EventType.PRESS) {
       if (isDuplicate(detail.notification?.id)) return;
+      void clearChatGroup(detail.notification?.data);
       const intent = resolveNavIntent(detail.notification?.data);
       if (intent) deliver(intent);
     }
@@ -223,6 +302,7 @@ export function registerBackgroundHandlers(): void {
   notifee.onBackgroundEvent(async ({ type, detail }) => {
     if (type !== EventType.PRESS) return;
     if (isDuplicate(detail.notification?.id)) return;
+    await clearChatGroup(detail.notification?.data);
     deliver(resolveNavIntent(detail.notification?.data));
   });
 }
