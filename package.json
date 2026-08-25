@@ -1,7 +1,7 @@
 {
   "name": "intip-mobile-app",
   "main": "expo-router/entry",
-  "version": "3.0.10",
+  "version": "3.0.11",
   "dependencies": {
     "@expo/ui": "~56.0.18",
     "@notifee/react-native": "^9.1.8",
@@ -27,11 +27,13 @@
     "expo-system-ui": "~56.0.5",
     "expo-updates": "~56.0.23",
     "expo-web-browser": "~56.0.5",
+    "expo-widgets": "~56.0.26",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
     "react-native-blob-util": "^0.24.10",
     "react-native-gesture-handler": "~2.31.1",
+    "react-native-keyboard-controller": "1.21.6",
     "react-native-permissions": "^5.6.0",
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
@@ -58,6 +60,7 @@
     "web": "expo start --web",
     "prebuild": "expo prebuild",
     "prebuild:clean": "expo prebuild --clean",
+    "build:android": "./scripts/android-release.sh",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest"

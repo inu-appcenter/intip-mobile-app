@@ -32,6 +32,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useKeyboardState } from 'react-native-keyboard-controller';
 import { useFocusEffect, useNavigationContainerRef, useRouter } from 'expo-router';
 import WebView, {
   type WebViewMessageEvent,
@@ -45,14 +46,17 @@ import { useShareIntentContext } from 'expo-share-intent';
 // compiled from source (no npm package / registry). See AGENTS.md.
 import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
 import { nativeAlert } from '../../modules/intip-native-dialog';
+import SplashArt from './SplashArt';
 import {
   APP_UA_SUFFIX,
   PORTAL_HOST,
   STRINGS,
+  SYSTEM_BACK_GESTURE_EDGE_DP,
   isMainTabPath,
 } from '../webview/constants';
 import {
   INJECTED_SCRIPT,
+  buildEdgeLongPressGuardScript,
   LAUNCH_CLEANUP_SCRIPT,
   buildBridgeShimScript,
   buildSafeAreaInsetsScript,
@@ -97,14 +101,12 @@ const REVEAL_OVERLAY_TIMEOUT_MS = 4000;
 const OVERLAY_FADE_MS = 250;
 
 /**
- * Width (dp) of the band along each screen edge that Android reserves for the
- * system back gesture. AOSP's inset is 20dp; OEM skins (One UI) can widen it,
- * so guard slightly more than the platform minimum.
+ * Travel (dp) that commits a touch to being a swipe rather than a tap. Kept
+ * well under gesture-handler's default pan slop (10dp) so a *slow* back swipe
+ * still hands the touch to the guard early, before the WebView's long-press
+ * timer can fire (issue #25).
  */
-const SYSTEM_BACK_GESTURE_EDGE_DP = 24;
-
-/** Travel (dp) that commits a touch to being a swipe rather than a tap. */
-const EDGE_GUARD_SLOP_DP = 8;
+const EDGE_GUARD_SLOP_DP = 4;
 
 /**
  * How long a back press waits for the page's `backResult` before the shell
@@ -227,6 +229,18 @@ export default function WebViewContainer({ url, mode }: Props) {
   const beforeContentScript = useMemo(
     () => BEFORE_CONTENT_SCRIPT + buildSafeAreaInsetsScript(insets),
     [insets],
+  );
+
+  // Document-end script + the in-page half of the back-gesture guard (issue
+  // #25): the native edge guard below can only cancel the WebView's touches
+  // once the finger has travelled, so the page also suppresses its long-press
+  // affordances for any touch that starts in the system back-gesture band.
+  // Module-constant, but built here so both halves share one edge width.
+  const documentEndScript = useMemo(
+    () =>
+      INJECTED_SCRIPT +
+      buildEdgeLongPressGuardScript(SYSTEM_BACK_GESTURE_EDGE_DP),
+    [],
   );
 
   // Connect this container to the WebView orchestrator (shared dev controller).
@@ -666,6 +680,22 @@ export default function WebViewContainer({ url, mode }: Props) {
     webViewRef.current?.reload();
   }, []);
 
+  // Soft-keyboard avoidance (Android). The app runs edge-to-edge, and under
+  // edge-to-edge Android stops honouring `adjustResize`: the window keeps its
+  // full height when the IME opens, so the WebView viewport never shrinks and
+  // the keyboard simply covers whatever input sits at the bottom of the page.
+  //
+  // `KeyboardProvider` (see `app/_layout.tsx`) reports the real IME inset, and
+  // padding the container by it reproduces what `adjustResize` used to do:
+  // the WebView gets shorter, so the engine scrolls the focused input into the
+  // remaining viewport by itself.
+  //
+  // iOS is deliberately left at 0 — WKWebView already insets its own scroll
+  // view for the keyboard, so shrinking the host view too would double-count
+  // and push the focused input a keyboard's height too far up.
+  const keyboardHeight = useKeyboardState((state) => state.height);
+  const keyboardInset = Platform.OS === 'android' ? keyboardHeight : 0;
+
   // Root sits on the main tabs -> no WebView-level swipe-back; sub-pages let the
   // native stack own the swipe so it pops the screen (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
@@ -682,9 +712,10 @@ export default function WebViewContainer({ url, mode }: Props) {
   // touch stream in the WebView underneath, so the long-press never fires. They
   // only claim the touch once it travels inward horizontally (the direction the
   // back gesture pulls) and bail on a vertical drag, so tapping and scrolling
-  // near the edge still reach the page exactly as before. A touch that just
-  // rests at the edge never activates them and still long-presses normally —
-  // that mis-grab is rare enough not to be worth blocking.
+  // near the edge still reach the page exactly as before. A touch that only
+  // rests at the edge without travelling never activates them — that case is
+  // covered by the in-page guard (`buildEdgeLongPressGuardScript`), which
+  // suppresses the long-press affordances without cancelling the touch.
   const backGestureGuard = useMemo(() => {
     const guard = (edge: 'left' | 'right') =>
       Gesture.Pan()
@@ -721,7 +752,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       // Bridge wiring: shims + alert override before content, observers after.
       onMessage={onWebViewMessage}
       injectedJavaScriptBeforeContentLoaded={beforeContentScript}
-      injectedJavaScript={INJECTED_SCRIPT}
+      injectedJavaScript={documentEndScript}
       onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
       onNavigationStateChange={onNavigationStateChange}
       onLoadEnd={onLoadEnd}
@@ -752,8 +783,11 @@ export default function WebViewContainer({ url, mode }: Props) {
   );
 
   return (
-    // Fill the screen; ignore the bottom inset so content reaches the edge.
-    <View style={[styles.fill, { backgroundColor }]}>
+    // Fill the screen; ignore the bottom inset so content reaches the edge —
+    // except for the soft keyboard, which the container gives up room to.
+    <View
+      style={[styles.fill, { backgroundColor, paddingBottom: keyboardInset }]}
+    >
       {isRoot ? (
         // Root goes fully edge-to-edge on every side; the web owns all four
         // insets via env(safe-area-inset-*) / the injected CSS vars above.
@@ -770,9 +804,23 @@ export default function WebViewContainer({ url, mode }: Props) {
       {overlayVisible && (
         <Animated.View
           pointerEvents="none"
-          style={[styles.overlay, { backgroundColor, opacity: overlayOpacity }]}
+          style={[
+            styles.overlay,
+            { opacity: overlayOpacity },
+            // Root paints its own background inside SplashArt.
+            isRoot ? null : { backgroundColor },
+          ]}
         >
-          <ActivityIndicator size="large" color={INDICATOR_COLOR} />
+          {isRoot ? (
+            // Root's overlay *is* the launch screen: it continues the system
+            // splash (same background, same logo at the same fixed dp) and adds
+            // the artwork the system splash cannot draw, then cross-fades away
+            // once the web signals the launch cleanup is done. A spinner here
+            // would read as a second, unbranded loading screen.
+            <SplashArt />
+          ) : (
+            <ActivityIndicator size="large" color={INDICATOR_COLOR} />
+          )}
         </Animated.View>
       )}
     </View>

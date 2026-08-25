@@ -113,8 +113,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
+          # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
+          # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
+          node-version: 24
+          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
+          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
+          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
+          # 오래 걸린다.
 
       - name: Install dependencies
         run: npm ci
@@ -243,8 +249,14 @@ jobs:
         if: steps.native_guard.outputs.changed != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
+          # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
+          # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
+          node-version: 24
+          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
+          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
+          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
+          # 오래 걸린다.
 
       - name: Install dependencies
         if: steps.native_guard.outputs.changed != 'true'
@@ -329,8 +341,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
+          # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
+          # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
+          node-version: 24
+          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
+          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
+          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
+          # 오래 걸린다.
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -356,8 +374,12 @@ jobs:
       - name: Decode google-services.json
         run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > google-services.json
 
+      # `--clean`: self-hosted 러너는 _work 디렉터리를 계속 재사용하므로 이전
+      # 실행이 남긴 android/ 가 그대로 있다. clean 없이 돌리면 mod 가 이미 패치된
+      # 파일 위에 다시 적용될 뿐 아니라, app.json 에서 **빼낸** 플러그인이
+      # 만들어 둔 타깃/entitlement 가 지워지지 않고 그대로 빌드에 들어간다.
       - name: Prebuild (android)
-        run: npx expo prebuild --platform android
+        run: npx expo prebuild --clean --platform android
 
       - name: Build signed release AAB and APK
         working-directory: android
@@ -420,8 +442,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
+          # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
+          # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
+          node-version: 24
+          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
+          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
+          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
+          # 오래 걸린다.
 
       # setup-xcode는 `sudo xcode-select -s`로 머신 전역의 활성 Xcode를 바꾼다.
       # 매 실행 폐기되는 GitHub-hosted 이미지에서는 무해했지만 self-hosted는
@@ -536,8 +564,12 @@ jobs:
           NEXT_BUILD_NUMBER=$(node scripts/ios-next-build-number.js)
           echo "EXPO_IOS_BUILD_NUMBER=$NEXT_BUILD_NUMBER" >> "$GITHUB_ENV"
 
+      # `--clean`: self-hosted 러너는 _work 디렉터리를 계속 재사용하므로 이전
+      # 실행이 남긴 ios/ 가 그대로 있다. clean 없이 돌리면 mod 가 이미 패치된
+      # 파일 위에 다시 적용될 뿐 아니라, app.json 에서 **빼낸** 플러그인이
+      # 만들어 둔 타깃/entitlement 가 지워지지 않고 그대로 빌드에 들어간다.
       - name: Prebuild (ios)
-        run: npx expo prebuild --platform ios
+        run: npx expo prebuild --clean --platform ios
 
       # -allowProvisioningUpdates 없음: withIOSManualSigning이 prebuild 때
       # 이미 INTIP 타깃(Release)을 Manual + 위에서 넣은 프로파일/인증서로

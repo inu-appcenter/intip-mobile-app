@@ -41,6 +41,13 @@ module.exports = function withAndroidReleaseSigning(config) {
   return withAppBuildGradle(config, (cfg) => {
     let contents = cfg.modResults.contents;
 
+    // `expo prebuild` without `--clean` re-runs this mod over the *already
+    // patched* build.gradle, so bail out early instead of double-inserting the
+    // signingConfig block and then throwing on the (already replaced) anchor.
+    if (contents.includes('signingConfigs.release')) {
+      return cfg;
+    }
+
     if (!contents.includes('signingConfigs {')) {
       throw new Error(
         'withAndroidReleaseSigning: no `signingConfigs {` block found in ' +

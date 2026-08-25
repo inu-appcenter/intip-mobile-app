@@ -1,19 +1,32 @@
-import { useEffect } from 'react';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useColorScheme } from 'react-native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { ShareIntentProvider } from 'expo-share-intent';
+import { Stack } from "expo-router";
+import { ShareIntentProvider } from "expo-share-intent";
+import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
+import { useColorScheme } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 
-import WebViewControllerPanel from '../components/WebViewControllerPanel';
-import { registerBackgroundHandlers, requestNotificationPermission } from '../push/messaging';
-import { checkForUpdate } from '../native/updateCheck';
-import { WebViewProvider } from '../webview/WebViewContext';
-import { backgroundColorFor } from '../theme';
+import WebViewControllerPanel from "../components/WebViewControllerPanel";
+import { checkForUpdate } from "../native/updateCheck";
+import {
+  registerBackgroundHandlers,
+  requestNotificationPermission,
+} from "../push/messaging";
+import { backgroundColorFor } from "../theme";
+import { WebViewProvider } from "../webview/WebViewContext";
 
 // Background FCM/notifee handlers must be registered before React renders so
 // they survive a background/quit launch.
 registerBackgroundHandlers();
+
+// Hold the system splash until SplashArt has actually drawn its artwork, so it
+// hands straight over instead of flashing the bare window background in
+// between. SplashArt itself calls `hideAsync` once its images report they are
+// on screen. Both calls here must run in global scope, before the first
+// render.
+void SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ duration: 250, fade: true });
 
 export default function RootLayout() {
   const scheme = useColorScheme();
@@ -27,6 +40,10 @@ export default function RootLayout() {
     void requestNotificationPermission();
     // Check for OTA updates (non-blocking; shows a prompt if one is available).
     void checkForUpdate();
+    // The home screen widget is not part of this release — the expo-widgets
+    // plugin is off in app.json until the iOS App Group / provisioning profiles
+    // are in place, so there is no widget target to seed. `src/widgets/` stays
+    // for when it is turned back on.
   }, []);
 
   return (
@@ -34,35 +51,50 @@ export default function RootLayout() {
     // (the dev controller panel) work; native-stack transitions/swipe-back are
     // handled natively by react-native-screens and don't depend on it.
     <GestureHandlerRootView style={{ flex: 1 }}>
-
-      {/* Must wrap everything else (per expo-share-intent's own docs) so the
+      {/* The app runs edge-to-edge (`edgeToEdgeEnabled=true`), so Android no
+          longer resizes the window for the soft keyboard — `adjustResize` in
+          the manifest is effectively a no-op there and the IME just covers the
+          bottom of the WebView. KeyboardProvider reports the real IME insets
+          instead, which `WebViewContainer` turns into bottom padding so the
+          WebView viewport shrinks like `adjustResize` used to.
+          The three Android flags below tell it the app already draws behind
+          the status/navigation bars, so it must not re-apply those insets. */}
+      <KeyboardProvider
+        statusBarTranslucent
+        navigationBarTranslucent
+        preserveEdgeToEdge
+      >
+        {/* Must wrap everything else (per expo-share-intent's own docs) so the
           native module's deep-link-triggered cold start is caught before any
           other provider mounts. Android only for now — the plugin config
           (app.json) sets `disableIOS`, so this is a no-op on iOS. */}
-      <ShareIntentProvider>
-        {/* WebViewProvider orchestrates every WebView container (root + pushed
+        <ShareIntentProvider>
+          {/* WebViewProvider orchestrates every WebView container (root + pushed
             sub-pages) and backs the debug controller (dev menu + panel). */}
-              <WebViewProvider>
-        <StatusBar style="auto" />
-        <Stack
-          screenOptions={{ headerShown: false, contentStyle: { backgroundColor: contentBackgroundColor } }}
-        >
-          {/* Root portal: main tabs live here via SPA routing. Swipe-back is
-              disabled so it never conflicts with the bottom tab navigation. */}
-          <Stack.Screen name="index" options={{ gestureEnabled: false }} />
-            <Stack.Screen
-              name="webview"
-              options={{
-                animation: 'default',
-                gestureEnabled: true,
-
+          <WebViewProvider>
+            <StatusBar style="auto" />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: contentBackgroundColor },
               }}
-            />
-          </Stack>
-          {/* Debug-only GUI controller, rendered above the whole stack. */}
-          <WebViewControllerPanel />
-        </WebViewProvider>
-      </ShareIntentProvider>
+            >
+              {/* Root portal: main tabs live here via SPA routing. Swipe-back is
+              disabled so it never conflicts with the bottom tab navigation. */}
+              <Stack.Screen name="index" options={{ gestureEnabled: false }} />
+              <Stack.Screen
+                name="webview"
+                options={{
+                  animation: "default",
+                  gestureEnabled: true,
+                }}
+              />
+            </Stack>
+            {/* Debug-only GUI controller, rendered above the whole stack. */}
+            <WebViewControllerPanel />
+          </WebViewProvider>
+        </ShareIntentProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }
