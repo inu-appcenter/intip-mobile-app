@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach } from '@jest/globals';
-import { consumePending, deliver, isDuplicate, subscribe, __resetForTests } from '../pendingIntent';
+import {
+  GROUP_SUMMARY_ID_PREFIX,
+  consumePending,
+  deliver,
+  isDuplicate,
+  subscribe,
+  __resetForTests,
+} from '../pendingIntent';
 import type { NavIntent } from '../navIntent';
 
 const intentA: NavIntent = { kind: 'spa', path: '/home' };
@@ -107,6 +114,25 @@ describe('isDuplicate (dedupe ring buffer)', () => {
     // A 9th id evicts the oldest (msg-1).
     expect(isDuplicate('msg-9')).toBe(false);
     expect(isDuplicate('msg-1')).toBe(false); // evicted -> treated as new again
+  });
+
+  it('never flags an Android group-summary id, whose id is stable per chat room', () => {
+    // The summary for a room is re-displayed under the same id on every new
+    // message, so a repeat is a genuinely new tap — not the one-tap-two-paths
+    // race the ring buffer exists to collapse.
+    const summaryId = `${GROUP_SUMMARY_ID_PREFIX}42`;
+    expect(isDuplicate(summaryId)).toBe(false);
+    expect(isDuplicate(summaryId)).toBe(false);
+    expect(isDuplicate(summaryId)).toBe(false);
+  });
+
+  it('keeps the summary exemption from consuming a ring slot', () => {
+    expect(isDuplicate(`${GROUP_SUMMARY_ID_PREFIX}42`)).toBe(false);
+    for (let i = 1; i <= 8; i++) {
+      expect(isDuplicate(`msg-${i}`)).toBe(false);
+    }
+    // msg-1 survives: the summary check returned before touching the buffer.
+    expect(isDuplicate('msg-1')).toBe(true);
   });
 });
 

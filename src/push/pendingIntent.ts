@@ -24,6 +24,13 @@ import type { NavIntent } from './navIntent';
  * a time, this is just headroom for rapid multi-notification launches. */
 const DEDUPE_RING_SIZE = 8;
 
+/**
+ * Id prefix for Android group-summary notifications (see `messaging.ts`).
+ * Lives here rather than in `messaging.ts` because `isDuplicate` is the one
+ * that has to recognise it, and this module stays Firebase/notifee-free.
+ */
+export const GROUP_SUMMARY_ID_PREFIX = 'summary:';
+
 let pending: NavIntent | null = null;
 let subscriber: ((intent: NavIntent) => void) | null = null;
 const seenIds: string[] = [];
@@ -36,6 +43,13 @@ const seenIds: string[] = [];
  */
 export function isDuplicate(id: string | null | undefined): boolean {
   if (!id) return false;
+  // Android group summaries are re-displayed under one *stable* id per chat
+  // room (`summary:<chatRoomId>`) so the tray keeps a single summary per room.
+  // That makes them the one id space where a repeat is a genuinely new tap,
+  // not the two-paths-one-tap race this ring buffer exists to collapse —
+  // without this exemption the second tap on a room's summary would be
+  // swallowed forever.
+  if (id.startsWith(GROUP_SUMMARY_ID_PREFIX)) return false;
   if (seenIds.includes(id)) return true;
   seenIds.push(id);
   if (seenIds.length > DEDUPE_RING_SIZE) seenIds.shift();
