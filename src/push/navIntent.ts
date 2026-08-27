@@ -8,7 +8,7 @@ import { PUSH_EXTERNAL_HOSTS, isMainTabPath, portalUrlFor } from '../webview/con
 import { extractCandidate, extractNavPath } from './navPath';
 import { routeForType } from './routeMap';
 
-export type NavIntent =
+export type NavIntent = (
   // Main-tab destination: drive the root instance's own SPA (`goHome`).
   | { kind: 'spa'; path: string }
   // Non-main-tab destination: push a native sub-page instance (`pushSub`).
@@ -16,7 +16,30 @@ export type NavIntent =
   // requires one, it doesn't accept a bare path.
   | { kind: 'push'; path: string; url: string }
   // Off-portal, allow-listed host: hand off to the in-app browser.
-  | { kind: 'external'; url: string };
+  | { kind: 'external'; url: string }
+) & {
+  /** Present only for a push-notification tap; share/deep-link intents omit it. */
+  fcmMessageId?: number;
+};
+
+/**
+ * FCM data values arrive as strings. Convert only a positive safe integer so
+ * malformed payloads can never turn into a request for the wrong notification.
+ */
+export function extractFcmMessageId(data?: Record<string, unknown>): number | undefined {
+  const value = data?.fcmMessageId;
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return undefined;
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+}
+
+function withFcmMessageId(intent: NavIntent, data?: Record<string, unknown>): NavIntent {
+  const fcmMessageId = extractFcmMessageId(data);
+  return fcmMessageId === undefined ? intent : { ...intent, fcmMessageId };
+}
 
 /** True when `host` is (or is a subdomain of) one of the allow-listed domains. */
 function isAllowedExternalHost(host: string): boolean {
@@ -55,14 +78,14 @@ export function intentForPortalPath(path: string): NavIntent {
 export function resolveNavIntent(data?: Record<string, unknown>): NavIntent | null {
   const mappedPath = routeForType(data);
   const portalPath = mappedPath ?? extractNavPath(data);
-  if (portalPath) return intentForPortalPath(portalPath);
+  if (portalPath) return withFcmMessageId(intentForPortalPath(portalPath), data);
 
   const candidate = extractCandidate(data);
   if (!candidate) return null;
   try {
     const u = new URL(candidate);
     if (/^https?:$/.test(u.protocol) && isAllowedExternalHost(u.host)) {
-      return { kind: 'external', url: candidate };
+      return withFcmMessageId({ kind: 'external', url: candidate }, data);
     }
   } catch {
     /* not a URL */

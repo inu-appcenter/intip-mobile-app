@@ -251,6 +251,10 @@ export default function WebViewContainer({ url, mode }: Props) {
   const canGoBackRef = useRef(false);
   const lastBackPressRef = useRef(0);
   const pendingNavRef = useRef<string | null>(null);
+  // `onLoadEnd` does not guarantee the web app has registered its NativeToWeb
+  // handlers. Wait for its explicit `bridgeReady` acknowledgement instead.
+  const webBridgeReadyRef = useRef(false);
+  const pendingNotificationOpenedRef = useRef<{ fcmMessageId: number; path?: string } | null>(null);
   const cleanupStartedRef = useRef(false);
   // Dev controller "load full URL": the URL a developer asked to load in place.
   // Lets `onShouldStartLoadWithRequest` allow that one navigation even off-portal
@@ -282,6 +286,21 @@ export default function WebViewContainer({ url, mode }: Props) {
   const navigateSpa = useCallback((path: string) => {
     bridge.channel.send('navigate', path);
   }, [bridge]);
+
+  const flushPendingNotificationOpened = useCallback(() => {
+    if (!webBridgeReadyRef.current || !pendingNotificationOpenedRef.current) return;
+    bridge.channel.send('notificationOpened', pendingNotificationOpenedRef.current);
+    pendingNotificationOpenedRef.current = null;
+  }, [bridge]);
+
+  const notifyNotificationOpened = useCallback((intent: NavIntent) => {
+    if (intent.fcmMessageId === undefined) return;
+    pendingNotificationOpenedRef.current = {
+      fcmMessageId: intent.fcmMessageId,
+      path: intent.kind === 'external' ? intent.url : intent.path,
+    };
+    flushPendingNotificationOpened();
+  }, [flushPendingNotificationOpened]);
 
   // Idempotent: the load signal and the safety timeout race, and whichever
   // lands first owns the fade.
@@ -317,6 +336,7 @@ export default function WebViewContainer({ url, mode }: Props) {
   // `NavIntent` union, so they share this one dispatcher.
   const handleNavIntent = useCallback(
     (intent: NavIntent) => {
+      notifyNotificationOpened(intent);
       if (intent.kind === 'external') {
         WebBrowser.openBrowserAsync(intent.url).catch(() => {});
       } else if (intent.kind === 'push') {
@@ -349,7 +369,7 @@ export default function WebViewContainer({ url, mode }: Props) {
         pendingNavRef.current = intent.path;
       }
     },
-    [goHome, navigationRef, router],
+    [goHome, navigationRef, notifyNotificationOpened, router],
   );
 
   // OS Share Sheet grade-import (Android only for now — app.json's
@@ -568,6 +588,10 @@ export default function WebViewContainer({ url, mode }: Props) {
   useEffect(() => {
     const { channel } = bridge;
     const offs = [
+      channel.on('bridgeReady', () => {
+        webBridgeReadyRef.current = true;
+        flushPendingNotificationOpened();
+      }),
       // Push a new native sub-page screen (spec §3.B/§4). The web only emits
       // this for non-main-tab destinations.
       channel.on('navigateTo', ({ path, url: target }) => {
@@ -632,7 +656,7 @@ export default function WebViewContainer({ url, mode }: Props) {
     return () => {
       for (const off of offs) off();
     };
-  }, [bridge, dismissOverlay, goHome, id, postFcmToken, registry, router]);
+  }, [bridge, dismissOverlay, flushPendingNotificationOpened, goHome, id, postFcmToken, registry, router]);
 
   // --- External links + Android downloads ------------------------------------
   const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {
@@ -703,6 +727,10 @@ export default function WebViewContainer({ url, mode }: Props) {
       dismissOverlay();
     }
   }, [dismissOverlay, isRoot, navigateSpa, postFcmToken]);
+
+  const onLoadStart = useCallback(() => {
+    if (isRoot) webBridgeReadyRef.current = false;
+  }, [isRoot]);
 
   // Jetsam recovery (iOS content-process termination / Android render-process
   // gone): a visible container just reloads itself in place.
@@ -785,6 +813,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       injectedJavaScript={documentEndScript}
       onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
       onNavigationStateChange={onNavigationStateChange}
+      onLoadStart={onLoadStart}
       onLoadEnd={onLoadEnd}
       onContentProcessDidTerminate={onContentProcessDied}
       onRenderProcessGone={onContentProcessDied}

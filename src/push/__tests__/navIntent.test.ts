@@ -1,8 +1,27 @@
 import { describe, it, expect } from '@jest/globals';
 import { PORTAL_HOST, portalUrlFor } from '../../webview/constants';
-import { resolveNavIntent } from '../navIntent';
+import { extractFcmMessageId, resolveNavIntent } from '../navIntent';
 
 describe('resolveNavIntent', () => {
+  describe('fcmMessageId', () => {
+    it('parses the server payload string and retains it on the navigation intent', () => {
+      expect(extractFcmMessageId({ fcmMessageId: '1234' })).toBe(1234);
+      expect(resolveNavIntent({ path: '/posts/55', fcmMessageId: '1234' })).toEqual({
+        kind: 'push',
+        path: '/posts/55',
+        url: portalUrlFor('/posts/55'),
+        fcmMessageId: 1234,
+      });
+    });
+
+    it('rejects malformed, non-positive, and unsafe notification ids', () => {
+      expect(extractFcmMessageId({ fcmMessageId: '12.5' })).toBeUndefined();
+      expect(extractFcmMessageId({ fcmMessageId: '0' })).toBeUndefined();
+      expect(extractFcmMessageId({ fcmMessageId: '-1' })).toBeUndefined();
+      expect(extractFcmMessageId({ fcmMessageId: '9007199254740992' })).toBeUndefined();
+    });
+  });
+
   describe('empty / missing input', () => {
     it('returns null when there is no data', () => {
       expect(resolveNavIntent(undefined)).toBeNull();
