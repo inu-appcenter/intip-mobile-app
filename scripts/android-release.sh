@@ -5,13 +5,18 @@
 # signingConfigs.release 를 System.getenv(...) 로 채워두기 때문에, Gradle 을
 # 그냥 실행하면 storePassword 가 null 이라
 #   SigningConfig "release" is missing required property "storePassword"
-# 로 죽는다. 이 스크립트는 .env.android.local 을 export 한 뒤 Gradle 을 부른다.
+# 로 죽는다. 이 스크립트는 .android-release.env.local 을 export 한 뒤 Gradle 을 부른다.
+#
+# 파일 이름이 `.env` 로 시작하면 안 된다: 개발 번들에서 Expo 의 가상 env 모듈이
+# require.context(projectRoot, false, /^\.\/\.env/) 로 루트의 `.env*` 를 전부
+# 모듈 그래프에 넣는데, Expo 가 아는 이름(.env[.local|.development|.production])
+# 이 아니면 파싱을 안 해주고 그대로 babel 로 넘겨 Metro 가 SyntaxError 로 죽는다.
 # CI 는 같은 이름의 GitHub Secrets 를 쓰므로 이 스크립트가 필요 없다.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-ENV_FILE=".env.android.local"
+ENV_FILE=".android-release.env.local"
 if [ ! -f "$ENV_FILE" ]; then
   echo "$ENV_FILE 이 없다. 키스토어 자격증명을 채운 뒤 다시 실행할 것." >&2
   exit 1

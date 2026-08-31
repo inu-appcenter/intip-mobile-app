@@ -36,6 +36,10 @@ yarn-error.*
 
 # local env files
 .env*.local
+# Android 릴리스 서명 자격증명. 이름이 `.env` 로 시작하면 개발 번들에서 Expo 의
+# 가상 env 모듈(expo/virtual/env.js)이 require.context(/^\.\/\.env/) 로 프로젝트
+# 루트의 `.env*` 를 전부 그래프에 끌어와 Metro 가 파싱하려다 죽는다.
+.android-release.env.local
 
 # Firebase config (secrets — supply per environment, do not commit)
 /google-services.json
