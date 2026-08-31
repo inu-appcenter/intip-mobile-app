@@ -103,12 +103,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          # Falls back to the default GITHUB_TOKEN, which only works once
-          # inu-appcenter/intip-bridge grants this repo Actions access
-          # (Settings > Actions > General > Access on the intip-bridge repo).
-          # Until that's set up, add a SUBMODULE_TOKEN repo secret (PAT with
-          # read access to both repos) and it'll be used instead.
-          token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -164,7 +158,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
           # Full history: the guard below diffs the range this push brought in.
           fetch-depth: 0
 
@@ -336,7 +329,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -437,7 +429,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
