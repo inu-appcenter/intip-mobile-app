@@ -197,8 +197,8 @@ export default function WebViewContainer({ url, mode }: Props) {
   const nativeChannelRef = webViewRef as unknown as Parameters<
     typeof createNativeChannel
   >[0];
-  // eslint-disable-next-line react-hooks/refs
   const bridge = useMemo(
+    // eslint-disable-next-line react-hooks/refs
     () => createNativeChannel(nativeChannelRef),
     [nativeChannelRef],
   );
