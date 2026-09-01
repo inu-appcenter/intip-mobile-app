@@ -58,3 +58,5 @@ example
 /modules/*/android/build/
 
 ios_distribution.cer
+
+services_account.json
