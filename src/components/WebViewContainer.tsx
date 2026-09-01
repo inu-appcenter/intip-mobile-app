@@ -17,10 +17,14 @@
  * push-notification lifecycle, the native-stack navigator registration (for the
  * dev controller / `restoreSession`), and the launch cache-purge overlay.
  */
-import { useFocusEffect, useNavigationContainerRef, useRouter } from 'expo-router';
-import { useShareIntentContext } from 'expo-share-intent';
-import * as WebBrowser from 'expo-web-browser';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useFocusEffect,
+  useNavigationContainerRef,
+  useRouter,
+} from "expo-router";
+import { useShareIntentContext } from "expo-share-intent";
+import * as WebBrowser from "expo-web-browser";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -32,42 +36,45 @@ import {
   ToastAndroid,
   useColorScheme,
   View,
-} from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useKeyboardState } from 'react-native-keyboard-controller';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+} from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { useKeyboardState } from "react-native-keyboard-controller";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import WebView, {
   type WebViewMessageEvent,
   type WebViewNavigation,
-} from 'react-native-webview';
-import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
+} from "react-native-webview";
+import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTypes";
 
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
-import { nativeAlert } from '../../modules/intip-native-dialog';
-import { createNativeChannel } from '../../packages/intip-bridge/src/adapters/native';
-import { clearCacheAndReload, clearWebViewCache } from '../native/cache';
-import { saveDownload } from '../native/downloads';
-import { ensureLocationPermission } from '../native/permissions';
-import { clearTokenInfo, saveTokenInfo } from '../native/secureTokenStore';
-import { flushPendingFcmToken } from '../push/fcmTokenSync';
+import { nativeAlert } from "../../modules/intip-native-dialog";
+import { createNativeChannel } from "../../packages/intip-bridge/src/adapters/native";
+import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
+import { saveDownload } from "../native/downloads";
+import { ensureLocationPermission } from "../native/permissions";
+import { clearTokenInfo, saveTokenInfo } from "../native/secureTokenStore";
+import { flushPendingFcmToken } from "../push/fcmTokenSync";
 import {
   getFcmTokenWithRetry,
   getInitialNavIntent,
   setupForegroundNotifications,
   subscribeNotificationOpen,
   type NavIntent,
-} from '../push/messaging';
-import { resolveGradeShareIntent } from '../share/gradeShareIntent';
-import { backgroundColorFor, INDICATOR_COLOR } from '../theme';
-import { resolveBackAction } from '../webview/backPolicy';
+} from "../push/messaging";
+import { resolveGradeShareIntent } from "../share/gradeShareIntent";
+import { backgroundColorFor, INDICATOR_COLOR } from "../theme";
+import { resolveBackAction } from "../webview/backPolicy";
 import {
   APP_UA_SUFFIX,
   isMainTabPath,
   PORTAL_HOST,
   STRINGS,
   SYSTEM_BACK_GESTURE_EDGE_DP,
-} from '../webview/constants';
+} from "../webview/constants";
 import {
   buildBridgeShimScript,
   buildEdgeLongPressGuardScript,
@@ -75,20 +82,36 @@ import {
   INJECTED_SCRIPT,
   isGeoPermissionRequest,
   LAUNCH_CLEANUP_SCRIPT,
-} from '../webview/injectedScript';
-import { openSubPageDepth } from '../webview/subPageStack';
-import { relayWebConsoleMessage, WEB_CONSOLE_SCRIPT } from '../webview/webConsole';
+} from "../webview/injectedScript";
+import { openSubPageDepth } from "../webview/subPageStack";
+import {
+  relayWebConsoleMessage,
+  WEB_CONSOLE_SCRIPT,
+} from "../webview/webConsole";
 import {
   nextWebViewSeq,
   useWebViewRegistry,
   type WebViewHandle,
-} from '../webview/WebViewContext';
-import SplashArt from './SplashArt';
+} from "../webview/WebViewContext";
+import SplashArt from "./SplashArt";
 
 /** Extensions we treat as downloads on Android (iOS uses onFileDownload). */
 const DOWNLOAD_EXTENSIONS = [
-  '.pdf', '.hwp', '.hwpx', '.doc', '.docx', '.xls', '.xlsx',
-  '.ppt', '.pptx', '.zip', '.csv', '.txt', '.png', '.jpg', '.jpeg',
+  ".pdf",
+  ".hwp",
+  ".hwpx",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+  ".zip",
+  ".csv",
+  ".txt",
+  ".png",
+  ".jpg",
+  ".jpeg",
 ];
 
 /** Hard cap on how long the launch overlay waits for the web cleanup signal. */
@@ -139,7 +162,9 @@ const BACK_DELEGATION_TIMEOUT_MS = 350;
 let locationPermissionPrimed = false;
 
 /** Bridge shim is platform-specific (see injectedScript.ts). */
-const BRIDGE_SHIM_SCRIPT = buildBridgeShimScript(Platform.OS === 'ios' ? 'ios' : 'android');
+const BRIDGE_SHIM_SCRIPT = buildBridgeShimScript(
+  Platform.OS === "ios" ? "ios" : "android",
+);
 
 /** Dev builds also relay the web's console.* to the Metro log (webConsole.ts). */
 const BEFORE_CONTENT_SCRIPT = __DEV__
@@ -147,7 +172,7 @@ const BEFORE_CONTENT_SCRIPT = __DEV__
   : BRIDGE_SHIM_SCRIPT;
 
 function looksLikeDownload(url: string): boolean {
-  const path = url.split('?')[0].toLowerCase();
+  const path = url.split("?")[0].toLowerCase();
   return DOWNLOAD_EXTENSIONS.some((ext) => path.endsWith(ext));
 }
 
@@ -155,7 +180,7 @@ type Props = {
   /** Absolute URL this container loads. */
   url: string;
   /** Root portal hosts the main tabs; sub-pages are pushed on top. */
-  mode: 'root' | 'sub';
+  mode: "root" | "sub";
 };
 
 export default function WebViewContainer({ url, mode }: Props) {
@@ -169,9 +194,14 @@ export default function WebViewContainer({ url, mode }: Props) {
   // one (13.16.1), so TS resolves two structurally-different `WebView`
   // classes (their default generic differs: `{}` vs `undefined`) for what is
   // the exact same runtime ref at build/run time.
-  const nativeChannelRef = webViewRef as unknown as Parameters<typeof createNativeChannel>[0];
+  const nativeChannelRef = webViewRef as unknown as Parameters<
+    typeof createNativeChannel
+  >[0];
   // eslint-disable-next-line react-hooks/refs
-  const bridge = useMemo(() => createNativeChannel(nativeChannelRef), [nativeChannelRef]);
+  const bridge = useMemo(
+    () => createNativeChannel(nativeChannelRef),
+    [nativeChannelRef],
+  );
 
   // Prime location (campus map) permission lazily — the first time any
   // mounted page actually calls `navigator.geolocation` (see
@@ -212,7 +242,7 @@ export default function WebViewContainer({ url, mode }: Props) {
   const navigationRef = useNavigationContainerRef();
   const scheme = useColorScheme();
   const backgroundColor = backgroundColorFor(scheme);
-  const isRoot = mode === 'root';
+  const isRoot = mode === "root";
   // Root reserves no inset natively (the web owns all four via
   // env(safe-area-inset-*) + the injected --native-safe-area-inset-* below).
   // Sub-pages still let native reserve left/right (notch/landscape), but never
@@ -247,14 +277,17 @@ export default function WebViewContainer({ url, mode }: Props) {
   const registry = useWebViewRegistry();
   const [id] = useState(() => `${mode}-${nextWebViewSeq()}`);
 
-  const [currentPath, setCurrentPath] = useState<string>('/');
+  const [currentPath, setCurrentPath] = useState<string>("/");
   const canGoBackRef = useRef(false);
   const lastBackPressRef = useRef(0);
   const pendingNavRef = useRef<string | null>(null);
   // `onLoadEnd` does not guarantee the web app has registered its NativeToWeb
   // handlers. Wait for its explicit `bridgeReady` acknowledgement instead.
   const webBridgeReadyRef = useRef(false);
-  const pendingNotificationOpenedRef = useRef<{ fcmMessageId: number; path?: string } | null>(null);
+  const pendingNotificationOpenedRef = useRef<{
+    fcmMessageId: number;
+    path?: string;
+  } | null>(null);
   const cleanupStartedRef = useRef(false);
   // Dev controller "load full URL": the URL a developer asked to load in place.
   // Lets `onShouldStartLoadWithRequest` allow that one navigation even off-portal
@@ -277,30 +310,40 @@ export default function WebViewContainer({ url, mode }: Props) {
   const postFcmToken = useCallback(async () => {
     const token = await getFcmTokenWithRetry();
     if (token) {
-      bridge.channel.send('receiveFcmToken', token);
+      bridge.channel.send("receiveFcmToken", token);
       registry.mergeSession({ fcmToken: token });
     }
     flushPendingFcmToken();
   }, [bridge, registry]);
 
-  const navigateSpa = useCallback((path: string) => {
-    bridge.channel.send('navigate', path);
-  }, [bridge]);
+  const navigateSpa = useCallback(
+    (path: string) => {
+      bridge.channel.send("navigate", path);
+    },
+    [bridge],
+  );
 
   const flushPendingNotificationOpened = useCallback(() => {
-    if (!webBridgeReadyRef.current || !pendingNotificationOpenedRef.current) return;
-    bridge.channel.send('notificationOpened', pendingNotificationOpenedRef.current);
+    if (!webBridgeReadyRef.current || !pendingNotificationOpenedRef.current)
+      return;
+    bridge.channel.send(
+      "notificationOpened",
+      pendingNotificationOpenedRef.current,
+    );
     pendingNotificationOpenedRef.current = null;
   }, [bridge]);
 
-  const notifyNotificationOpened = useCallback((intent: NavIntent) => {
-    if (intent.fcmMessageId === undefined) return;
-    pendingNotificationOpenedRef.current = {
-      fcmMessageId: intent.fcmMessageId,
-      path: intent.kind === 'external' ? intent.url : intent.path,
-    };
-    flushPendingNotificationOpened();
-  }, [flushPendingNotificationOpened]);
+  const notifyNotificationOpened = useCallback(
+    (intent: NavIntent) => {
+      if (intent.fcmMessageId === undefined) return;
+      pendingNotificationOpenedRef.current = {
+        fcmMessageId: intent.fcmMessageId,
+        path: intent.kind === "external" ? intent.url : intent.path,
+      };
+      flushPendingNotificationOpened();
+    },
+    [flushPendingNotificationOpened],
+  );
 
   // Idempotent: the load signal and the safety timeout race, and whichever
   // lands first owns the fade.
@@ -317,19 +360,22 @@ export default function WebViewContainer({ url, mode }: Props) {
   // Collapse the native sub-stack back to root, then drive root's SPA to a
   // main-tab path. Root is always mounted (the index screen), so `driveRoot`
   // works whether or not any sub-pages are currently on top of it.
-  const goHome = useCallback((path: string) => {
-    if (router.canGoBack()) {
-      try {
-        router.dismissAll();
-      } catch {
-        while (router.canGoBack()) router.back();
+  const goHome = useCallback(
+    (path: string) => {
+      if (router.canGoBack()) {
+        try {
+          router.dismissAll();
+        } catch {
+          while (router.canGoBack()) router.back();
+        }
       }
-    }
-    registry.driveRoot(path);
-  }, [registry, router]);
+      registry.driveRoot(path);
+    },
+    [registry, router],
+  );
 
-      // 1. push 인텐트를 임시 저장할 Ref 추가
-    const pendingPushRef = useRef<NavIntent | null>(null);
+  // 1. push 인텐트를 임시 저장할 Ref 추가
+  const pendingPushRef = useRef<NavIntent | null>(null);
 
   // Nav-intent routing (root only): push-notification tap / cold-start, and
   // (below) an incoming OS Share Sheet grade-import. Both resolve to the same
@@ -337,14 +383,15 @@ export default function WebViewContainer({ url, mode }: Props) {
   const handleNavIntent = useCallback(
     (intent: NavIntent) => {
       notifyNotificationOpened(intent);
-      if (intent.kind === 'external') {
+      if (intent.kind === "external") {
         WebBrowser.openBrowserAsync(intent.url).catch(() => {});
-      } else if (intent.kind === 'push') {
-             const isReady = navigationRef.isReady() && !!navigationRef.getCurrentRoute();
-      if (!isReady) {
-        pendingPushRef.current = intent; // 네비게이션이 준비될 때까지 대기
-        return;
-      }
+      } else if (intent.kind === "push") {
+        const isReady =
+          navigationRef.isReady() && !!navigationRef.getCurrentRoute();
+        if (!isReady) {
+          pendingPushRef.current = intent; // 네비게이션이 준비될 때까지 대기
+          return;
+        }
         // Land ON TOP of whatever is open (don't collapse the user's stack) —
         // but never stack a second copy of a page that is already open. Chat
         // notifications for one room arrive as separate notifications with
@@ -355,7 +402,10 @@ export default function WebViewContainer({ url, mode }: Props) {
           ? openSubPageDepth(navigationRef.getRootState(), intent.url)
           : null;
         if (depth === null) {
-          router.push({ pathname: '/webview', params: { url: intent.url, path: intent.path } });
+          router.push({
+            pathname: "/webview",
+            params: { url: intent.url, path: intent.path },
+          });
         } else if (depth > 0) {
           // Already open underneath: come back to it instead of duplicating it.
           router.dismiss(depth);
@@ -378,7 +428,8 @@ export default function WebViewContainer({ url, mode }: Props) {
   // launch (app opened via the share) and a live share while already
   // running, so — unlike push notifications — there's no separate
   // `getInitial…` to poll here.
-  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+  const { hasShareIntent, shareIntent, resetShareIntent } =
+    useShareIntentContext();
   useEffect(() => {
     if (!isRoot || !hasShareIntent) return;
     const intent = resolveGradeShareIntent(shareIntent);
@@ -402,8 +453,8 @@ export default function WebViewContainer({ url, mode }: Props) {
       if (intent) handleNavIntent(intent);
     });
     // Re-post the FCM token whenever the app returns to the foreground.
-    const appStateSub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void postFcmToken();
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void postFcmToken();
     });
     // Safety net: never leave the overlay stuck if the web never signals back.
     const timeout = setTimeout(dismissOverlay, CLEANUP_OVERLAY_TIMEOUT_MS);
@@ -415,27 +466,27 @@ export default function WebViewContainer({ url, mode }: Props) {
     };
   }, [dismissOverlay, handleNavIntent, isRoot, postFcmToken]);
 
-  
-    // 3. 네비게이션 준비 상태를 관찰하는 useEffect
-    useEffect(() => {
-      if (!isRoot) return;
-    
-      const checkPendingPush = () => {
-        const isReady = navigationRef.isReady() && !!navigationRef.getCurrentRoute();
-        if (pendingPushRef.current && isReady) {
-          const intent = pendingPushRef.current;
-          pendingPushRef.current = null;
-          handleNavIntent(intent);
-        }
-      };
-    
-      // 마운트 직후 이미 준비 완료된 상태일 수 있으므로 즉시 검사
-      checkPendingPush();
-    
-      // 네비게이션 상태 변화 감지 리스너 등록
-      const unsub = navigationRef.addListener('state', checkPendingPush);
-      return unsub;
-    }, [isRoot, navigationRef, handleNavIntent]);
+  // 3. 네비게이션 준비 상태를 관찰하는 useEffect
+  useEffect(() => {
+    if (!isRoot) return;
+
+    const checkPendingPush = () => {
+      const isReady =
+        navigationRef.isReady() && !!navigationRef.getCurrentRoute();
+      if (pendingPushRef.current && isReady) {
+        const intent = pendingPushRef.current;
+        pendingPushRef.current = null;
+        handleNavIntent(intent);
+      }
+    };
+
+    // 마운트 직후 이미 준비 완료된 상태일 수 있으므로 즉시 검사
+    checkPendingPush();
+
+    // 네비게이션 상태 변화 감지 리스너 등록
+    const unsub = navigationRef.addListener("state", checkPendingPush);
+    return unsub;
+  }, [isRoot, navigationRef, handleNavIntent]);
 
   // Sub-pages lift the reveal overlay from `onLoadEnd`; this is the safety net
   // for a load that errors out or never ends (root has its own above).
@@ -474,10 +525,12 @@ export default function WebViewContainer({ url, mode }: Props) {
         );
       },
       refreshFcmToken: () => void postFcmToken(),
-      sendTokenInfo: (tokenInfo) => bridge.channel.send('tokenInfoUpdated', tokenInfo),
-      sendBroadcastSync: (message) => bridge.channel.send('broadcastSyncMessage', message),
+      sendTokenInfo: (tokenInfo) =>
+        bridge.channel.send("tokenInfoUpdated", tokenInfo),
+      sendBroadcastSync: (message) =>
+        bridge.channel.send("broadcastSyncMessage", message),
     };
-    registry.registerWebView({ id, mode, url, path: '/' }, handle);
+    registry.registerWebView({ id, mode, url, path: "/" }, handle);
     return () => registry.unregisterWebView(id);
   }, [id, mode, url, registry, navigateSpa, postFcmToken, bridge]);
 
@@ -487,7 +540,7 @@ export default function WebViewContainer({ url, mode }: Props) {
     if (!isRoot) return;
     registry.registerNavigator({
       push: (target, path) =>
-        router.push({ pathname: '/webview', params: { url: target, path } }),
+        router.push({ pathname: "/webview", params: { url: target, path } }),
       pop: () => {
         if (router.canGoBack()) router.back();
       },
@@ -519,7 +572,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       const reply = await Promise.race([
         // A late rejection (the channel's own 10s request timeout) is absorbed
         // by the already-settled race — no unhandled rejection.
-        bridge.channel.request('checkBack'),
+        bridge.channel.request("checkBack"),
         new Promise<null>((resolve) => {
           timer = setTimeout(() => resolve(null), BACK_DELEGATION_TIMEOUT_MS);
         }),
@@ -527,7 +580,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       if (!reply) return null;
       // An old web build without the `checkBack` handler can't reply at all, so
       // anything other than `backResult` is treated as "no answer".
-      return reply.event === 'backResult' ? reply.value.handled : null;
+      return reply.event === "backResult" ? reply.value.handled : null;
     } catch {
       return null;
     } finally {
@@ -549,22 +602,25 @@ export default function WebViewContainer({ url, mode }: Props) {
         webViewCanGoBack: canGoBackRef.current,
       });
       switch (action) {
-        case 'none':
+        case "none":
           return;
-        case 'webViewGoBack':
+        case "webViewGoBack":
           webViewRef.current?.goBack();
           return;
-        case 'popScreen':
+        case "popScreen":
           if (router.canGoBack()) router.back();
           return;
-        case 'exitPrompt': {
+        case "exitPrompt": {
           const now = Date.now();
           if (now - lastBackPressRef.current < 2000) {
             BackHandler.exitApp();
             return;
           }
           lastBackPressRef.current = now;
-          ToastAndroid.show('뒤로 가기를 한 번 더 누르면 종료됩니다.', ToastAndroid.SHORT);
+          ToastAndroid.show(
+            "뒤로 가기를 한 번 더 누르면 종료됩니다.",
+            ToastAndroid.SHORT,
+          );
         }
       }
     } finally {
@@ -574,8 +630,8 @@ export default function WebViewContainer({ url, mode }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      if (Platform.OS !== 'android') return;
-      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (Platform.OS !== "android") return;
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
         // Always consume it: the real decision lands once the page answers.
         void handleSystemBack();
         return true;
@@ -588,25 +644,30 @@ export default function WebViewContainer({ url, mode }: Props) {
   useEffect(() => {
     const { channel } = bridge;
     const offs = [
-      channel.on('bridgeReady', () => {
+      channel.on("bridgeReady", () => {
         webBridgeReadyRef.current = true;
         flushPendingNotificationOpened();
+        // Resolve any queued notification deep-link now the SPA is ready.
+        if (isRoot && pendingNavRef.current) {
+          navigateSpa(pendingNavRef.current);
+          pendingNavRef.current = null;
+        }
       }),
       // Push a new native sub-page screen (spec §3.B/§4). The web only emits
       // this for non-main-tab destinations.
-      channel.on('navigateTo', ({ path, url: target }) => {
-        router.push({ pathname: '/webview', params: { url: target, path } });
+      channel.on("navigateTo", ({ path, url: target }) => {
+        router.push({ pathname: "/webview", params: { url: target, path } });
       }),
       // Pop the top-most screen (spec §3.C). No-op on the root.
-      channel.on('goBack', () => {
+      channel.on("goBack", () => {
         if (router.canGoBack()) router.back();
       }),
       // Return to a home-tab path — collapse the stack to root and drive root
       // there, regardless of which page (root or a sub) sent it.
-      channel.on('goHome', ({ path }) => {
+      channel.on("goHome", ({ path }) => {
         goHome(path);
       }),
-      channel.on('loginSuccess', () => {
+      channel.on("loginSuccess", () => {
         void postFcmToken();
         registry.mergeSession({ loggedIn: true, loginAt: Date.now() });
       }),
@@ -614,88 +675,102 @@ export default function WebViewContainer({ url, mode }: Props) {
       // authenticated backend endpoints on its own (background FCM token
       // registration) without a live WebView. An empty accessToken is the
       // web's logout signal — clear the native copy too.
-      channel.on('syncTokenInfo', (tokenInfo) => {
-        void (tokenInfo.accessToken ? saveTokenInfo(tokenInfo) : clearTokenInfo());
+      channel.on("syncTokenInfo", (tokenInfo) => {
+        void (tokenInfo.accessToken
+          ? saveTokenInfo(tokenInfo)
+          : clearTokenInfo());
       }),
       // Multi-WebView state sync fallback/second path (see WebViewContext's
       // `relayBroadcastSync` doc comment): relay to every other mounted WebView.
-      channel.on('relayBroadcastSync', (message) => {
+      channel.on("relayBroadcastSync", (message) => {
         registry.relayBroadcastSync(message, id);
       }),
-      channel.on('routeChange', (path) => {
-        setCurrentPath(path || '/');
-        registry.updateWebView(id, { path: path || '/' });
+      channel.on("routeChange", (path) => {
+        setCurrentPath(path || "/");
+        registry.updateWebView(id, { path: path || "/" });
       }),
-      channel.on('requestAppUpdate', () => {
+      channel.on("requestAppUpdate", () => {
         nativeAlert(STRINGS.appUpdate.title, STRINGS.appUpdate.message, [
-          { text: STRINGS.appUpdate.cancel, style: 'cancel' },
+          { text: STRINGS.appUpdate.cancel, style: "cancel" },
           {
             text: STRINGS.appUpdate.confirm,
             onPress: () => clearCacheAndReload(webViewRef),
           },
         ]);
       }),
-      channel.on('openAppSettings', () => {
+      channel.on("openAppSettings", () => {
         Linking.openSettings().catch(() => {});
       }),
-      channel.on('requestPermissionSettings', () => {
+      channel.on("requestPermissionSettings", () => {
         Linking.openSettings().catch(() => {});
       }),
-      channel.on('logWebDiagnostics', (diag) => {
-        console.log('[web-diagnostics]', diag);
+      channel.on("logWebDiagnostics", (diag) => {
+        console.log("[web-diagnostics]", diag);
       }),
       // Cleanup loop done: reveal the WebView (spec §5.B step 4).
-      channel.on('onLaunchWebCleanupFinished', () => {
+      channel.on("onLaunchWebCleanupFinished", () => {
         dismissOverlay();
       }),
-      channel.on('jsAlert', (message) => {
+      channel.on("jsAlert", (message) => {
         // Web `alert()` has no title, so this is message-only.
-        nativeAlert('', message, [{ text: STRINGS.common.confirm }]);
+        nativeAlert("", message, [{ text: STRINGS.common.confirm }]);
       }),
     ];
     return () => {
       for (const off of offs) off();
     };
-  }, [bridge, dismissOverlay, flushPendingNotificationOpened, goHome, id, postFcmToken, registry, router]);
+  }, [
+    bridge,
+    dismissOverlay,
+    flushPendingNotificationOpened,
+    goHome,
+    id,
+    postFcmToken,
+    registry,
+    router,
+  ]);
 
   // --- External links + Android downloads ------------------------------------
-  const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {
-    const { url: target } = request;
-    // Allow sub-frame / resource loads (iOS reports these too).
-    if (request.isTopFrame === false) return true;
+  const onShouldStartLoadWithRequest = useCallback(
+    (request: ShouldStartLoadRequest) => {
+      const { url: target } = request;
+      // Allow sub-frame / resource loads (iOS reports these too).
+      if (request.isTopFrame === false) return true;
 
-    // Dev controller "load full URL": let the exact URL a developer asked to
-    // load navigate in place, even if off-portal (the guard below would send it
-    // to the system browser). One-shot; cleared once consumed.
-    if (__DEV__ && devLoadUrlRef.current === target) {
-      devLoadUrlRef.current = null;
-      return true;
-    }
+      // Dev controller "load full URL": let the exact URL a developer asked to
+      // load navigate in place, even if off-portal (the guard below would send it
+      // to the system browser). One-shot; cleared once consumed.
+      if (__DEV__ && devLoadUrlRef.current === target) {
+        devLoadUrlRef.current = null;
+        return true;
+      }
 
-    let host = '';
-    try {
-      host = new URL(target).host;
-    } catch {
-      // Non-standard scheme (mailto:, tel:, intent:, market:, blob:) -> hand off.
-      if (!/^https?:/i.test(target)) {
+      let host = "";
+      try {
+        host = new URL(target).host;
+      } catch {
+        // Non-standard scheme (mailto:, tel:, intent:, market:, blob:) -> hand off.
+        if (!/^https?:/i.test(target)) {
+          Linking.openURL(target).catch(() => {});
+          return false;
+        }
+      }
+
+      // Android downloads are not surfaced via onFileDownload — catch them here.
+      if (Platform.OS === "android" && looksLikeDownload(target)) {
+        void saveDownload(target);
+        return false;
+      }
+
+      // Any off-portal navigation opens in the system browser (spec §6.4).
+      if (host && host !== PORTAL_HOST) {
         Linking.openURL(target).catch(() => {});
         return false;
       }
-    }
-
-    // Android downloads are not surfaced via onFileDownload — catch them here.
-    if (Platform.OS === 'android' && looksLikeDownload(target)) {
-      void saveDownload(target);
-      return false;
-    }
-
-    // Any off-portal navigation opens in the system browser (spec §6.4).
-    if (host && host !== PORTAL_HOST) {
-      Linking.openURL(target).catch(() => {});
-      return false;
-    }
-    return true;
-  }, []);
+      return true;
+    },
+    [],
+  );
 
   const onNavigationStateChange = useCallback(
     (nav: WebViewNavigation) => {
@@ -714,11 +789,6 @@ export default function WebViewContainer({ url, mode }: Props) {
       if (!cleanupStartedRef.current) {
         cleanupStartedRef.current = true;
         webViewRef.current?.injectJavaScript(LAUNCH_CLEANUP_SCRIPT);
-      }
-      // Resolve any queued notification deep-link now the SPA is ready.
-      if (pendingNavRef.current) {
-        navigateSpa(pendingNavRef.current);
-        pendingNavRef.current = null;
       }
     } else {
       // Sub-page: the document is loaded, so the page has (or is one frame from)
@@ -752,7 +822,7 @@ export default function WebViewContainer({ url, mode }: Props) {
   // view for the keyboard, so shrinking the host view too would double-count
   // and push the focused input a keyboard's height too far up.
   const keyboardHeight = useKeyboardState((state) => state.height);
-  const keyboardInset = Platform.OS === 'android' ? keyboardHeight : 0;
+  const keyboardInset = Platform.OS === "android" ? keyboardHeight : 0;
 
   // Root sits on the main tabs -> no WebView-level swipe-back; sub-pages let the
   // native stack own the swipe so it pops the screen (spec §3.C.2 / §6.5).
@@ -775,19 +845,21 @@ export default function WebViewContainer({ url, mode }: Props) {
   // covered by the in-page guard (`buildEdgeLongPressGuardScript`), which
   // suppresses the long-press affordances without cancelling the touch.
   const backGestureGuard = useMemo(() => {
-    const guard = (edge: 'left' | 'right') =>
+    const guard = (edge: "left" | "right") =>
       Gesture.Pan()
         .hitSlop(
-          edge === 'left'
+          edge === "left"
             ? { left: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP }
             : { right: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP },
         )
-        .activeOffsetX(edge === 'left' ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP)
+        .activeOffsetX(
+          edge === "left" ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP,
+        )
         .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
         // iOS has no equivalent problem: the native stack owns the edge swipe
         // and WKWebView does not start a selection mid-gesture.
-        .enabled(Platform.OS === 'android');
-    return Gesture.Race(guard('left'), guard('right'));
+        .enabled(Platform.OS === "android");
+    return Gesture.Race(guard("left"), guard("right"));
   }, []);
 
   const webView = (
@@ -817,7 +889,9 @@ export default function WebViewContainer({ url, mode }: Props) {
       onLoadEnd={onLoadEnd}
       onContentProcessDidTerminate={onContentProcessDied}
       onRenderProcessGone={onContentProcessDied}
-      onFileDownload={({ nativeEvent }) => saveDownload(nativeEvent.downloadUrl)}
+      onFileDownload={({ nativeEvent }) =>
+        saveDownload(nativeEvent.downloadUrl)
+      }
       // Inline media — videos must not auto-fullscreen (spec §6.3).
       allowsInlineMediaPlayback
       mediaPlaybackRequiresUserAction
@@ -826,7 +900,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       contentInsetAdjustmentBehavior="never"
       geolocationEnabled
       allowsFullscreenVideo={false}
-      originWhitelist={['https://*', 'http://*', 'about:*']}
+      originWhitelist={["https://*", "http://*", "about:*"]}
       pullToRefreshEnabled={false}
     />
   );
@@ -855,7 +929,7 @@ export default function WebViewContainer({ url, mode }: Props) {
         // Sub-pages keep native left/right (notch/landscape) reservation, but
         // no longer reserve the top inset — every pushed page pads its own
         // header itself using the safe-area values injected above.
-        <SafeAreaView style={styles.fill} edges={['left', 'right']}>
+        <SafeAreaView style={styles.fill} edges={["left", "right"]}>
           {guardedWebView}
         </SafeAreaView>
       )}
@@ -889,12 +963,12 @@ export default function WebViewContainer({ url, mode }: Props) {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   overlay: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
