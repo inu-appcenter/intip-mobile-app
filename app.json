@@ -31,7 +31,7 @@
     },
     "android": {
       "package": "inu.appcenter.intip_android",
-      "versionCode": 28,
+      "versionCode": 29,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -63,6 +63,10 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
       ]
     },
     "plugins": [
