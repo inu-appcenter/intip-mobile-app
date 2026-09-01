@@ -889,6 +889,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       onLoadEnd={onLoadEnd}
       onContentProcessDidTerminate={onContentProcessDied}
       onRenderProcessGone={onContentProcessDied}
+      decelerationRate={1.2}
       onFileDownload={({ nativeEvent }) =>
         saveDownload(nativeEvent.downloadUrl)
       }

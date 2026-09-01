@@ -9,7 +9,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "kr.inuappcenter.intip",
-      "buildNumber": "24",
+      "buildNumber": "25",
       "supportsTablet": true,
       "associatedDomains": [
         "applinks:intip.inuappcenter.kr",
