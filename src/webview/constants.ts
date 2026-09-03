@@ -67,6 +67,21 @@ export const DEEP_LINK_EXCLUDED_PREFIXES = ["/.well-known/"] as const;
 export const APP_UA_SUFFIX = "INTIPApp/1.0.0";
 
 /**
+ * Feature names the native shell advertises to the web via `bridgeCapabilities`
+ * right after it receives `bridgeReady` (see `WebViewContainer`'s "Bridge:
+ * Web -> Native" effect). This is the negotiation surface for every optional
+ * bridge feature: the web can't rely on a `request()` timeout to detect
+ * support for something like `share` (a share sheet can stay open for
+ * minutes), and an old shell that never sends `bridgeCapabilities` at all
+ * must be treated by the web as supporting none of these — this list is what
+ * lets a *new* shell tell a *new* web build what it can do.
+ *
+ * Update this whenever a new capability lands (e.g. a future `share:files`
+ * once phase-2 image/file sharing ships).
+ */
+export const NATIVE_FEATURES = ["share"] as const;
+
+/**
  * Main-tab paths (spec §3.A). These stay inside the single root WebView via SPA
  * routing and never push a native sub-WebView. The `/m` mobile prefix maps to
  * the same set (e.g. `/m/home` === `/home`). While the root sits on one of

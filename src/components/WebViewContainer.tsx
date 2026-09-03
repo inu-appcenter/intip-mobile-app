@@ -53,10 +53,12 @@ import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTyp
 // compiled from source (no npm package / registry). See AGENTS.md.
 import { nativeAlert } from "../../modules/intip-native-dialog";
 import { createNativeChannel } from "../../packages/intip-bridge/src/adapters/native";
+import { PROTOCOL_VERSION } from "../../packages/intip-bridge/src/messages";
 import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
 import { saveDownload } from "../native/downloads";
 import { ensureLocationPermission } from "../native/permissions";
 import { clearTokenInfo, saveTokenInfo } from "../native/secureTokenStore";
+import { shareContent } from "../native/share";
 import { flushPendingFcmToken } from "../push/fcmTokenSync";
 import {
   getFcmTokenWithRetry,
@@ -71,6 +73,7 @@ import { resolveBackAction } from "../webview/backPolicy";
 import {
   APP_UA_SUFFIX,
   isMainTabPath,
+  NATIVE_FEATURES,
   PORTAL_HOST,
   STRINGS,
   SYSTEM_BACK_GESTURE_EDGE_DP,
@@ -652,6 +655,15 @@ export default function WebViewContainer({ url, mode }: Props) {
           navigateSpa(pendingNavRef.current);
           pendingNavRef.current = null;
         }
+        // Advertise what this shell supports. The web can't rely on a
+        // request() timeout to detect `share` support (the share sheet can
+        // stay open for minutes), so this is sent unprompted right after
+        // `bridgeReady` — an old shell that never sends this at all is the
+        // signal for "supports none of these".
+        channel.send("bridgeCapabilities", {
+          protocol: PROTOCOL_VERSION,
+          features: [...NATIVE_FEATURES],
+        });
       }),
       // Push a new native sub-page screen (spec §3.B/§4). The web only emits
       // this for non-main-tab destinations.
@@ -714,6 +726,15 @@ export default function WebViewContainer({ url, mode }: Props) {
       channel.on("jsAlert", (message) => {
         // Web `alert()` has no title, so this is message-only.
         nativeAlert("", message, [{ text: STRINGS.common.confirm }]);
+      }),
+      // Web-initiated OS Share Sheet. `shareContent` never rejects, but guard
+      // `reply` too (it throws on outgoing schema validation) so a bug here
+      // can't escape into the injected-code exception blackhole (see
+      // channel.ts's `handleRaw` comment).
+      channel.on("share", (value, msg) => {
+        void shareContent(value)
+          .then((result) => channel.reply(msg, "shareResult", result))
+          .catch((error) => console.warn("[bridge] share reply failed", error));
       }),
     ];
     return () => {
