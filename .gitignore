@@ -21,6 +21,8 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 *.mobileprovision.base64
+ios_credentials
+
 
 # Metro
 .metro-health-check*
@@ -57,6 +59,6 @@ example
 # gradle output of the local Expo modules (the sources next to it are tracked)
 /modules/*/android/build/
 
-ios_distribution.cer
+
 
 services_account.json
