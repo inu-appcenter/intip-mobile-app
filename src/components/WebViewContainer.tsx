@@ -266,26 +266,14 @@ export default function WebViewContainer({ url, mode }: Props) {
     [insets],
   );
 
-  // Document-end script + the in-page half of the back-gesture guard (issue
-  // #25): the native edge guard below can only cancel the WebView's touches
-  // once the finger has travelled, so the page also suppresses its long-press
-  // affordances for any touch that starts in the system back-gesture band.
-  // Module-constant, but built here so both halves share one edge width.
-  // Width of the system's own gesture band, per edge. Read from the OS rather
-  // than assumed: One UI reserves 30dp where AOSP reserves 20, Samsung's
-  // sensitivity slider widens it further, and under button navigation it is 0 —
-  // no edge gesture exists, so nothing should be taken from the page.
+  // 문서 끝 스크립트와 시스템 백 제스처 영역 가드를 구성한다.
   const gestureBand = useSystemGestureBand();
 
-  // Seeded with the band known at mount and kept current by the effect below,
-  // so this deliberately does not depend on `gestureBand`: re-running it would
-  // be a no-op anyway (the guard is idempotent by design).
+  // 초기 로드 후에는 아래 effect에서 변경된 폭을 주입한다.
   const documentEndScript = useMemo(
     () =>
       INJECTED_SCRIPT +
       buildEdgeLongPressGuardScript(gestureBand.left, gestureBand.right) +
-      // Dev builds also carry the guard's instrumentation, so a reproduction
-      // reports what it actually did instead of leaving us to infer it.
       (__DEV__ ? buildEdgeGuardDiagnosticsScript() : ""),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -879,29 +867,8 @@ export default function WebViewContainer({ url, mode }: Props) {
   // native stack own the swipe so it pops the screen (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
 
-  // Android's system back gesture starts inside a narrow band at each screen
-  // edge, and the app keeps receiving those touches until SystemUI decides the
-  // swipe really is a back gesture. The WebView acts on them in the meantime:
-  // hold near the edge for the long-press timeout and the page kicks off a text
-  // selection / image drag *while the user is swiping back*, so the content
-  // visibly smears under the transition.
-  //
-  // These two pans live only in that band and deliberately do nothing — the
-  // point is the activation itself, which makes gesture-handler cancel the
-  // touch stream in the WebView underneath. They only claim the touch once it
-  // travels inward horizontally (the direction the back gesture pulls) and bail
-  // on a vertical drag, so tapping and scrolling near the edge still reach the
-  // page exactly as before.
-  //
-  // Note what this does *not* do: measurement on device (One UI, Android 16)
-  // shows the engine's long-press haptic still fires ~250ms after one of these
-  // activates, so cancelling the RN touch stream does not reach Chromium's own
-  // gesture detector. Suppressing that is the in-page guard's job now (see
-  // `buildEdgeLongPressGuardScript`). These stay for the selection/drag smear
-  // they were originally added for (issue #25).
+  // 시스템 백 제스처 영역의 터치를 네이티브 제스처로 먼저 처리한다.
   const backGestureGuard = useMemo(() => {
-    // Dev builds announce which guard claimed the touch and when, so a
-    // reproduction reports what happened instead of leaving us to infer it.
     const trace = <T extends { onStart: (cb: () => void) => T }>(
       gesture: T & { runOnJS: (value: boolean) => T },
       label: string,
@@ -923,9 +890,7 @@ export default function WebViewContainer({ url, mode }: Props) {
             edge === "left" ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP,
           )
           .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
-          // iOS has no equivalent problem: the native stack owns the edge swipe
-          // and WKWebView does not start a selection mid-gesture. A zero band
-          // means button navigation, where there is nothing to guard.
+          // iOS와 버튼 내비게이션에서는 가드를 사용하지 않는다.
           .enabled(Platform.OS === "android" && width > 0),
         `pan/${edge}`,
       );

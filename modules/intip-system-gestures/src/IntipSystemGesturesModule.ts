@@ -1,7 +1,7 @@
 import { NativeModule, requireOptionalNativeModule } from 'expo';
 
 export type GestureInsets = {
-  /** dp reserved along each edge for the system's own gestures. */
+  /** 시스템 제스처용으로 각 가장자리에 예약된 폭(dp). */
   left: number;
   right: number;
   top: number;
@@ -10,16 +10,15 @@ export type GestureInsets = {
 
 declare class IntipSystemGesturesModule extends NativeModule {
   /**
-   * Current `systemGestures` insets in dp, or `null` when they could not be
-   * read (no activity yet). `null` is not the same as all-zero: zero is what
-   * button navigation legitimately reports.
+   * 현재 systemGestures 인셋(dp). 읽지 못하면 null.
+   * null과 0은 다르다. 0은 버튼 내비게이션이 보고하는 정상 값이다.
    */
   getGestureInsets(): GestureInsets | null;
 }
 
 /**
- * Optional on purpose: the module only exists on Android, and a JS bundle can
- * outrun the native binary via EAS Update. Callers fall back to a constant.
+ * 의도적으로 optional. 안드로이드에만 있고, EAS Update로 JS만 먼저 나가면
+ * 네이티브 바이너리에 이 모듈이 없을 수 있다. 호출부는 상수로 폴백한다.
  */
 export default requireOptionalNativeModule<IntipSystemGesturesModule>(
   'IntipSystemGestures',

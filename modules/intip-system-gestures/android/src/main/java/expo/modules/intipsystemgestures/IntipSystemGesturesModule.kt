@@ -5,38 +5,12 @@ import androidx.core.view.WindowInsetsCompat
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
-/**
- * Reports the width of the band along each screen edge that the system reserves
- * for its own gestures.
- *
- * The back gesture starts inside that band, and the WebView has no idea it
- * exists — it will happily start a long press on a touch the user meant as
- * "go back". The shell guards against that, but only if it knows how wide the
- * band actually is, and that is not a constant we can hardcode:
- *
- *  - AOSP reserves 20dp, One UI reserves 30dp, and Samsung lets the user widen
- *    it further with a back-gesture sensitivity slider;
- *  - under *button* navigation the band is 0 — there is no edge gesture at all,
- *    so a hardcoded guard would cost those users a strip of screen for nothing.
- *
- * `systemGestures` is the right inset here rather than
- * `mandatorySystemGestures`: the latter is only the part an app can never take
- * back (the home indicator), while the former is the whole area the system
- * watches, which is what actually races the WebView for the touch.
- *
- * Reading is synchronous and cheap, so there is no event stream and no
- * `OnApplyWindowInsetsListener` — installing one on the decor view would fight
- * react-native-safe-area-context and the edge-to-edge setup for the same
- * callback. The JS side re-reads instead, which is enough: the band only
- * changes when the user visits Settings, and the app passes through background
- * on the way.
- */
+/** 시스템 제스처 영역의 가장자리별 인셋을 dp로 제공한다. */
 class IntipSystemGesturesModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("IntipSystemGestures")
 
-    // dp, not px: the caller compares this against gesture-handler hitSlop and
-    // against CSS pixels inside the WebView, both of which are density units.
+    // 호출부와 같은 dp 단위로 반환한다.
     Function("getGestureInsets") {
       val activity = appContext.currentActivity
       val view = activity?.window?.decorView
@@ -44,8 +18,7 @@ class IntipSystemGesturesModule : Module() {
         ?.getInsets(WindowInsetsCompat.Type.systemGestures())
       val density = activity?.resources?.displayMetrics?.density ?: 1f
 
-      // `null` means "could not read", which the JS side must not confuse with
-      // a genuine zero (button navigation). It falls back to a constant there.
+      // null은 측정 실패이며, 버튼 내비게이션의 0과 구분한다.
       if (insets == null || density <= 0f) {
         return@Function null
       }

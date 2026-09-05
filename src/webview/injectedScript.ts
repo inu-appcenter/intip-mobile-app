@@ -231,51 +231,18 @@ true;
 `;
 
 /**
- * In-page half of the back-gesture guard (issue #25).
+ * 가장자리 터치의 기본 동작을 막아 웹뷰의 롱프레스·선택을 방지한다.
  *
- * A back swipe starts inside a narrow band at the screen edge, and the page
- * keeps receiving those touches until the system decides the swipe really is a
- * back gesture. If the finger lingers there for the long-press timeout (~500ms
- * — i.e. any slightly slow swipe) the WebView starts a text selection / image
- * drag *mid back gesture*: the selection handles and the context menu pop up
- * and the content smears under the transition.
+ * 가장자리에서 시작한 터치는 페이지 이벤트보다 먼저 차단한다.
  *
- * The native edge guard in `WebViewContainer` cannot do this on its own, and
- * measurement on device (One UI, Android 16) says why: `ACTION_DOWN` reaches the
- * WebView before any native guard can rule on the touch, and cancelling the RN
- * touch stream afterwards does not reach Chromium's own gesture detector — the
- * guard activated 346ms in and the engine still fired its long-press haptic
- * 250ms later. The system's own `ACTION_CANCEL` is no help either; it was
- * measured arriving 3-16s after the touch began.
+ * touchstart은 preventDefault하고, 선택·드래그 방지 스타일을 함께 적용한다.
  *
- * What does work is telling the engine, at touch-down, to drop its default
- * handling for this touch. So for any touch that begins in the edge band:
+ * 가장자리에서 시작한 터치는 다음과 같이 처리한다.
  *
- *  - `touchstart` is `preventDefault`ed, which drops the engine's long-press
- *    selection and the OS haptic that rides along with it. The listener must be
- *    registered `{ passive: false }` — document-level touchstart is passive by
- *    default in Chromium and a passive listener's `preventDefault` is ignored;
- *  - the events a page starts an interaction from (`touchstart`, `pointerdown`,
- *    `mousedown`) are swallowed in the capture phase, so the page's own handler
- *    never runs. React binds its listeners to the root container, not
- *    `document`, so capturing here always wins the race. This is what stops a
- *    back swipe being read as the start of a drag or a long press, with no
- *    state left for the page to unwind afterwards;
- *  - a stylesheet (toggled by a class on `<html>`) kills `user-select`,
- *    `-webkit-touch-callout` and `-webkit-user-drag` everywhere, which is what
- *    the engine consults when the long-press timer fires;
- *  - `contextmenu` is swallowed while the guard is engaged, covering the
- *    link/image menu that does not go through selection.
+ *  - touchstart를 preventDefault하고 시작 이벤트를 캡처 단계에서 차단한다.
+ *  - 선택·드래그 방지 스타일과 contextmenu를 가드 활성 중 적용한다.
  *
- * `preventDefault` also suppresses the synthesised `click`, which would kill
- * plain taps in the band, so a touch that never travels is replayed as a click
- * on `touchend`. Scrolling that starts in the band was measured to still work.
- * Editable targets are exempt throughout, so a text field at the edge keeps its
- * caret handles. Everything is released on `touchend`/`touchcancel`, with a
- * timer as a backstop in case the WebView eats the end event.
- *
- * Nothing outside the band changes: a long press there still selects text and
- * still vibrates, which is the control the fix was verified against.
+ * 탭은 touchend에서 복구하고, 입력 요소와 영역 밖의 터치는 그대로 둔다.
  */
 export function buildEdgeLongPressGuardScript(
   leftPx: number,
@@ -286,7 +253,7 @@ export function buildEdgeLongPressGuardScript(
   if (window.__intipEdgeGuardReady) return;
   window.__intipEdgeGuardReady = true;
 
-  // Backstop only: a committed back gesture can swallow touchend.
+  // touchend 누락에 대비한 해제 타이머.
   var RELEASE_FALLBACK_MS = 2000;
   var CLASS = '__intip-edge-guard';
 
@@ -333,8 +300,7 @@ export function buildEdgeLongPressGuardScript(
     return clientX <= handle.left || clientX >= width - handle.right;
   }
 
-  // x of the point this event starts an interaction at, or null when the event
-  // is not a single-finger start (a second finger is never a back gesture).
+  // 단일 손가락 터치의 시작 x 좌표를 반환한다.
   function startX(e) {
     if (e.type === 'touchstart') {
       if (!e.touches || e.touches.length !== 1) return null;
@@ -348,32 +314,21 @@ export function buildEdgeLongPressGuardScript(
     return x !== null && inBand(x) && !isEditable(e.target);
   }
 
-  // Runtime handle so a dev build can A/B the fix without rebuilding: setting
-  // window.__intipEdgeGuard.blocking = false (or .preventDefault = false)
-  // restores the pre-fix behaviour from the next touch on.
+  // 네이티브에서 갱신할 수 있는 가드 상태.
   var handle = {
     blocking: true,
     preventDefault: true,
-    // Live, because the band is not a constant: it changes with navigation
-    // mode and with Samsung's gesture-sensitivity slider. Pushed by
-    // buildEdgeGuardBandScript.
+    // 시스템 설정 변경 시 buildEdgeGuardBandScript로 갱신한다.
     left: ${leftPx},
     right: ${rightPx}
   };
   try { window.__intipEdgeGuard = handle; } catch (e) {}
 
-  // Layer 1: the page never learns the touch happened. stopPropagation (not
-  // stopImmediatePropagation) so the engage listener below still runs.
+  // 페이지 핸들러보다 먼저 시작 이벤트를 차단한다.
   function blockGestureStart(e) {
     if (!handle.blocking || !isGuarded(e)) return;
     e.stopPropagation();
-    // Drops the engine's own default handling for this touch — the long-press
-    // selection and the OS haptic with it. Cancelling the RN touch stream
-    // demonstrably does not.
     if (handle.preventDefault && e.cancelable) e.preventDefault();
-    // preventDefault also suppresses the synthesised click, so a plain tap in
-    // the band would stop working. Remember it and replay it on touchend if
-    // the finger never travelled: a tap is not a back gesture.
     if (e.type === 'touchstart') {
       var t0 = e.touches[0];
       pendingTap = { target: e.target, x: t0.clientX, y: t0.clientY, at: Date.now() };
@@ -404,13 +359,12 @@ export function buildEdgeLongPressGuardScript(
     if (Math.abs(t.clientX - p.x) > TAP_SLOP_PX || Math.abs(t.clientY - p.y) > TAP_SLOP_PX) dropTap();
   }, true);
 
-  // passive:false — document-level touchstart is passive by default in
-  // Chromium, and a passive listener's preventDefault() is ignored.
+  // preventDefault를 위해 passive 리스너를 사용하지 않는다.
   document.addEventListener('touchstart', blockGestureStart, { capture: true, passive: false });
   document.addEventListener('pointerdown', blockGestureStart, true);
   document.addEventListener('mousedown', blockGestureStart, true);
 
-  // Layer 2: suppress what the engine consults for the rest of the touch.
+  // 가드가 활성화된 동안 선택·드래그 스타일을 적용한다.
   document.addEventListener('touchstart', function (e) {
     if (engaged) return;
     if (isGuarded(e)) engage();
@@ -427,25 +381,7 @@ true;
 `;
 }
 
-/**
- * Dev-only instrumentation for the edge guard. Never injected in a release
- * build (see `documentEndScript` in `WebViewContainer`).
- *
- * The whole back-gesture investigation kept stalling on one unanswered
- * question: when a back swipe makes the device buzz, did the *page* ask for
- * that (`navigator.vibrate`, a deliberate drag-start haptic) or did the
- * *engine* (a ~500ms long press, whose haptic is emitted below JS where no
- * injected script can reach it)? The two have completely different fixes, and
- * nothing in the app could tell them apart.
- *
- * Pairing this with `adb logcat -s VibratorManagerService:V` answers it:
- * a vibration the OS logs but this never sees came from the engine.
- *
- * It also records the geometry every guess so far has been built on — where
- * the touch actually landed relative to the viewport edge, and how long the
- * page held the touch before it was cancelled. That is what says whether
- * the band actually in force matches what this device really reserves.
- */
+/** 개발 빌드에서 가장자리 가드 동작을 기록한다. */
 export function buildEdgeGuardDiagnosticsScript(): string {
   return `
 (function () {
@@ -457,8 +393,7 @@ export function buildEdgeGuardDiagnosticsScript(): string {
   var startedAt = 0;
   var pending = null;
 
-  // Read off the guard's live handle so the log never disagrees with the band
-  // actually in force (it changes with navigation mode / sensitivity).
+  // 현재 적용 중인 가드 폭을 기록한다.
   function bandLeft() { try { return window.__intipEdgeGuard.left; } catch (e) { return -1; } }
   function bandRight() { try { return window.__intipEdgeGuard.right; } catch (e) { return -1; } }
 
@@ -475,7 +410,7 @@ export function buildEdgeGuardDiagnosticsScript(): string {
     return out;
   }
 
-  // 1. Who asks for vibration. Silence here + a vibration in logcat == engine.
+  // 진동 호출 여부를 기록한다.
   try {
     var origVibrate = navigator.vibrate && navigator.vibrate.bind(navigator);
     if (origVibrate) {
@@ -490,7 +425,7 @@ export function buildEdgeGuardDiagnosticsScript(): string {
     }
   } catch (e) {}
 
-  // 2. Where each touch landed, and whether the guard claimed it.
+  // 터치 위치와 가드 적용 여부를 기록한다.
   document.addEventListener('touchstart', function (e) {
     var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
     if (!t) return;
@@ -512,9 +447,7 @@ export function buildEdgeGuardDiagnosticsScript(): string {
     );
   }, true);
 
-  // 3. How it ended. The gap before a cancel is the window the engine's
-  //    ~500ms long press fires in — if it is longer than that, the native
-  //    guard is arriving too late (or not at all).
+  // 터치 종료 방식과 지속 시간을 기록한다.
   function logEnd(e) {
     if (pending === null) return;
     console.log(TAG, e.type, 'after=' + (Date.now() - startedAt) + 'ms', 'inBand=' + pending);
@@ -623,16 +556,7 @@ export function buildNavigateScript(path: string): string {
   return `window.__intipNavigate && window.__intipNavigate(${safe}); true;`;
 }
 
-/**
- * Pushes a new gesture band into a guard that is already running.
- *
- * The band is not fixed for the life of a page: the user can switch navigation
- * mode or move Samsung's gesture-sensitivity slider while the app sits in the
- * background. `buildEdgeLongPressGuardScript` bakes in whatever was known at
- * injection time and then reads `window.__intipEdgeGuard` on every touch, so
- * this only has to overwrite two numbers. Safe to run before the guard exists
- * (it does nothing) and safe to run repeatedly.
- */
+/** 실행 중인 가장자리 가드의 좌우 폭을 갱신한다. */
 export function buildEdgeGuardBandScript(
   leftPx: number,
   rightPx: number,
