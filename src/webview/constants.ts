@@ -10,11 +10,18 @@
  * https, not http: the host 301-redirects cleartext to https, so an `http://`
  * origin cost every launch (and every `portalUrlFor` push) a wasted round-trip
  * before the first byte of HTML.
+ *
+ * Overridable via `EXPO_PUBLIC_ROOT_URL`, inlined at JS-bundle time. This is
+ * separate from `APP_VARIANT` (native-only, read by `app.config.js`): the
+ * internal dev build (`.github/workflows/dev-build.yml`) is bundled in
+ * *release* JS mode just like the store build, so `.env.production` alone
+ * can't tell the two apart — the dev-build job sets this env var directly so
+ * the dev variant loads `intip-test.pages.dev` instead of production.
  */
-export const ROOT_URL = "https://intip.inuappcenter.kr";
+export const ROOT_URL = process.env.EXPO_PUBLIC_ROOT_URL ?? "https://intip.inuappcenter.kr";
 
 /** Host that is considered "internal". Anything else opens in the system browser. */
-export const PORTAL_HOST = "intip.inuappcenter.kr";
+export const PORTAL_HOST = new URL(ROOT_URL).host;
 
 /**
  * Hosts a push notification's payload is allowed to point off-portal to (e.g.

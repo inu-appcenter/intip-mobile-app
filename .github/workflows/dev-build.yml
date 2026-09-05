@@ -58,6 +58,10 @@ jobs:
     runs-on: self-hosted
     env:
       APP_VARIANT: development
+      # 네이티브 config(app.config.js, APP_VARIANT 기준)와 별개로 JS 번들에도
+      # 박아 넣는다 — src/webview/constants.ts 참고. 이 잡은 Release 설정으로
+      # 빌드하므로 .env.production만으로는 운영 빌드와 구분이 안 된다.
+      EXPO_PUBLIC_ROOT_URL: https://intip-test.pages.dev
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -122,6 +126,10 @@ jobs:
     runs-on: self-hosted
     env:
       APP_VARIANT: development
+      # 네이티브 config(app.config.js, APP_VARIANT 기준)와 별개로 JS 번들에도
+      # 박아 넣는다 — src/webview/constants.ts 참고. 이 잡은 Release 설정으로
+      # 빌드하므로 .env.production만으로는 운영 빌드와 구분이 안 된다.
+      EXPO_PUBLIC_ROOT_URL: https://intip-test.pages.dev
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
