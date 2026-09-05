@@ -52,6 +52,7 @@ import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTyp
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
 import { nativeAlert } from "../../modules/intip-native-dialog";
+import { useSystemGestureBand } from "../../modules/intip-system-gestures";
 import { createNativeChannel } from "../../packages/intip-bridge/src/adapters/native";
 import { PROTOCOL_VERSION } from "../../packages/intip-bridge/src/messages";
 import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
@@ -76,10 +77,11 @@ import {
   NATIVE_FEATURES,
   PORTAL_HOST,
   STRINGS,
-  SYSTEM_BACK_GESTURE_EDGE_DP,
 } from "../webview/constants";
 import {
   buildBridgeShimScript,
+  buildEdgeGuardBandScript,
+  buildEdgeGuardDiagnosticsScript,
   buildEdgeLongPressGuardScript,
   buildSafeAreaInsetsScript,
   INJECTED_SCRIPT,
@@ -264,15 +266,16 @@ export default function WebViewContainer({ url, mode }: Props) {
     [insets],
   );
 
-  // Document-end script + the in-page half of the back-gesture guard (issue
-  // #25): the native edge guard below can only cancel the WebView's touches
-  // once the finger has travelled, so the page also suppresses its long-press
-  // affordances for any touch that starts in the system back-gesture band.
-  // Module-constant, but built here so both halves share one edge width.
+  // 문서 끝 스크립트와 시스템 백 제스처 영역 가드를 구성한다.
+  const gestureBand = useSystemGestureBand();
+
+  // 초기 로드 후에는 아래 effect에서 변경된 폭을 주입한다.
   const documentEndScript = useMemo(
     () =>
       INJECTED_SCRIPT +
-      buildEdgeLongPressGuardScript(SYSTEM_BACK_GESTURE_EDGE_DP),
+      buildEdgeLongPressGuardScript(gestureBand.left, gestureBand.right) +
+      (__DEV__ ? buildEdgeGuardDiagnosticsScript() : ""),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -498,6 +501,21 @@ export default function WebViewContainer({ url, mode }: Props) {
     const timeout = setTimeout(dismissOverlay, REVEAL_OVERLAY_TIMEOUT_MS);
     return () => clearTimeout(timeout);
   }, [dismissOverlay, isRoot]);
+
+  // Same shape as the insets push below: the guard bakes in the band it was
+  // injected with, so a later change (navigation mode, sensitivity slider) has
+  // to be pushed. Skipping the first run avoids re-sending what the injected
+  // script already carries.
+  const skipFirstBandPushRef = useRef(true);
+  useEffect(() => {
+    if (skipFirstBandPushRef.current) {
+      skipFirstBandPushRef.current = false;
+      return;
+    }
+    webViewRef.current?.injectJavaScript(
+      buildEdgeGuardBandScript(gestureBand.left, gestureBand.right),
+    );
+  }, [gestureBand.left, gestureBand.right]);
 
   // Keep the page's safe-area CSS vars current across an insets change after
   // the initial load (rotation, foldable fold/unfold). The initial value is
@@ -849,39 +867,36 @@ export default function WebViewContainer({ url, mode }: Props) {
   // native stack own the swipe so it pops the screen (spec §3.C.2 / §6.5).
   const webViewSwipeBack = isRoot && !isMainTabPath(currentPath);
 
-  // Android's system back gesture starts inside a narrow band at each screen
-  // edge, and the app keeps receiving those touches until SystemUI decides the
-  // swipe really is a back gesture. The WebView acts on them in the meantime:
-  // hold near the edge for the long-press timeout and the page kicks off a text
-  // selection / image drag *while the user is swiping back*, so the content
-  // visibly smears under the transition.
-  //
-  // These two pans live only in that band and deliberately do nothing — the
-  // point is the activation itself, which makes gesture-handler cancel the
-  // touch stream in the WebView underneath, so the long-press never fires. They
-  // only claim the touch once it travels inward horizontally (the direction the
-  // back gesture pulls) and bail on a vertical drag, so tapping and scrolling
-  // near the edge still reach the page exactly as before. A touch that only
-  // rests at the edge without travelling never activates them — that case is
-  // covered by the in-page guard (`buildEdgeLongPressGuardScript`), which
-  // suppresses the long-press affordances without cancelling the touch.
+  // 시스템 백 제스처 영역의 터치를 네이티브 제스처로 먼저 처리한다.
   const backGestureGuard = useMemo(() => {
-    const guard = (edge: "left" | "right") =>
-      Gesture.Pan()
-        .hitSlop(
-          edge === "left"
-            ? { left: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP }
-            : { right: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP },
-        )
-        .activeOffsetX(
-          edge === "left" ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP,
-        )
-        .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
-        // iOS has no equivalent problem: the native stack owns the edge swipe
-        // and WKWebView does not start a selection mid-gesture.
-        .enabled(Platform.OS === "android");
+    const trace = <T extends { onStart: (cb: () => void) => T }>(
+      gesture: T & { runOnJS: (value: boolean) => T },
+      label: string,
+    ): T =>
+      __DEV__
+        ? gesture
+            .runOnJS(true)
+            .onStart(() => console.log(`[edge-diag] native ${label} activated`))
+        : gesture;
+
+    const guard = (edge: "left" | "right") => {
+      const width = edge === "left" ? gestureBand.left : gestureBand.right;
+      return trace(
+        Gesture.Pan()
+          .hitSlop(
+            edge === "left" ? { left: 0, width } : { right: 0, width },
+          )
+          .activeOffsetX(
+            edge === "left" ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP,
+          )
+          .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
+          // iOS와 버튼 내비게이션에서는 가드를 사용하지 않는다.
+          .enabled(Platform.OS === "android" && width > 0),
+        `pan/${edge}`,
+      );
+    };
     return Gesture.Race(guard("left"), guard("right"));
-  }, []);
+  }, [gestureBand.left, gestureBand.right]);
 
   const webView = (
     <WebView

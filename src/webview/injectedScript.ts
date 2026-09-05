@@ -231,41 +231,29 @@ true;
 `;
 
 /**
- * In-page half of the back-gesture guard (issue #25).
+ * 가장자리 터치의 기본 동작을 막아 웹뷰의 롱프레스·선택을 방지한다.
  *
- * A back swipe starts inside a narrow band at the screen edge, and the page
- * keeps receiving those touches until the system decides the swipe really is a
- * back gesture. If the finger lingers there for the long-press timeout (~500ms
- * — i.e. any slightly slow swipe) the WebView starts a text selection / image
- * drag *mid back gesture*: the selection handles and the context menu pop up
- * and the content smears under the transition.
+ * 가장자리에서 시작한 터치는 페이지 이벤트보다 먼저 차단한다.
  *
- * The native edge guard in `WebViewContainer` only cancels the WebView's touch
- * stream once the finger has actually travelled inward, which a slow gesture
- * does *after* the long press has already fired. So we also suppress the
- * long-press affordances in the page itself, for the duration of any touch that
- * begins in the edge band:
+ * touchstart은 preventDefault하고, 선택·드래그 방지 스타일을 함께 적용한다.
  *
- *  - a stylesheet (toggled by a class on `<html>`) kills `user-select`,
- *    `-webkit-touch-callout` and `-webkit-user-drag` everywhere, which is what
- *    the engine consults when the long-press timer fires;
- *  - `contextmenu` is swallowed while the guard is engaged, covering the
- *    link/image menu that does not go through selection.
+ * 가장자리에서 시작한 터치는 다음과 같이 처리한다.
  *
- * Unlike cancelling the touch, this leaves the touch stream intact: a tap (even
- * a slow one) near the edge still reaches the page and still clicks. Editable
- * targets are exempt so long-pressing a text field at the edge keeps its caret
- * handles. Everything is released on `touchend`/`touchcancel`, with a timer as
- * a backstop in case the WebView eats the end event when the gesture commits.
+ *  - touchstart를 preventDefault하고 시작 이벤트를 캡처 단계에서 차단한다.
+ *  - 선택·드래그 방지 스타일과 contextmenu를 가드 활성 중 적용한다.
+ *
+ * 탭은 touchend에서 복구하고, 입력 요소와 영역 밖의 터치는 그대로 둔다.
  */
-export function buildEdgeLongPressGuardScript(edgePx: number): string {
+export function buildEdgeLongPressGuardScript(
+  leftPx: number,
+  rightPx: number,
+): string {
   return `
 (function () {
   if (window.__intipEdgeGuardReady) return;
   window.__intipEdgeGuardReady = true;
 
-  var EDGE_PX = ${edgePx};
-  // Backstop only: a committed back gesture can swallow touchend.
+  // touchend 누락에 대비한 해제 타이머.
   var RELEASE_FALLBACK_MS = 2000;
   var CLASS = '__intip-edge-guard';
 
@@ -307,22 +295,174 @@ export function buildEdgeLongPressGuardScript(edgePx: number): string {
     try { document.documentElement.classList.remove(CLASS); } catch (e) {}
   }
 
-  document.addEventListener('touchstart', function (e) {
-    if (engaged) return;
-    var touch = e.touches && e.touches.length === 1 ? e.touches[0] : null;
-    if (!touch) return;
+  function inBand(clientX) {
     var width = window.innerWidth || document.documentElement.clientWidth || 0;
-    var nearEdge = touch.clientX <= EDGE_PX || touch.clientX >= width - EDGE_PX;
-    if (!nearEdge || isEditable(e.target)) return;
-    engage();
+    return clientX <= handle.left || clientX >= width - handle.right;
+  }
+
+  // 단일 손가락 터치의 시작 x 좌표를 반환한다.
+  function startX(e) {
+    if (e.type === 'touchstart') {
+      if (!e.touches || e.touches.length !== 1) return null;
+      return e.touches[0].clientX;
+    }
+    return typeof e.clientX === 'number' ? e.clientX : null;
+  }
+
+  function isGuarded(e) {
+    var x = startX(e);
+    return x !== null && inBand(x) && !isEditable(e.target);
+  }
+
+  // 네이티브에서 갱신할 수 있는 가드 상태.
+  var handle = {
+    blocking: true,
+    preventDefault: true,
+    // 시스템 설정 변경 시 buildEdgeGuardBandScript로 갱신한다.
+    left: ${leftPx},
+    right: ${rightPx}
+  };
+  try { window.__intipEdgeGuard = handle; } catch (e) {}
+
+  // 페이지 핸들러보다 먼저 시작 이벤트를 차단한다.
+  function blockGestureStart(e) {
+    if (!handle.blocking || !isGuarded(e)) return;
+    e.stopPropagation();
+    if (handle.preventDefault && e.cancelable) e.preventDefault();
+    if (e.type === 'touchstart') {
+      var t0 = e.touches[0];
+      pendingTap = { target: e.target, x: t0.clientX, y: t0.clientY, at: Date.now() };
+    }
+  }
+
+  var pendingTap = null;
+  var TAP_SLOP_PX = 10;
+  var TAP_MAX_MS = 500;
+
+  function dropTap() { pendingTap = null; }
+
+  function maybeReplayTap(e) {
+    var p = pendingTap;
+    pendingTap = null;
+    if (!p) return;
+    if (Date.now() - p.at > TAP_MAX_MS) return;
+    var t = e.changedTouches && e.changedTouches[0];
+    if (t && (Math.abs(t.clientX - p.x) > TAP_SLOP_PX || Math.abs(t.clientY - p.y) > TAP_SLOP_PX)) return;
+    try { if (p.target && p.target.click) p.target.click(); } catch (e4) {}
+  }
+
+  document.addEventListener('touchmove', function (e) {
+    var p = pendingTap;
+    if (!p) return;
+    var t = e.touches && e.touches[0];
+    if (!t) return;
+    if (Math.abs(t.clientX - p.x) > TAP_SLOP_PX || Math.abs(t.clientY - p.y) > TAP_SLOP_PX) dropTap();
   }, true);
 
-  document.addEventListener('touchend', release, true);
-  document.addEventListener('touchcancel', release, true);
+  // preventDefault를 위해 passive 리스너를 사용하지 않는다.
+  document.addEventListener('touchstart', blockGestureStart, { capture: true, passive: false });
+  document.addEventListener('pointerdown', blockGestureStart, true);
+  document.addEventListener('mousedown', blockGestureStart, true);
+
+  // 가드가 활성화된 동안 선택·드래그 스타일을 적용한다.
+  document.addEventListener('touchstart', function (e) {
+    if (engaged) return;
+    if (isGuarded(e)) engage();
+  }, true);
+
+  document.addEventListener('touchend', function (e) { maybeReplayTap(e); release(); }, true);
+  document.addEventListener('touchcancel', function () { dropTap(); release(); }, true);
 
   document.addEventListener('contextmenu', function (e) {
     if (engaged) e.preventDefault();
   }, true);
+})();
+true;
+`;
+}
+
+/** 개발 빌드에서 가장자리 가드 동작을 기록한다. */
+export function buildEdgeGuardDiagnosticsScript(): string {
+  return `
+(function () {
+  try { console.log('[edge-diag] boot'); } catch (e0) {}
+  if (window.__intipEdgeDiagReady) return;
+  window.__intipEdgeDiagReady = true;
+ try {
+  var TAG = '[edge-diag]';
+  var startedAt = 0;
+  var pending = null;
+
+  // 현재 적용 중인 가드 폭을 기록한다.
+  function bandLeft() { try { return window.__intipEdgeGuard.left; } catch (e) { return -1; } }
+  function bandRight() { try { return window.__intipEdgeGuard.right; } catch (e) { return -1; } }
+
+  function describe(node) {
+    if (!node || node.nodeType !== 1) return String(node);
+    var out = node.tagName.toLowerCase();
+    if (node.id) out += '#' + node.id;
+    var cls = typeof node.className === 'string' ? node.className : '';
+    if (cls) out += '.' + cls.trim().split(/\\s+/).slice(0, 3).join('.');
+    if (node.getAttribute) {
+      var day = node.getAttribute('data-day');
+      if (day !== null) out += '[day=' + day + ',hour=' + node.getAttribute('data-hour') + ']';
+    }
+    return out;
+  }
+
+  // 진동 호출 여부를 기록한다.
+  try {
+    var origVibrate = navigator.vibrate && navigator.vibrate.bind(navigator);
+    if (origVibrate) {
+      navigator.vibrate = function (pattern) {
+        var stack = '';
+        try { stack = new Error().stack || '(no stack)'; } catch (e) {}
+        console.log(TAG, 'navigator.vibrate(' + JSON.stringify(pattern) + ')\\n' + stack);
+        return origVibrate(pattern);
+      };
+    } else {
+      console.log(TAG, 'navigator.vibrate unavailable — any buzz is engine-side');
+    }
+  } catch (e) {}
+
+  // 터치 위치와 가드 적용 여부를 기록한다.
+  document.addEventListener('touchstart', function (e) {
+    var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+    if (!t) return;
+    var w = window.innerWidth || document.documentElement.clientWidth || 0;
+    var fromLeft = Math.round(t.clientX);
+    var fromRight = Math.round(w - t.clientX);
+    var inBand = fromLeft <= bandLeft() || fromRight <= bandRight();
+    var blocking = true;
+    try { blocking = !!(window.__intipEdgeGuard && window.__intipEdgeGuard.blocking); } catch (e2) {}
+    startedAt = Date.now();
+    pending = inBand;
+    console.log(
+      TAG, 'touchstart',
+      'fromLeft=' + fromLeft, 'fromRight=' + fromRight,
+      'viewport=' + w, 'screen=' + ((window.screen && window.screen.width) || '?'),
+      'dpr=' + (window.devicePixelRatio || 1),
+      'band=' + bandLeft() + '/' + bandRight(), 'inBand=' + inBand, 'blocking=' + blocking,
+      'target=' + describe(e.target), 'path=' + location.pathname
+    );
+  }, true);
+
+  // 터치 종료 방식과 지속 시간을 기록한다.
+  function logEnd(e) {
+    if (pending === null) return;
+    console.log(TAG, e.type, 'after=' + (Date.now() - startedAt) + 'ms', 'inBand=' + pending);
+    pending = null;
+  }
+  document.addEventListener('click', function (e) {
+    console.log(TAG, 'click x=' + Math.round(e.clientX) + ' target=' + describe(e.target));
+  }, true);
+  document.addEventListener('touchend', logEnd, true);
+  document.addEventListener('touchcancel', logEnd, true);
+
+  console.log(TAG, 'ready band=' + bandLeft() + '/' + bandRight() + ' viewport=' + (window.innerWidth || 0));
+ } catch (err) {
+  try { console.log('[edge-diag] THREW', (err && (err.stack || err.message)) || String(err)); } catch (e9) {}
+ }
 })();
 true;
 `;
@@ -414,4 +554,22 @@ export function buildReceiveFcmTokenScript(token: string): string {
 export function buildNavigateScript(path: string): string {
   const safe = JSON.stringify(path);
   return `window.__intipNavigate && window.__intipNavigate(${safe}); true;`;
+}
+
+/** 실행 중인 가장자리 가드의 좌우 폭을 갱신한다. */
+export function buildEdgeGuardBandScript(
+  leftPx: number,
+  rightPx: number,
+): string {
+  return `
+(function () {
+  try {
+    var g = window.__intipEdgeGuard;
+    if (!g) return;
+    g.left = ${leftPx};
+    g.right = ${rightPx};
+  } catch (e) {}
+})();
+true;
+`;
 }
