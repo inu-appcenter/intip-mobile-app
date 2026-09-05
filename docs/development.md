@@ -41,6 +41,8 @@ git submodule update --init
 | --- | --- |
 | `./GoogleService-Info.plist` | iOS |
 | `./google-services.json` | Android |
+| `./GoogleService-Info-Dev.plist` | iOS 개발 빌드 |
+| `./google-services-dev.json` | Android 개발 빌드 |
 
 > iOS는 RNFirebase 요구사항에 따라 `useFrameworks: "static"`
 > (`expo-build-properties`)을 씁니다. AppDelegate 스위즐링 프록시는 기본값
@@ -169,6 +171,49 @@ import하는 소스만 import 추적을 통해 타입체크됩니다.
 
 JS와 에셋 변경은 스토어 심사 없이 사용자에게 도달합니다.
 
+### 내부 배포용 개발 빌드
+
+`.github/workflows/dev-build.yml`이 `dev` 브랜치에 push될 때마다 자동으로
+돕니다. **`eas build`는 쓰지 않습니다** — `ci.yml`의 android-release/
+ios-release와 같은 자체 self-hosted 파이프라인(prebuild → gradlew /
+xcodebuild)으로 서명된 APK/IPA를 만들어 Actions 아티팩트로 올립니다. EAS는
+OTA(`ota-publish`, `eas update`) 경로에만 씁니다.
+
+개발 변형은 `APP_VARIANT=development` 환경변수로 빌드하며(`app.config.js`
+참고), 운영 앱과 나란히 설치될 수 있도록 아래가 모두 다릅니다.
+
+| | 운영 | 개발 |
+| --- | --- | --- |
+| iOS bundle ID | `kr.inuappcenter.intip` | `kr.inuappcenter.intip.dev` |
+| Android package | `inu.appcenter.intip_android` | `inu.appcenter.intip_android.dev` |
+| 앱 아이콘 | `assets/expo.icon` | `assets/icon-dev.icon` (Icon Composer) / `assets/images/Dev App Icon.png` |
+| associated domain (딥링크) | `intip.inuappcenter.kr` | `intip-test.pages.dev` |
+| URL scheme | `intipmobileapp` | `intipmobileappdev` |
+| 홈 화면 표시 이름 | INTIP | INTIP Dev |
+| Firebase 설정 | `GoogleService-Info.plist` / `google-services.json` | `GoogleService-Info-Dev.plist` / `google-services-dev.json` |
+
+개발 Firebase 설정 파일(`GoogleService-Info-Dev.plist`,
+`google-services-dev.json`)은 개발용 bundle ID/package로 등록된 별도 Firebase
+앱 설정이어야 합니다. 저장소 루트에 두되 시크릿이므로 커밋하지 않습니다
+(`.gitignore` 참고). CI는 base64 시크릿(아래 표)에서 디코드합니다.
+
+iOS는 `kr.inuappcenter.intip.dev` bundle ID가 Apple Developer 계정에 먼저
+등록돼 있어야 하고(`node scripts/ios-asc.js bundle create
+kr.inuappcenter.intip.dev`), 그 bundle ID로 발급한 **Ad Hoc** 프로비저닝
+프로파일이 필요합니다(`node scripts/ios-asc.js profile reissue --bundle-id
+kr.inuappcenter.intip.dev` — 단 `profileType`을 `IOS_APP_STORE`가 아니라
+Ad Hoc으로 발급하려면 App Store Connect에서 수동으로 만들거나 스크립트를
+확장해야 합니다). 발급한 프로파일을 base64로 인코딩해
+`IOS_DEV_PROVISIONING_PROFILE_BASE64` 시크릿에 저장하세요. distribution
+인증서는 운영 릴리스와 같은 것을 재사용합니다.
+
+Android는 운영 릴리스와 같은 키스토어(`ANDROID_RELEASE_KEYSTORE_BASE64` 등)를
+재사용합니다 — package명이 다르므로 Play Store와는 충돌하지 않습니다(어차피
+Play Store에 올리지 않습니다).
+
+빌드 결과(APK/IPA)는 Actions 실행 페이지의 아티팩트에서 내려받아 팀 기기에
+직접 설치합니다(Play 내부 테스트 트랙이나 TestFlight를 거치지 않습니다).
+
 ### 수동 — Actions 탭에서 실행
 
 **실행할 작업** 드롭다운에서 하나를 고릅니다.
@@ -240,6 +285,16 @@ GitHub-hosted 러너는 분 단위로 과금되고 macOS는 단가가 10배라, 
 | `IOS_DISTRIBUTION_CERTIFICATE_P`, `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE`, `IOS_CI_KEYCHAIN_PASSWORD` | iOS 수동 서명 |
 | `APP_STORE_CONNECT_API_KEY_BASE`, `APP_STORE_CONNECT_ISSUER_ID` | TestFlight 업로드 · buildNumber 조회 |
 | `MATTERMOST_WEBHOOK` | 배포 결과 알림 |
+
+`dev-build.yml`(내부 배포용 개발 빌드)이 추가로 쓰는 시크릿:
+
+| 시크릿 | 용도 |
+| --- | --- |
+| `GOOGLE_SERVICES_DEV_JSON_BASE64` / `GOOGLE_SERVICE_INFO_DEV_PLIST_BASE64` | 개발 bundle ID/package용 Firebase 설정 (base64) |
+| `IOS_DEV_PROVISIONING_PROFILE_BASE64` | `kr.inuappcenter.intip.dev`용 Ad Hoc 프로비저닝 프로파일 (base64) |
+
+Android 키스토어와 iOS distribution 인증서는 운영 릴리스와 동일한 시크릿을
+재사용합니다(위 표).
 
 디코딩된 시크릿 파일과 임시 keychain은 잡 마지막의 `if: always()` 스텝에서
 삭제됩니다.

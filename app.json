@@ -11,10 +11,7 @@
       "bundleIdentifier": "kr.inuappcenter.intip",
       "buildNumber": "26",
       "supportsTablet": true,
-      "associatedDomains": [
-        "applinks:intip.inuappcenter.kr",
-        "applinks:intip-test.pages.dev"
-      ],
+      "associatedDomains": ["applinks:intip.inuappcenter.kr"],
       "googleServicesFile": "./GoogleService-Info.plist",
       "icon": "./assets/expo.icon",
       "entitlements": {
@@ -46,10 +43,6 @@
             {
               "scheme": "https",
               "host": "intip.inuappcenter.kr"
-            },
-            {
-              "scheme": "https",
-              "host": "intip-test.pages.dev"
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]

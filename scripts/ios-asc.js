@@ -17,16 +17,25 @@
  *   cert revoke <certificate-id>
  *
  *   profile list [--bundle-id <id>]
- *   profile reissue --bundle-id <id> [--certificate-id <id>] [--profile-name <name>]
+ *   profile reissue --bundle-id <id> [--certificate-id <id>]
+ *                    [--profile-type <IOS_APP_STORE|IOS_APP_ADHOC|IOS_APP_DEVELOPMENT>]
+ *                    [--profile-name <name>] [--device-ids <id,id,...>]
  *                    [--out <path>] [--dry-run]
+ *     AD_HOC/DEVELOPMENT는 devices relationship이 필수라, --device-ids를
+ *     안 주면 'device list'로 조회한 ENABLED 기기 전부를 자동 포함한다.
  *   profile delete (--name <name> | --profile-id <id>) [--keep-latest] [--yes]
  *
  *   bundle capabilities <bundle-id>
+ *   bundle create <bundle-id> [--name <name>] [--dry-run]
  *   bundle enable-app-groups <bundle-id> [--dry-run]
+ *   bundle enable-capability <bundle-id> <capability-type> [--dry-run]
  *
  *   app-group check [--bundle-id <id>] [--extension-bundle-id <id>]
  *
  *   access check [--read-only] [--bundle-id <id>]
+ *
+ *   device list [--status <ENABLED|DISABLED>]
+ *   device register <udid> --name <name> [--platform IOS] [--dry-run]
  *
  * 공통 옵션 (아무 명령어에나 붙일 수 있음, 안 주면 ios_credentials/에서 자동 탐색):
  *   --key <path>     AuthKey_<id>.p8 경로   (APP_STORE_CONNECT_KEY_PATH)
@@ -38,6 +47,10 @@
  *   node scripts/ios-asc.js profile list --bundle-id kr.inuappcenter.intip
  *   node scripts/ios-asc.js profile delete --name "INTIP App Store 20260903-1836" --keep-latest --yes
  *   node scripts/ios-asc.js app-group check
+ *   node scripts/ios-asc.js device list
+ *   node scripts/ios-asc.js profile reissue --bundle-id kr.inuappcenter.intip.dev \
+ *     --profile-type IOS_APP_ADHOC --profile-name "INTIP Dev Ad Hoc" \
+ *     --out INTIP-Dev.mobileprovision.base64
  *
  * 의존성 없음.
  */
@@ -54,12 +67,19 @@ function topLevelUsage(exitCode) {
       `  node scripts/ios-asc.js cert revoke <certificate-id>\n\n` +
       `  node scripts/ios-asc.js profile list [--bundle-id <id>]\n` +
       `  node scripts/ios-asc.js profile reissue --bundle-id <id> [--certificate-id <id>]\n` +
-      `                          [--profile-name <name>] [--out <path>] [--dry-run]\n` +
+      `                          [--profile-type <IOS_APP_STORE|IOS_APP_ADHOC|IOS_APP_DEVELOPMENT>]\n` +
+      `                          [--profile-name <name>] [--device-ids <id,id,...>]\n` +
+      `                          [--out <path>] [--dry-run]\n` +
+      `                          (AD_HOC/DEVELOPMENT는 --device-ids 없으면 등록된 ENABLED 기기 전부를 자동 포함)\n` +
       `  node scripts/ios-asc.js profile delete (--name <name> | --profile-id <id>) [--keep-latest] [--yes]\n\n` +
       `  node scripts/ios-asc.js bundle capabilities <bundle-id>\n` +
-      `  node scripts/ios-asc.js bundle enable-app-groups <bundle-id> [--dry-run]\n\n` +
+      `  node scripts/ios-asc.js bundle create <bundle-id> [--name <name>] [--dry-run]\n` +
+      `  node scripts/ios-asc.js bundle enable-app-groups <bundle-id> [--dry-run]\n` +
+      `  node scripts/ios-asc.js bundle enable-capability <bundle-id> <capability-type> [--dry-run]\n\n` +
       `  node scripts/ios-asc.js app-group check [--bundle-id <id>] [--extension-bundle-id <id>]\n\n` +
       `  node scripts/ios-asc.js access check [--read-only] [--bundle-id <id>]\n\n` +
+      `  node scripts/ios-asc.js device list [--status <ENABLED|DISABLED>]\n` +
+      `  node scripts/ios-asc.js device register <udid> --name <name> [--platform IOS] [--dry-run]\n\n` +
       `공통 옵션 (안 주면 ios_credentials/ 자동 탐색):\n` +
       `  --key <path>   --key-id <id>   --issuer <id>\n`,
   );
@@ -155,13 +175,28 @@ async function profileList(client, argv) {
   }
 }
 
+// AD_HOC/개발용 프로파일은 등록된 기기(UDID)에 바인딩돼야 한다 — App Store용
+// 프로파일과 달리 devices relationship이 필수다.
+const PROFILE_TYPES_REQUIRING_DEVICES = new Set([
+  "IOS_APP_ADHOC",
+  "IOS_APP_DEVELOPMENT",
+  "TVOS_APP_ADHOC",
+  "TVOS_APP_DEVELOPMENT",
+]);
+
 async function profileReissue(client, argv) {
-  const args = { bundleId: DEFAULT_BUNDLE_ID, out: "./INTIP.mobileprovision.base64" };
+  const args = {
+    bundleId: DEFAULT_BUNDLE_ID,
+    out: "./INTIP.mobileprovision.base64",
+    profileType: "IOS_APP_STORE",
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--bundle-id") args.bundleId = argv[++i];
     else if (a === "--certificate-id") args.certificateId = argv[++i];
     else if (a === "--profile-name") args.profileName = argv[++i];
+    else if (a === "--profile-type") args.profileType = argv[++i];
+    else if (a === "--device-ids") args.deviceIds = argv[++i].split(",").filter(Boolean);
     else if (a === "--out") args.out = argv[++i];
     else if (a === "--dry-run") args.dryRun = true;
   }
@@ -190,28 +225,105 @@ async function profileReissue(client, argv) {
     }
   }
 
+  let deviceIds = args.deviceIds;
+  if (PROFILE_TYPES_REQUIRING_DEVICES.has(args.profileType) && !deviceIds) {
+    const devices = await client.request("GET", "/devices?filter[status]=ENABLED&limit=200");
+    if (!devices.data.length) {
+      throw new Error(
+        `${args.profileType} 프로파일은 등록된 기기가 최소 1개 필요합니다. ` +
+          `먼저 'device list'로 확인하거나 ASC 콘솔에서 기기를 등록하세요.`,
+      );
+    }
+    deviceIds = devices.data.map((d) => d.id);
+    console.log(
+      `기기 ${deviceIds.length}개 자동 포함:\n` +
+        devices.data.map((d) => `  ${d.id}\t${d.attributes.name}\t${d.attributes.udid}`).join("\n"),
+    );
+  }
+
   const profileName = args.profileName ?? `INTIP ${args.bundleId} ${timestampSuffix()}`;
   if (args.dryRun) {
-    console.log(`[dry-run] POST /profiles 생략 — name="${profileName}", certificate=${certificateId}`);
+    console.log(
+      `[dry-run] POST /profiles 생략 — name="${profileName}", type=${args.profileType}, ` +
+        `certificate=${certificateId}${deviceIds ? `, devices=${deviceIds.length}` : ""}`,
+    );
     return;
+  }
+
+  const relationships = {
+    bundleId: { data: { id: bundleResourceId, type: "bundleIds" } },
+    certificates: { data: [{ id: certificateId, type: "certificates" }] },
+  };
+  if (deviceIds) {
+    relationships.devices = { data: deviceIds.map((id) => ({ id, type: "devices" })) };
   }
 
   const profile = await client.request("POST", "/profiles", {
     data: {
       type: "profiles",
-      attributes: { name: profileName, profileType: "IOS_APP_STORE" },
-      relationships: {
-        bundleId: { data: { id: bundleResourceId, type: "bundleIds" } },
-        certificates: { data: [{ id: certificateId, type: "certificates" }] },
-      },
+      attributes: { name: profileName, profileType: args.profileType },
+      relationships,
     },
   });
 
   const content = profile.data?.attributes?.profileContent;
   if (!content) throw new Error("응답에 profileContent가 없습니다:\n" + JSON.stringify(profile));
   fs.writeFileSync(args.out, content, "utf8");
-  console.log(`✅ 새 프로파일 발급 완료: "${profileName}" (uuid ${profile.data.attributes.uuid})`);
+  console.log(`✅ 새 프로파일 발급 완료: "${profileName}" (${args.profileType}, uuid ${profile.data.attributes.uuid})`);
   console.log(`   base64 저장: ${args.out}`);
+}
+
+// ── device ────────────────────────────────────────────────────────────
+
+async function deviceList(client, argv) {
+  const args = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--status") args.status = argv[++i];
+  }
+  const filter = args.status ? `?filter[status]=${encodeURIComponent(args.status)}&limit=200` : "?limit=200";
+  const data = await client.request("GET", `/devices${filter}`);
+  if (!data.data.length) {
+    console.log("(등록된 기기 없음)");
+    return;
+  }
+  for (const d of data.data) {
+    const a = d.attributes;
+    console.log(`${d.id}\t${a.name}\t${a.udid}\t${a.deviceClass}\t${a.status}`);
+  }
+}
+
+async function deviceRegister(client, argv) {
+  const args = { platform: "IOS" };
+  const udid = argv.find((a) => !a.startsWith("--"));
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--name") args.name = argv[++i];
+    else if (argv[i] === "--platform") args.platform = argv[++i];
+    else if (argv[i] === "--dry-run") args.dryRun = true;
+  }
+  if (!udid) {
+    console.error("device register <udid> --name <name>이 필요합니다.");
+    process.exit(1);
+  }
+  if (!args.name) {
+    console.error("--name이 필요합니다 (ASC 콘솔에 표시될 기기 이름).");
+    process.exit(1);
+  }
+
+  const existing = await client.request("GET", `/devices?filter[udid]=${encodeURIComponent(udid)}&limit=1`);
+  if (existing.data.length) {
+    const d = existing.data[0];
+    console.log(`✅ 이미 등록되어 있음: "${d.attributes.name}" (${d.id}, ${d.attributes.status}) — 생략.`);
+    return;
+  }
+  if (args.dryRun) {
+    console.log(`[dry-run] POST /devices 생략 — name="${args.name}", udid=${udid}, platform=${args.platform}`);
+    return;
+  }
+
+  const created = await client.request("POST", "/devices", {
+    data: { type: "devices", attributes: { name: args.name, udid, platform: args.platform } },
+  });
+  console.log(`✅ 등록 완료: "${args.name}" (${created.data.id}, udid ${udid})`);
 }
 
 async function profileDelete(client, argv) {
@@ -287,34 +399,77 @@ async function bundleCapabilities(client, argv) {
   for (const c of caps.data) console.log(`  ${c.attributes.capabilityType}`);
 }
 
-async function bundleEnableAppGroups(client, argv) {
+async function bundleCreate(client, argv) {
   const args = {};
-  const bundleId = argv.find((a) => !a.startsWith("--")) ?? DEFAULT_BUNDLE_ID;
+  const bundleId = argv.find((a) => !a.startsWith("--"));
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--dry-run") args.dryRun = true;
+    if (argv[i] === "--name") args.name = argv[++i];
+    else if (argv[i] === "--dry-run") args.dryRun = true;
   }
+  if (!bundleId) {
+    console.error("bundle create <bundle-id>가 필요합니다.");
+    process.exit(1);
+  }
+
+  const existing = await findBundleId(client, bundleId);
+  if (existing) {
+    console.log(`✅ 이미 등록되어 있음: ${bundleId} (${existing}) — 생략.`);
+    return;
+  }
+  if (args.dryRun) {
+    console.log(`[dry-run] POST /bundleIds (${bundleId})는 생략함.`);
+    return;
+  }
+  const name = args.name ?? bundleId;
+  const created = await client.request("POST", "/bundleIds", {
+    data: { type: "bundleIds", attributes: { identifier: bundleId, name, platform: "IOS" } },
+  });
+  console.log(`✅ 등록 완료: ${bundleId} (${created.data.id})`);
+}
+
+/** 임의의 capabilityType(APP_GROUPS, ASSOCIATED_DOMAINS, ...)을 켠다. settings는 항상 []
+ * — App Groups처럼 별도 그룹 식별자가 필요한 capability는 그룹 자체를 App Groups
+ * 리소스로 따로 만든 뒤 여기서는 켜기만 하면 되는 것들 기준(현재 쓰는 두 개가 그렇다). */
+async function bundleEnableCapability(client, bundleId, capabilityType, { dryRun } = {}) {
   const resourceId = await findBundleId(client, bundleId);
   if (!resourceId) throw new Error(`Bundle ID를 찾지 못했습니다: ${bundleId}`);
 
   const caps = await client.request("GET", `/bundleIds/${resourceId}/bundleIdCapabilities`);
   const types = caps.data.map((c) => c.attributes.capabilityType);
-  console.log(`현재 capability: ${types.length ? types.join(", ") : "(없음)"}`);
-  if (types.includes("APP_GROUPS")) {
-    console.log("✅ 이미 활성화되어 있음.");
+  console.log(`${bundleId} 현재 capability: ${types.length ? types.join(", ") : "(없음)"}`);
+  if (types.includes(capabilityType)) {
+    console.log(`✅ ${capabilityType}는 이미 활성화되어 있음.`);
     return;
   }
-  if (args.dryRun) {
-    console.log("[dry-run] POST /bundleIdCapabilities (APP_GROUPS)는 생략함.");
+  if (dryRun) {
+    console.log(`[dry-run] POST /bundleIdCapabilities (${capabilityType})는 생략함.`);
     return;
   }
   await client.request("POST", "/bundleIdCapabilities", {
     data: {
       type: "bundleIdCapabilities",
-      attributes: { capabilityType: "APP_GROUPS", settings: [] },
+      attributes: { capabilityType, settings: [] },
       relationships: { bundleId: { data: { id: resourceId, type: "bundleIds" } } },
     },
   });
-  console.log("✅ APP_GROUPS 활성화 완료.");
+  console.log(`✅ ${capabilityType} 활성화 완료.`);
+}
+
+async function bundleEnableAppGroups(client, argv) {
+  const bundleId = argv.find((a) => !a.startsWith("--")) ?? DEFAULT_BUNDLE_ID;
+  const dryRun = argv.includes("--dry-run");
+  await bundleEnableCapability(client, bundleId, "APP_GROUPS", { dryRun });
+}
+
+async function bundleEnableCapabilityCmd(client, argv) {
+  const positional = argv.filter((a) => !a.startsWith("--"));
+  const [bundleId, capabilityType] = positional;
+  if (!bundleId || !capabilityType) {
+    console.error("bundle enable-capability <bundle-id> <capability-type>가 필요합니다.");
+    process.exit(1);
+  }
+  const dryRun = argv.includes("--dry-run");
+  await bundleEnableCapability(client, bundleId, capabilityType, { dryRun });
 }
 
 // ── app-group ─────────────────────────────────────────────────────────
@@ -441,9 +596,15 @@ async function accessCheck(client, argv) {
 const COMMANDS = {
   cert: { list: certList, revoke: certRevoke },
   profile: { list: profileList, reissue: profileReissue, delete: profileDelete },
-  bundle: { capabilities: bundleCapabilities, "enable-app-groups": bundleEnableAppGroups },
+  bundle: {
+    capabilities: bundleCapabilities,
+    create: bundleCreate,
+    "enable-app-groups": bundleEnableAppGroups,
+    "enable-capability": bundleEnableCapabilityCmd,
+  },
   "app-group": { check: appGroupCheck },
   access: { check: accessCheck },
+  device: { list: deviceList, register: deviceRegister },
 };
 
 async function main() {
