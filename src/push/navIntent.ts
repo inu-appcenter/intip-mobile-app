@@ -20,6 +20,9 @@ export type NavIntent = (
 ) & {
   /** Present only for a push-notification tap; share/deep-link intents omit it. */
   fcmMessageId?: number;
+  notificationType?: string;
+  campaignId?: string;
+  sentAt?: string;
 };
 
 /**
@@ -36,9 +39,39 @@ export function extractFcmMessageId(data?: Record<string, unknown>): number | un
   return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
+function extractOptionalString(
+  data: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = data?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function withFcmMessageId(intent: NavIntent, data?: Record<string, unknown>): NavIntent {
   const fcmMessageId = extractFcmMessageId(data);
-  return fcmMessageId === undefined ? intent : { ...intent, fcmMessageId };
+  const notificationType = extractOptionalString(data, "notificationType");
+  const campaignId = extractOptionalString(data, "campaignId");
+  const sentAt = extractOptionalString(data, "sentAt");
+
+  if (
+    fcmMessageId === undefined &&
+    notificationType === undefined &&
+    campaignId === undefined &&
+    sentAt === undefined
+  ) {
+    return intent;
+  }
+
+  const metadata: Pick<NavIntent, "notificationType" | "campaignId" | "sentAt"> = {};
+  if (notificationType !== undefined) metadata.notificationType = notificationType;
+  if (campaignId !== undefined) metadata.campaignId = campaignId;
+  if (sentAt !== undefined) metadata.sentAt = sentAt;
+
+  return {
+    ...intent,
+    ...metadata,
+    ...(fcmMessageId === undefined ? {} : { fcmMessageId }),
+  };
 }
 
 /** True when `host` is (or is a subdomain of) one of the allow-listed domains. */

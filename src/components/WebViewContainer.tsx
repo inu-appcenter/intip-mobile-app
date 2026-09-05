@@ -293,6 +293,9 @@ export default function WebViewContainer({ url, mode }: Props) {
   const pendingNotificationOpenedRef = useRef<{
     fcmMessageId: number;
     path?: string;
+    notificationType?: string;
+    campaignId?: string;
+    sentAt?: string;
   } | null>(null);
   const cleanupStartedRef = useRef(false);
   // Dev controller "load full URL": the URL a developer asked to load in place.
@@ -345,6 +348,9 @@ export default function WebViewContainer({ url, mode }: Props) {
       pendingNotificationOpenedRef.current = {
         fcmMessageId: intent.fcmMessageId,
         path: intent.kind === "external" ? intent.url : intent.path,
+        notificationType: intent.notificationType,
+        campaignId: intent.campaignId,
+        sentAt: intent.sentAt,
       };
       flushPendingNotificationOpened();
     },
