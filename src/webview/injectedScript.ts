@@ -240,23 +240,42 @@ true;
  * drag *mid back gesture*: the selection handles and the context menu pop up
  * and the content smears under the transition.
  *
- * The native edge guard in `WebViewContainer` only cancels the WebView's touch
- * stream once the finger has actually travelled inward, which a slow gesture
- * does *after* the long press has already fired. So we also suppress the
- * long-press affordances in the page itself, for the duration of any touch that
- * begins in the edge band:
+ * The native edge guard in `WebViewContainer` cannot do this on its own, and
+ * measurement on device (One UI, Android 16) says why: `ACTION_DOWN` reaches the
+ * WebView before any native guard can rule on the touch, and cancelling the RN
+ * touch stream afterwards does not reach Chromium's own gesture detector — the
+ * guard activated 346ms in and the engine still fired its long-press haptic
+ * 250ms later. The system's own `ACTION_CANCEL` is no help either; it was
+ * measured arriving 3-16s after the touch began.
  *
+ * What does work is telling the engine, at touch-down, to drop its default
+ * handling for this touch. So for any touch that begins in the edge band:
+ *
+ *  - `touchstart` is `preventDefault`ed, which drops the engine's long-press
+ *    selection and the OS haptic that rides along with it. The listener must be
+ *    registered `{ passive: false }` — document-level touchstart is passive by
+ *    default in Chromium and a passive listener's `preventDefault` is ignored;
+ *  - the events a page starts an interaction from (`touchstart`, `pointerdown`,
+ *    `mousedown`) are swallowed in the capture phase, so the page's own handler
+ *    never runs. React binds its listeners to the root container, not
+ *    `document`, so capturing here always wins the race. This is what stops a
+ *    back swipe being read as the start of a drag or a long press, with no
+ *    state left for the page to unwind afterwards;
  *  - a stylesheet (toggled by a class on `<html>`) kills `user-select`,
  *    `-webkit-touch-callout` and `-webkit-user-drag` everywhere, which is what
  *    the engine consults when the long-press timer fires;
  *  - `contextmenu` is swallowed while the guard is engaged, covering the
  *    link/image menu that does not go through selection.
  *
- * Unlike cancelling the touch, this leaves the touch stream intact: a tap (even
- * a slow one) near the edge still reaches the page and still clicks. Editable
- * targets are exempt so long-pressing a text field at the edge keeps its caret
- * handles. Everything is released on `touchend`/`touchcancel`, with a timer as
- * a backstop in case the WebView eats the end event when the gesture commits.
+ * `preventDefault` also suppresses the synthesised `click`, which would kill
+ * plain taps in the band, so a touch that never travels is replayed as a click
+ * on `touchend`. Scrolling that starts in the band was measured to still work.
+ * Editable targets are exempt throughout, so a text field at the edge keeps its
+ * caret handles. Everything is released on `touchend`/`touchcancel`, with a
+ * timer as a backstop in case the WebView eats the end event.
+ *
+ * Nothing outside the band changes: a long press there still selects text and
+ * still vibrates, which is the control the fix was verified against.
  */
 export function buildEdgeLongPressGuardScript(edgePx: number): string {
   return `
@@ -307,22 +326,196 @@ export function buildEdgeLongPressGuardScript(edgePx: number): string {
     try { document.documentElement.classList.remove(CLASS); } catch (e) {}
   }
 
-  document.addEventListener('touchstart', function (e) {
-    if (engaged) return;
-    var touch = e.touches && e.touches.length === 1 ? e.touches[0] : null;
-    if (!touch) return;
+  function inBand(clientX) {
     var width = window.innerWidth || document.documentElement.clientWidth || 0;
-    var nearEdge = touch.clientX <= EDGE_PX || touch.clientX >= width - EDGE_PX;
-    if (!nearEdge || isEditable(e.target)) return;
-    engage();
+    return clientX <= EDGE_PX || clientX >= width - EDGE_PX;
+  }
+
+  // x of the point this event starts an interaction at, or null when the event
+  // is not a single-finger start (a second finger is never a back gesture).
+  function startX(e) {
+    if (e.type === 'touchstart') {
+      if (!e.touches || e.touches.length !== 1) return null;
+      return e.touches[0].clientX;
+    }
+    return typeof e.clientX === 'number' ? e.clientX : null;
+  }
+
+  function isGuarded(e) {
+    var x = startX(e);
+    return x !== null && inBand(x) && !isEditable(e.target);
+  }
+
+  // Runtime handle so a dev build can A/B the fix without rebuilding: setting
+  // window.__intipEdgeGuard.blocking = false (or .preventDefault = false)
+  // restores the pre-fix behaviour from the next touch on.
+  var handle = { blocking: true, preventDefault: true, band: EDGE_PX };
+  try { window.__intipEdgeGuard = handle; } catch (e) {}
+
+  // Layer 1: the page never learns the touch happened. stopPropagation (not
+  // stopImmediatePropagation) so the engage listener below still runs.
+  function blockGestureStart(e) {
+    if (!handle.blocking || !isGuarded(e)) return;
+    e.stopPropagation();
+    // Drops the engine's own default handling for this touch — the long-press
+    // selection and the OS haptic with it. Cancelling the RN touch stream
+    // demonstrably does not.
+    if (handle.preventDefault && e.cancelable) e.preventDefault();
+    // preventDefault also suppresses the synthesised click, so a plain tap in
+    // the band would stop working. Remember it and replay it on touchend if
+    // the finger never travelled: a tap is not a back gesture.
+    if (e.type === 'touchstart') {
+      var t0 = e.touches[0];
+      pendingTap = { target: e.target, x: t0.clientX, y: t0.clientY, at: Date.now() };
+    }
+  }
+
+  var pendingTap = null;
+  var TAP_SLOP_PX = 10;
+  var TAP_MAX_MS = 500;
+
+  function dropTap() { pendingTap = null; }
+
+  function maybeReplayTap(e) {
+    var p = pendingTap;
+    pendingTap = null;
+    if (!p) return;
+    if (Date.now() - p.at > TAP_MAX_MS) return;
+    var t = e.changedTouches && e.changedTouches[0];
+    if (t && (Math.abs(t.clientX - p.x) > TAP_SLOP_PX || Math.abs(t.clientY - p.y) > TAP_SLOP_PX)) return;
+    try { if (p.target && p.target.click) p.target.click(); } catch (e4) {}
+  }
+
+  document.addEventListener('touchmove', function (e) {
+    var p = pendingTap;
+    if (!p) return;
+    var t = e.touches && e.touches[0];
+    if (!t) return;
+    if (Math.abs(t.clientX - p.x) > TAP_SLOP_PX || Math.abs(t.clientY - p.y) > TAP_SLOP_PX) dropTap();
   }, true);
 
-  document.addEventListener('touchend', release, true);
-  document.addEventListener('touchcancel', release, true);
+  // passive:false — document-level touchstart is passive by default in
+  // Chromium, and a passive listener's preventDefault() is ignored.
+  document.addEventListener('touchstart', blockGestureStart, { capture: true, passive: false });
+  document.addEventListener('pointerdown', blockGestureStart, true);
+  document.addEventListener('mousedown', blockGestureStart, true);
+
+  // Layer 2: suppress what the engine consults for the rest of the touch.
+  document.addEventListener('touchstart', function (e) {
+    if (engaged) return;
+    if (isGuarded(e)) engage();
+  }, true);
+
+  document.addEventListener('touchend', function (e) { maybeReplayTap(e); release(); }, true);
+  document.addEventListener('touchcancel', function () { dropTap(); release(); }, true);
 
   document.addEventListener('contextmenu', function (e) {
     if (engaged) e.preventDefault();
   }, true);
+})();
+true;
+`;
+}
+
+/**
+ * Dev-only instrumentation for the edge guard. Never injected in a release
+ * build (see `documentEndScript` in `WebViewContainer`).
+ *
+ * The whole back-gesture investigation kept stalling on one unanswered
+ * question: when a back swipe makes the device buzz, did the *page* ask for
+ * that (`navigator.vibrate`, a deliberate drag-start haptic) or did the
+ * *engine* (a ~500ms long press, whose haptic is emitted below JS where no
+ * injected script can reach it)? The two have completely different fixes, and
+ * nothing in the app could tell them apart.
+ *
+ * Pairing this with `adb logcat -s VibratorManagerService:V` answers it:
+ * a vibration the OS logs but this never sees came from the engine.
+ *
+ * It also records the geometry every guess so far has been built on — where
+ * the touch actually landed relative to the viewport edge, and how long the
+ * page held the touch before it was cancelled. That is what says whether
+ * `SYSTEM_BACK_GESTURE_EDGE_DP` matches the band this device really uses.
+ */
+export function buildEdgeGuardDiagnosticsScript(edgePx: number): string {
+  return `
+(function () {
+  try { console.log('[edge-diag] boot'); } catch (e0) {}
+  if (window.__intipEdgeDiagReady) return;
+  window.__intipEdgeDiagReady = true;
+ try {
+  var EDGE_PX = ${edgePx};
+  var TAG = '[edge-diag]';
+  var startedAt = 0;
+  var pending = null;
+
+  function describe(node) {
+    if (!node || node.nodeType !== 1) return String(node);
+    var out = node.tagName.toLowerCase();
+    if (node.id) out += '#' + node.id;
+    var cls = typeof node.className === 'string' ? node.className : '';
+    if (cls) out += '.' + cls.trim().split(/\\s+/).slice(0, 3).join('.');
+    if (node.getAttribute) {
+      var day = node.getAttribute('data-day');
+      if (day !== null) out += '[day=' + day + ',hour=' + node.getAttribute('data-hour') + ']';
+    }
+    return out;
+  }
+
+  // 1. Who asks for vibration. Silence here + a vibration in logcat == engine.
+  try {
+    var origVibrate = navigator.vibrate && navigator.vibrate.bind(navigator);
+    if (origVibrate) {
+      navigator.vibrate = function (pattern) {
+        var stack = '';
+        try { stack = new Error().stack || '(no stack)'; } catch (e) {}
+        console.log(TAG, 'navigator.vibrate(' + JSON.stringify(pattern) + ')\\n' + stack);
+        return origVibrate(pattern);
+      };
+    } else {
+      console.log(TAG, 'navigator.vibrate unavailable — any buzz is engine-side');
+    }
+  } catch (e) {}
+
+  // 2. Where each touch landed, and whether the guard claimed it.
+  document.addEventListener('touchstart', function (e) {
+    var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+    if (!t) return;
+    var w = window.innerWidth || document.documentElement.clientWidth || 0;
+    var fromLeft = Math.round(t.clientX);
+    var fromRight = Math.round(w - t.clientX);
+    var inBand = fromLeft <= EDGE_PX || fromRight <= EDGE_PX;
+    var blocking = true;
+    try { blocking = !!(window.__intipEdgeGuard && window.__intipEdgeGuard.blocking); } catch (e2) {}
+    startedAt = Date.now();
+    pending = inBand;
+    console.log(
+      TAG, 'touchstart',
+      'fromLeft=' + fromLeft, 'fromRight=' + fromRight,
+      'viewport=' + w, 'screen=' + ((window.screen && window.screen.width) || '?'),
+      'dpr=' + (window.devicePixelRatio || 1),
+      'band=' + EDGE_PX, 'inBand=' + inBand, 'blocking=' + blocking,
+      'target=' + describe(e.target), 'path=' + location.pathname
+    );
+  }, true);
+
+  // 3. How it ended. The gap before a cancel is the window the engine's
+  //    ~500ms long press fires in — if it is longer than that, the native
+  //    guard is arriving too late (or not at all).
+  function logEnd(e) {
+    if (pending === null) return;
+    console.log(TAG, e.type, 'after=' + (Date.now() - startedAt) + 'ms', 'inBand=' + pending);
+    pending = null;
+  }
+  document.addEventListener('click', function (e) {
+    console.log(TAG, 'click x=' + Math.round(e.clientX) + ' target=' + describe(e.target));
+  }, true);
+  document.addEventListener('touchend', logEnd, true);
+  document.addEventListener('touchcancel', logEnd, true);
+
+  console.log(TAG, 'ready band=' + EDGE_PX + ' viewport=' + (window.innerWidth || 0));
+ } catch (err) {
+  try { console.log('[edge-diag] THREW', (err && (err.stack || err.message)) || String(err)); } catch (e9) {}
+ }
 })();
 true;
 `;

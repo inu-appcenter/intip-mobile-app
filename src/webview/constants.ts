@@ -154,11 +154,29 @@ export const STRINGS = {
 
 /**
  * Width (dp / CSS px) of the band along each screen edge that the system
- * reserves for its back gesture. AOSP's inset is 20dp; OEM skins (One UI) can
- * widen it, so guard slightly more than the platform minimum.
+ * reserves for its back gesture.
  *
- * Shared by the native edge guard (`WebViewContainer`) and the in-page
- * long-press suppressor (`buildEdgeLongPressGuardScript`) so both agree on
- * exactly which touches belong to the back gesture.
- */
-export const SYSTEM_BACK_GESTURE_EDGE_DP = 24;
+ * 30, not AOSP's 20, because that is what One UI actually reserves. Measured on
+ * a Galaxy SM-S942N (Android 16, density 3.0) with the device in gesture
+ * navigation:
+ *
+ *   adb shell dumpsys window | grep systemGestures
+ *     type=systemGestures frame=[0,0][90,2340]     sideHint=LEFT
+ *     type=systemGestures frame=[990,0][1080,2340] sideHint=RIGHT
+ *
+ * 90px / 3.0 = 30dp, at `navigation_bar_back_gesture_sensitivity=1`. dp and CSS
+ * px coincide here (1080 device px, 360 CSS px viewport), so one number serves
+ * both consumers.
+ *
+ * This is still a hardcoded guess dressed up as a measurement, and it is wrong
+ * in two directions: Samsung's sensitivity slider widens the real band past 30,
+ * and in *button* navigation the same insets read 0 — there is no edge gesture
+ * at all, so the band needlessly costs those users a strip of the screen. The
+ * fix is to read `WindowInsets.getSystemGestureInsets()` at runtime, which does
+ * work on One UI; it needs a small native module (neither RN core nor
+ * react-native-safe-area-context exposes it) and is not written yet.
+ *
+ * Shared by the native edge guard (`WebViewContainer`) and the in-page guard
+ * (`buildEdgeLongPressGuardScript`) so both agree on which touches are the
+ * system's.
+ */export const SYSTEM_BACK_GESTURE_EDGE_DP = 30;

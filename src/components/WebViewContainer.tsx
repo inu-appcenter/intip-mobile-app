@@ -80,6 +80,7 @@ import {
 } from "../webview/constants";
 import {
   buildBridgeShimScript,
+  buildEdgeGuardDiagnosticsScript,
   buildEdgeLongPressGuardScript,
   buildSafeAreaInsetsScript,
   INJECTED_SCRIPT,
@@ -272,7 +273,12 @@ export default function WebViewContainer({ url, mode }: Props) {
   const documentEndScript = useMemo(
     () =>
       INJECTED_SCRIPT +
-      buildEdgeLongPressGuardScript(SYSTEM_BACK_GESTURE_EDGE_DP),
+      buildEdgeLongPressGuardScript(SYSTEM_BACK_GESTURE_EDGE_DP) +
+      // Dev builds also carry the guard's instrumentation, so a reproduction
+      // reports what it actually did instead of leaving us to infer it.
+      (__DEV__
+        ? buildEdgeGuardDiagnosticsScript(SYSTEM_BACK_GESTURE_EDGE_DP)
+        : ""),
     [],
   );
 
@@ -858,28 +864,47 @@ export default function WebViewContainer({ url, mode }: Props) {
   //
   // These two pans live only in that band and deliberately do nothing — the
   // point is the activation itself, which makes gesture-handler cancel the
-  // touch stream in the WebView underneath, so the long-press never fires. They
-  // only claim the touch once it travels inward horizontally (the direction the
-  // back gesture pulls) and bail on a vertical drag, so tapping and scrolling
-  // near the edge still reach the page exactly as before. A touch that only
-  // rests at the edge without travelling never activates them — that case is
-  // covered by the in-page guard (`buildEdgeLongPressGuardScript`), which
-  // suppresses the long-press affordances without cancelling the touch.
+  // touch stream in the WebView underneath. They only claim the touch once it
+  // travels inward horizontally (the direction the back gesture pulls) and bail
+  // on a vertical drag, so tapping and scrolling near the edge still reach the
+  // page exactly as before.
+  //
+  // Note what this does *not* do: measurement on device (One UI, Android 16)
+  // shows the engine's long-press haptic still fires ~250ms after one of these
+  // activates, so cancelling the RN touch stream does not reach Chromium's own
+  // gesture detector. Suppressing that is the in-page guard's job now (see
+  // `buildEdgeLongPressGuardScript`). These stay for the selection/drag smear
+  // they were originally added for (issue #25).
   const backGestureGuard = useMemo(() => {
+    // Dev builds announce which guard claimed the touch and when, so a
+    // reproduction reports what happened instead of leaving us to infer it.
+    const trace = <T extends { onStart: (cb: () => void) => T }>(
+      gesture: T & { runOnJS: (value: boolean) => T },
+      label: string,
+    ): T =>
+      __DEV__
+        ? gesture
+            .runOnJS(true)
+            .onStart(() => console.log(`[edge-diag] native ${label} activated`))
+        : gesture;
+
     const guard = (edge: "left" | "right") =>
-      Gesture.Pan()
-        .hitSlop(
-          edge === "left"
-            ? { left: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP }
-            : { right: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP },
-        )
-        .activeOffsetX(
-          edge === "left" ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP,
-        )
-        .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
-        // iOS has no equivalent problem: the native stack owns the edge swipe
-        // and WKWebView does not start a selection mid-gesture.
-        .enabled(Platform.OS === "android");
+      trace(
+        Gesture.Pan()
+          .hitSlop(
+            edge === "left"
+              ? { left: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP }
+              : { right: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP },
+          )
+          .activeOffsetX(
+            edge === "left" ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP,
+          )
+          .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
+          // iOS has no equivalent problem: the native stack owns the edge swipe
+          // and WKWebView does not start a selection mid-gesture.
+          .enabled(Platform.OS === "android"),
+        `pan/${edge}`,
+      );
     return Gesture.Race(guard("left"), guard("right"));
   }, []);
 
