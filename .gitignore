@@ -46,6 +46,8 @@ yarn-error.*
 # Firebase config (secrets — supply per environment, do not commit)
 /google-services.json
 /GoogleService-Info.plist
+/google-services-dev.json
+/GoogleService-Info-Dev.plist
 
 # typescript
 *.tsbuildinfo

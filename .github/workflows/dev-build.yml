@@ -1,0 +1,314 @@
+name: Dev Build
+
+# ─────────────────────────────────────────────────────────────────────────
+# 내부 배포용 개발 빌드. `dev` 브랜치에 push되면 자동으로 돈다.
+#
+# `eas build`는 쓰지 않는다 — ci.yml의 android-release/ios-release와 같은
+# 자체 self-hosted 파이프라인(prebuild → gradlew / xcodebuild)으로 만든다.
+# EAS는 OTA(EAS Update, ci.yml의 ota-publish) 경로에만 쓴다.
+#
+# 개발 변형(APP_VARIANT=development, app.config.js 참고)은 운영 앱과 별도로
+# 설치된다 — bundle id/package, 아이콘, Firebase 설정, associated domain
+# (딥링크), URL scheme이 모두 다르다. 그래서 운영 릴리스와 달리 스토어/
+# TestFlight에 올리지 않고, 서명된 APK/IPA를 그대로 Actions 아티팩트로
+# 올려 팀원이 내려받아 설치한다.
+#
+# 러너: ci.yml과 동일한 이유로 self-hosted(gangbook-air, macOS ARM64) 하나를
+# 공유한다 — private 저장소라 GitHub-hosted, 특히 macOS는 분당 과금이 크다.
+# ─────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 검증 (lint · 타입체크 · 테스트)
+    runs-on: self-hosted
+    steps:
+      - name: Checkout (with intip-bridge submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test -- --ci
+
+  android-dev-build:
+    name: Android 개발 빌드 (APK)
+    needs: verify
+    runs-on: self-hosted
+    env:
+      APP_VARIANT: development
+    steps:
+      - name: Checkout (with intip-bridge submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      # withAndroidReleaseSigning은 패키지명과 무관하게 동작하므로, 운영
+      # 릴리스 키스토어를 그대로 재사용한다 — package가 다르니 Play
+      # Store와는 충돌하지 않는다(어차피 Play Store에 올리지 않는다).
+      - name: Decode release keystore
+        run: echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > intip.jks
+
+      # app.config.js가 APP_VARIANT=development일 때 android.googleServicesFile을
+      # 이 경로로 바꿔 가리킨다. dev 패키지명(inu.appcenter.intip_android.dev)에
+      # 등록된 별도 Firebase 앱 설정이어야 한다.
+      - name: Decode google-services-dev.json
+        run: echo "${{ secrets.GOOGLE_SERVICES_DEV_JSON_BASE64 }}" | base64 --decode > google-services-dev.json
+
+      - name: Prebuild (android)
+        run: npx expo prebuild --clean --platform android
+
+      - name: Build signed APK
+        working-directory: android
+        env:
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseG1GC"
+        run: ./gradlew --no-daemon --build-cache assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+
+      - name: Remove decoded secrets
+        if: always()
+        run: rm -f intip.jks google-services-dev.json
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: intip-dev-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+
+  ios-dev-build:
+    name: iOS 개발 빌드 (IPA, ad-hoc)
+    needs: verify
+    runs-on: self-hosted
+    env:
+      APP_VARIANT: development
+    steps:
+      - name: Checkout (with intip-bridge submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Xcode 버전 확인
+        run: xcodebuild -version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Decode GoogleService-Info-Dev.plist
+        run: echo "${{ secrets.GOOGLE_SERVICE_INFO_DEV_PLIST_BASE64 }}" | base64 --decode -o GoogleService-Info-Dev.plist
+
+      # 운영 릴리스와 같은 distribution 인증서를 재사용한다(계정 단위이지
+      # bundle id에 묶이지 않는다) — 프로비저닝 프로파일만
+      # kr.inuappcenter.intip.dev용 Ad Hoc 프로파일로 다르다.
+      - name: Import signing credentials
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_DEV_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_DEV_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          CERT_PATH="$RUNNER_TEMP/ios_distribution.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/ios-ci.keychain-db"
+
+          echo -n "$IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+
+          security list-keychains -d user | sed 's/"//g' | xargs > "$RUNNER_TEMP/keychains.before"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(cat "$RUNNER_TEMP/keychains.before")
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
+
+          PROFILE_PATH="$RUNNER_TEMP/INTIP-Dev.mobileprovision"
+          echo -n "$IOS_DEV_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PROFILE_PATH"
+          cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/INTIP-Dev.mobileprovision
+
+          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/INTIP-Dev.mobileprovision.plist"
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/INTIP-Dev.mobileprovision.plist")
+          if [ -z "$PROFILE_NAME" ]; then
+            echo "::error::INTIP-Dev.mobileprovision 에서 Name을 못 읽었다 — IOS_DEV_PROVISIONING_PROFILE_BASE64 확인 필요"
+            exit 1
+          fi
+          echo "IOS_PROVISIONING_PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+
+      # withIOSManualSigning은 IOS_PROVISIONING_PROFILE_NAME이 세팅된 채로
+      # prebuild가 돌 때만 활성화된다 — 위 스텝에서 이미 넣었으므로 그대로
+      # 재사용한다(운영 릴리스 잡과 동일한 플러그인).
+      - name: Prebuild (ios)
+        run: npx expo prebuild --clean --platform ios
+
+      - name: Archive
+        working-directory: ios
+        run: |
+          xcodebuild archive \
+            -workspace INTIP.xcworkspace \
+            -scheme INTIP \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/INTIP-Dev.xcarchive" \
+            -destination "generic/platform=iOS"
+
+      - name: Export IPA (ad-hoc)
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>teamID</key>
+            <string>AANGG4Q668</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>iPhone Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>kr.inuappcenter.intip.dev</key>
+              <string>${IOS_PROVISIONING_PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/INTIP-Dev.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Clean up keychain and decoded secrets
+        if: always()
+        run: |
+          if [ -s "$RUNNER_TEMP/keychains.before" ]; then
+            security list-keychain -d user -s $(cat "$RUNNER_TEMP/keychains.before") || true
+          fi
+          security delete-keychain "$RUNNER_TEMP/ios-ci.keychain-db" 2>/dev/null || true
+          rm -f GoogleService-Info-Dev.plist
+          rm -f "$RUNNER_TEMP/INTIP-Dev.mobileprovision.plist"
+          rm -f ~/Library/MobileDevice/"Provisioning Profiles"/INTIP-Dev.mobileprovision
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: intip-dev-ipa
+          path: ${{ runner.temp }}/export/INTIP.ipa
+          retention-days: 14
+
+  notify-mattermost:
+    name: Mattermost 알림
+    if: always()
+    needs: [verify, android-dev-build, ios-dev-build]
+    runs-on: self-hosted
+    steps:
+      - name: Send Mattermost notification
+        env:
+          MATTERMOST_WEBHOOK: ${{ secrets.MATTERMOST_WEBHOOK }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          ANDROID_RESULT: ${{ needs.android-dev-build.result }}
+          IOS_RESULT: ${{ needs.ios-dev-build.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || github.sha }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$MATTERMOST_WEBHOOK" ]; then
+            echo "MATTERMOST_WEBHOOK secret is not set. Skipping Mattermost notification."
+            exit 0
+          fi
+
+          map_status() {
+            case "$1" in
+              "success") echo "✅ 성공" ;;
+              "failure") echo "❌ 실패" ;;
+              "cancelled") echo "⚠️ 취소됨" ;;
+              "skipped") echo "⏭️ 건너뜀" ;;
+              *) echo "❓ 알 수 없음 ($1)" ;;
+            esac
+          }
+
+          COLOR="#2ECC71"
+          TITLE_EMOJI="🧪"
+          TITLE_TEXT="개발 빌드 완료"
+          if [ "$ANDROID_RESULT" = "failure" ] || [ "$IOS_RESULT" = "failure" ] || [ "$VERIFY_RESULT" = "failure" ]; then
+            COLOR="#E74C3C"
+            TITLE_EMOJI="❌"
+            TITLE_TEXT="개발 빌드 실패"
+          fi
+
+          CLEAN_COMMIT_MSG=$(echo "$COMMIT_MSG" | head -n 1 | sed 's/"/\\"/g')
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "attachments": [
+              {
+                "fallback": "${TITLE_EMOJI} ${TITLE_TEXT}",
+                "color": "${COLOR}",
+                "title": "${TITLE_EMOJI} ${TITLE_TEXT}",
+                "title_link": "${RUN_URL}",
+                "fields": [
+                  {"title": "🔍 검증", "value": "$(map_status "$VERIFY_RESULT")", "short": true},
+                  {"title": "🤖 Android (APK)", "value": "$(map_status "$ANDROID_RESULT")", "short": true},
+                  {"title": "🍎 iOS (IPA, ad-hoc)", "value": "$(map_status "$IOS_RESULT")", "short": true},
+                  {"title": "👤 실행자", "value": "${ACTOR}", "short": true},
+                  {"title": "💬 커밋 메세지", "value": "${CLEAN_COMMIT_MSG}", "short": false},
+                  {"title": "📦 다운로드", "value": "[👉 GitHub Actions 실행 페이지에서 APK/IPA 다운로드하기](${RUN_URL}#artifacts)", "short": false}
+                ],
+                "footer": "INTIP Dev Build Pipeline",
+                "ts": $(date -u +%s)
+              }
+            ]
+          }
+          EOF
+          )
+
+          curl -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$MATTERMOST_WEBHOOK"
