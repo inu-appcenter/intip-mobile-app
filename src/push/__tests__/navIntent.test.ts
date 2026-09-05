@@ -14,6 +14,26 @@ describe('resolveNavIntent', () => {
       });
     });
 
+    it('retains notification analytics metadata on the navigation intent', () => {
+      expect(
+        resolveNavIntent({
+          path: '/posts/55',
+          fcmMessageId: '1234',
+          notificationType: 'promotion',
+          campaignId: 'campaign_202609',
+          sentAt: '2026-09-05T05:00:00.000Z',
+        }),
+      ).toEqual({
+        kind: 'push',
+        path: '/posts/55',
+        url: portalUrlFor('/posts/55'),
+        fcmMessageId: 1234,
+        notificationType: 'promotion',
+        campaignId: 'campaign_202609',
+        sentAt: '2026-09-05T05:00:00.000Z',
+      });
+    });
+
     it('rejects malformed, non-positive, and unsafe notification ids', () => {
       expect(extractFcmMessageId({ fcmMessageId: '12.5' })).toBeUndefined();
       expect(extractFcmMessageId({ fcmMessageId: '0' })).toBeUndefined();
