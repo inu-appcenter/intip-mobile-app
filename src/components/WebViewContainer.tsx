@@ -52,6 +52,7 @@ import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTyp
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
 import { nativeAlert } from "../../modules/intip-native-dialog";
+import { useSystemGestureBand } from "../../modules/intip-system-gestures";
 import { createNativeChannel } from "../../packages/intip-bridge/src/adapters/native";
 import { PROTOCOL_VERSION } from "../../packages/intip-bridge/src/messages";
 import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
@@ -76,10 +77,10 @@ import {
   NATIVE_FEATURES,
   PORTAL_HOST,
   STRINGS,
-  SYSTEM_BACK_GESTURE_EDGE_DP,
 } from "../webview/constants";
 import {
   buildBridgeShimScript,
+  buildEdgeGuardBandScript,
   buildEdgeGuardDiagnosticsScript,
   buildEdgeLongPressGuardScript,
   buildSafeAreaInsetsScript,
@@ -270,15 +271,23 @@ export default function WebViewContainer({ url, mode }: Props) {
   // once the finger has travelled, so the page also suppresses its long-press
   // affordances for any touch that starts in the system back-gesture band.
   // Module-constant, but built here so both halves share one edge width.
+  // Width of the system's own gesture band, per edge. Read from the OS rather
+  // than assumed: One UI reserves 30dp where AOSP reserves 20, Samsung's
+  // sensitivity slider widens it further, and under button navigation it is 0 —
+  // no edge gesture exists, so nothing should be taken from the page.
+  const gestureBand = useSystemGestureBand();
+
+  // Seeded with the band known at mount and kept current by the effect below,
+  // so this deliberately does not depend on `gestureBand`: re-running it would
+  // be a no-op anyway (the guard is idempotent by design).
   const documentEndScript = useMemo(
     () =>
       INJECTED_SCRIPT +
-      buildEdgeLongPressGuardScript(SYSTEM_BACK_GESTURE_EDGE_DP) +
+      buildEdgeLongPressGuardScript(gestureBand.left, gestureBand.right) +
       // Dev builds also carry the guard's instrumentation, so a reproduction
       // reports what it actually did instead of leaving us to infer it.
-      (__DEV__
-        ? buildEdgeGuardDiagnosticsScript(SYSTEM_BACK_GESTURE_EDGE_DP)
-        : ""),
+      (__DEV__ ? buildEdgeGuardDiagnosticsScript() : ""),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -504,6 +513,21 @@ export default function WebViewContainer({ url, mode }: Props) {
     const timeout = setTimeout(dismissOverlay, REVEAL_OVERLAY_TIMEOUT_MS);
     return () => clearTimeout(timeout);
   }, [dismissOverlay, isRoot]);
+
+  // Same shape as the insets push below: the guard bakes in the band it was
+  // injected with, so a later change (navigation mode, sensitivity slider) has
+  // to be pushed. Skipping the first run avoids re-sending what the injected
+  // script already carries.
+  const skipFirstBandPushRef = useRef(true);
+  useEffect(() => {
+    if (skipFirstBandPushRef.current) {
+      skipFirstBandPushRef.current = false;
+      return;
+    }
+    webViewRef.current?.injectJavaScript(
+      buildEdgeGuardBandScript(gestureBand.left, gestureBand.right),
+    );
+  }, [gestureBand.left, gestureBand.right]);
 
   // Keep the page's safe-area CSS vars current across an insets change after
   // the initial load (rotation, foldable fold/unfold). The initial value is
@@ -888,25 +912,26 @@ export default function WebViewContainer({ url, mode }: Props) {
             .onStart(() => console.log(`[edge-diag] native ${label} activated`))
         : gesture;
 
-    const guard = (edge: "left" | "right") =>
-      trace(
+    const guard = (edge: "left" | "right") => {
+      const width = edge === "left" ? gestureBand.left : gestureBand.right;
+      return trace(
         Gesture.Pan()
           .hitSlop(
-            edge === "left"
-              ? { left: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP }
-              : { right: 0, width: SYSTEM_BACK_GESTURE_EDGE_DP },
+            edge === "left" ? { left: 0, width } : { right: 0, width },
           )
           .activeOffsetX(
             edge === "left" ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP,
           )
           .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
           // iOS has no equivalent problem: the native stack owns the edge swipe
-          // and WKWebView does not start a selection mid-gesture.
-          .enabled(Platform.OS === "android"),
+          // and WKWebView does not start a selection mid-gesture. A zero band
+          // means button navigation, where there is nothing to guard.
+          .enabled(Platform.OS === "android" && width > 0),
         `pan/${edge}`,
       );
+    };
     return Gesture.Race(guard("left"), guard("right"));
-  }, []);
+  }, [gestureBand.left, gestureBand.right]);
 
   const webView = (
     <WebView

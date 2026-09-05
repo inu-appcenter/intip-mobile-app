@@ -2,14 +2,14 @@
   "expo": {
     "name": "INTIP",
     "slug": "intip-mobile-app",
-    "version": "3.0.12",
+    "version": "3.0.13",
     "orientation": "portrait",
 
     "scheme": "intipmobileapp",
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "kr.inuappcenter.intip",
-      "buildNumber": "25",
+      "buildNumber": "26",
       "supportsTablet": true,
       "associatedDomains": [
         "applinks:intip.inuappcenter.kr",
@@ -31,7 +31,7 @@
     },
     "android": {
       "package": "inu.appcenter.intip_android",
-      "versionCode": 29,
+      "versionCode": 30,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",

@@ -277,13 +277,15 @@ true;
  * Nothing outside the band changes: a long press there still selects text and
  * still vibrates, which is the control the fix was verified against.
  */
-export function buildEdgeLongPressGuardScript(edgePx: number): string {
+export function buildEdgeLongPressGuardScript(
+  leftPx: number,
+  rightPx: number,
+): string {
   return `
 (function () {
   if (window.__intipEdgeGuardReady) return;
   window.__intipEdgeGuardReady = true;
 
-  var EDGE_PX = ${edgePx};
   // Backstop only: a committed back gesture can swallow touchend.
   var RELEASE_FALLBACK_MS = 2000;
   var CLASS = '__intip-edge-guard';
@@ -328,7 +330,7 @@ export function buildEdgeLongPressGuardScript(edgePx: number): string {
 
   function inBand(clientX) {
     var width = window.innerWidth || document.documentElement.clientWidth || 0;
-    return clientX <= EDGE_PX || clientX >= width - EDGE_PX;
+    return clientX <= handle.left || clientX >= width - handle.right;
   }
 
   // x of the point this event starts an interaction at, or null when the event
@@ -349,7 +351,15 @@ export function buildEdgeLongPressGuardScript(edgePx: number): string {
   // Runtime handle so a dev build can A/B the fix without rebuilding: setting
   // window.__intipEdgeGuard.blocking = false (or .preventDefault = false)
   // restores the pre-fix behaviour from the next touch on.
-  var handle = { blocking: true, preventDefault: true, band: EDGE_PX };
+  var handle = {
+    blocking: true,
+    preventDefault: true,
+    // Live, because the band is not a constant: it changes with navigation
+    // mode and with Samsung's gesture-sensitivity slider. Pushed by
+    // buildEdgeGuardBandScript.
+    left: ${leftPx},
+    right: ${rightPx}
+  };
   try { window.__intipEdgeGuard = handle; } catch (e) {}
 
   // Layer 1: the page never learns the touch happened. stopPropagation (not
@@ -434,19 +444,23 @@ true;
  * It also records the geometry every guess so far has been built on — where
  * the touch actually landed relative to the viewport edge, and how long the
  * page held the touch before it was cancelled. That is what says whether
- * `SYSTEM_BACK_GESTURE_EDGE_DP` matches the band this device really uses.
+ * the band actually in force matches what this device really reserves.
  */
-export function buildEdgeGuardDiagnosticsScript(edgePx: number): string {
+export function buildEdgeGuardDiagnosticsScript(): string {
   return `
 (function () {
   try { console.log('[edge-diag] boot'); } catch (e0) {}
   if (window.__intipEdgeDiagReady) return;
   window.__intipEdgeDiagReady = true;
  try {
-  var EDGE_PX = ${edgePx};
   var TAG = '[edge-diag]';
   var startedAt = 0;
   var pending = null;
+
+  // Read off the guard's live handle so the log never disagrees with the band
+  // actually in force (it changes with navigation mode / sensitivity).
+  function bandLeft() { try { return window.__intipEdgeGuard.left; } catch (e) { return -1; } }
+  function bandRight() { try { return window.__intipEdgeGuard.right; } catch (e) { return -1; } }
 
   function describe(node) {
     if (!node || node.nodeType !== 1) return String(node);
@@ -483,7 +497,7 @@ export function buildEdgeGuardDiagnosticsScript(edgePx: number): string {
     var w = window.innerWidth || document.documentElement.clientWidth || 0;
     var fromLeft = Math.round(t.clientX);
     var fromRight = Math.round(w - t.clientX);
-    var inBand = fromLeft <= EDGE_PX || fromRight <= EDGE_PX;
+    var inBand = fromLeft <= bandLeft() || fromRight <= bandRight();
     var blocking = true;
     try { blocking = !!(window.__intipEdgeGuard && window.__intipEdgeGuard.blocking); } catch (e2) {}
     startedAt = Date.now();
@@ -493,7 +507,7 @@ export function buildEdgeGuardDiagnosticsScript(edgePx: number): string {
       'fromLeft=' + fromLeft, 'fromRight=' + fromRight,
       'viewport=' + w, 'screen=' + ((window.screen && window.screen.width) || '?'),
       'dpr=' + (window.devicePixelRatio || 1),
-      'band=' + EDGE_PX, 'inBand=' + inBand, 'blocking=' + blocking,
+      'band=' + bandLeft() + '/' + bandRight(), 'inBand=' + inBand, 'blocking=' + blocking,
       'target=' + describe(e.target), 'path=' + location.pathname
     );
   }, true);
@@ -512,7 +526,7 @@ export function buildEdgeGuardDiagnosticsScript(edgePx: number): string {
   document.addEventListener('touchend', logEnd, true);
   document.addEventListener('touchcancel', logEnd, true);
 
-  console.log(TAG, 'ready band=' + EDGE_PX + ' viewport=' + (window.innerWidth || 0));
+  console.log(TAG, 'ready band=' + bandLeft() + '/' + bandRight() + ' viewport=' + (window.innerWidth || 0));
  } catch (err) {
   try { console.log('[edge-diag] THREW', (err && (err.stack || err.message)) || String(err)); } catch (e9) {}
  }
@@ -607,4 +621,31 @@ export function buildReceiveFcmTokenScript(token: string): string {
 export function buildNavigateScript(path: string): string {
   const safe = JSON.stringify(path);
   return `window.__intipNavigate && window.__intipNavigate(${safe}); true;`;
+}
+
+/**
+ * Pushes a new gesture band into a guard that is already running.
+ *
+ * The band is not fixed for the life of a page: the user can switch navigation
+ * mode or move Samsung's gesture-sensitivity slider while the app sits in the
+ * background. `buildEdgeLongPressGuardScript` bakes in whatever was known at
+ * injection time and then reads `window.__intipEdgeGuard` on every touch, so
+ * this only has to overwrite two numbers. Safe to run before the guard exists
+ * (it does nothing) and safe to run repeatedly.
+ */
+export function buildEdgeGuardBandScript(
+  leftPx: number,
+  rightPx: number,
+): string {
+  return `
+(function () {
+  try {
+    var g = window.__intipEdgeGuard;
+    if (!g) return;
+    g.left = ${leftPx};
+    g.right = ${rightPx};
+  } catch (e) {}
+})();
+true;
+`;
 }
