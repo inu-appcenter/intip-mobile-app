@@ -35,10 +35,13 @@ module.exports = () => ({
         icon: "./assets/icon-dev.icon",
         googleServicesFile: "./GoogleService-Info-Dev.plist",
         associatedDomains: ["applinks:intip-test.pages.dev"],
-        entitlements: {
-          ...expo.ios.entitlements,
-          "aps-environment": "development",
-        },
+        // aps-environment는 운영과 같은 "production"으로 둔다(app.json에서 상속).
+        // 개발 빌드는 ad-hoc 배포 서명인데, ad-hoc/App Store 프로파일의
+        // 엔타이틀먼트에는 항상 aps-environment=production만 들어간다 —
+        // "development"로 덮으면 프로파일과 불일치해서 archive가
+        // "Provisioning profile ... doesn't include the aps-environment
+        // entitlement"로 죽는다. sandbox APNs가 필요하면 ad-hoc이 아니라
+        // IOS_APP_DEVELOPMENT 프로파일로 서명해야 한다.
         infoPlist: {
           ...expo.ios.infoPlist,
           CFBundleDisplayName: "INTIP Dev",
@@ -51,7 +54,7 @@ module.exports = () => ({
         package: "inu.appcenter.intip_android.dev",
         googleServicesFile: "./google-services-dev.json",
         adaptiveIcon: {
-          foregroundImage: "./assets/images/Dev App Icon.png",
+          foregroundImage: "./assets/images/android-icon-foreground-dev.png",
           backgroundImage: "./assets/images/android-icon-background.png",
         },
         intentFilters: [
