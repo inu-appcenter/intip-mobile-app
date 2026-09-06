@@ -10,8 +10,11 @@ name: Dev Build
 # 개발 변형(APP_VARIANT=development, app.config.js 참고)은 운영 앱과 별도로
 # 설치된다 — bundle id/package, 아이콘, Firebase 설정, associated domain
 # (딥링크), URL scheme이 모두 다르다. 그래서 운영 릴리스와 달리 스토어/
-# TestFlight에 올리지 않고, 서명된 APK/IPA를 그대로 Actions 아티팩트로
-# 올려 팀원이 내려받아 설치한다.
+# TestFlight에 올리지 않는다. 배포는 두 갈래다:
+#   1. Actions 아티팩트 (보존 14일, GitHub 로그인 필요)
+#   2. Garage(S3 호환) → https://media.inuappcenter.kr/intip-app-artifacts/dev/
+#      로그인 없이 링크 하나로 받는다. iOS는 itms-services 무선 설치까지
+#      되고, 그 설치 페이지를 publish-install-page 잡이 만든다.
 #
 # 러너: ci.yml과 동일한 이유로 self-hosted(gangbook-air, macOS ARM64) 하나를
 # 공유한다 — private 저장소라 GitHub-hosted, 특히 macOS는 분당 과금이 크다.
@@ -108,6 +111,17 @@ jobs:
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
           GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseG1GC"
         run: ./gradlew --no-daemon --build-cache assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+
+      # 팀 배포용. Actions 아티팩트는 GitHub 로그인이 있어야 받을 수 있어서,
+      # 링크 하나로 끝나도록 Garage(media.inuappcenter.kr)에도 올린다.
+      - name: Upload APK to Garage
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.GARAGE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.GARAGE_S3_SECRET_ACCESS_KEY }}
+        run: |
+          ./scripts/garage-put.sh \
+            android/app/build/outputs/apk/release/app-release.apk \
+            "dev/${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}/INTIP-dev.apk"
 
       - name: Remove decoded secrets
         if: always()
@@ -235,6 +249,18 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
+      - name: Upload IPA to Garage
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.GARAGE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.GARAGE_S3_SECRET_ACCESS_KEY }}
+        run: |
+          BUILD_DIR="dev/${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+          ./scripts/garage-put.sh "$RUNNER_TEMP/export/INTIP.ipa" "$BUILD_DIR/INTIP-dev.ipa"
+          # manifest.plist의 display-image/full-size-image용. 없으면 설치
+          # 다이얼로그에 아이콘이 안 뜰 뿐이라 실패해도 빌드는 막지 않는다.
+          ./scripts/garage-put.sh "assets/icon-dev.icon/Assets/Dev App Icon.png" \
+            "$BUILD_DIR/icon.png" || echo "::warning::아이콘 업로드 실패 — 설치 페이지는 정상 동작한다"
+
       - name: Clean up keychain and decoded secrets
         if: always()
         run: |
@@ -253,10 +279,65 @@ jobs:
           path: ${{ runner.temp }}/export/INTIP.ipa
           retention-days: 14
 
+  # 두 빌드가 끝난 뒤, 올라간 산출물을 가리키는 설치 페이지를 만든다.
+  # 한쪽 플랫폼이 실패해도 나머지 하나로 페이지를 낸다.
+  publish-install-page:
+    name: 설치 페이지 게시
+    if: always() && (needs.android-dev-build.result == 'success' || needs.ios-dev-build.result == 'success')
+    needs: [android-dev-build, ios-dev-build]
+    runs-on: self-hosted
+    outputs:
+      install_url: ${{ steps.publish.outputs.install_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Generate & upload install page
+        id: publish
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.GARAGE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.GARAGE_S3_SECRET_ACCESS_KEY }}
+          ANDROID_RESULT: ${{ needs.android-dev-build.result }}
+          IOS_RESULT: ${{ needs.ios-dev-build.result }}
+        run: |
+          set -euo pipefail
+
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          BUILD_DIR="dev/${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+          BASE_URL="https://media.inuappcenter.kr/intip-app-artifacts/${BUILD_DIR}"
+
+          # 버전/빌드번호는 app.json이 진실의 출처다(app.config.js도 이걸 편다).
+          VERSION=$(node -p "require('./app.json').expo.version")
+          BUILD_NO=$(node -p "require('./app.json').expo.ios.buildNumber")
+
+          ARGS=(--out-dir "$RUNNER_TEMP/page" --base-url "$BASE_URL"
+                --version "$VERSION" --build "$BUILD_NO" --sha "$SHORT_SHA"
+                --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
+          [ "$IOS_RESULT" = "success" ] && ARGS+=(--ipa INTIP-dev.ipa --icon icon.png)
+          [ "$ANDROID_RESULT" = "success" ] && ARGS+=(--apk INTIP-dev.apk)
+
+          ./scripts/make-dev-install-page.sh "${ARGS[@]}"
+
+          ./scripts/garage-put.sh "$RUNNER_TEMP/page/index.html" "$BUILD_DIR/index.html"
+          if [ -f "$RUNNER_TEMP/page/manifest.plist" ]; then
+            ./scripts/garage-put.sh "$RUNNER_TEMP/page/manifest.plist" "$BUILD_DIR/manifest.plist"
+          fi
+          # 페이지 안의 링크가 전부 절대 URL이라, 같은 파일을 dev/index.html로
+          # 한 번 더 올리면 "항상 최신 빌드" 주소가 된다.
+          ./scripts/garage-put.sh "$RUNNER_TEMP/page/index.html" "dev/index.html"
+
+          echo "install_url=${BASE_URL}/" >> "$GITHUB_OUTPUT"
+          echo "### 📲 설치 페이지: ${BASE_URL}/" >> "$GITHUB_STEP_SUMMARY"
+
   notify-mattermost:
     name: Mattermost 알림
     if: always()
-    needs: [verify, android-dev-build, ios-dev-build]
+    needs: [verify, android-dev-build, ios-dev-build, publish-install-page]
     runs-on: self-hosted
     steps:
       - name: Send Mattermost notification
@@ -266,6 +347,7 @@ jobs:
           ANDROID_RESULT: ${{ needs.android-dev-build.result }}
           IOS_RESULT: ${{ needs.ios-dev-build.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          INSTALL_URL: ${{ needs.publish-install-page.outputs.install_url }}
           COMMIT_MSG: ${{ github.event.head_commit.message || github.sha }}
           ACTOR: ${{ github.actor }}
         run: |
@@ -295,6 +377,13 @@ jobs:
 
           CLEAN_COMMIT_MSG=$(echo "$COMMIT_MSG" | head -n 1 | sed 's/"/\\"/g')
 
+          # 설치 페이지가 떴으면 그 링크를, 아니면 Actions 아티팩트로 안내한다.
+          if [ -n "${INSTALL_URL:-}" ]; then
+            INSTALL_LINE="[👉 설치 페이지 열기 (iOS 무선 설치 · Android APK)](${INSTALL_URL})"
+          else
+            INSTALL_LINE="[👉 GitHub Actions 실행 페이지에서 APK/IPA 다운로드하기](${RUN_URL}#artifacts)"
+          fi
+
           PAYLOAD=$(cat <<EOF
           {
             "attachments": [
@@ -309,7 +398,7 @@ jobs:
                   {"title": "🍎 iOS (IPA, ad-hoc)", "value": "$(map_status "$IOS_RESULT")", "short": true},
                   {"title": "👤 실행자", "value": "${ACTOR}", "short": true},
                   {"title": "💬 커밋 메세지", "value": "${CLEAN_COMMIT_MSG}", "short": false},
-                  {"title": "📦 다운로드", "value": "[👉 GitHub Actions 실행 페이지에서 APK/IPA 다운로드하기](${RUN_URL}#artifacts)", "short": false}
+                  {"title": "📲 설치", "value": "${INSTALL_LINE}", "short": false}
                 ],
                 "footer": "INTIP Dev Build Pipeline",
                 "ts": $(date -u +%s)
