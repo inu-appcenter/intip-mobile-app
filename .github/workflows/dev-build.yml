@@ -100,6 +100,23 @@ jobs:
       - name: Decode google-services-dev.json
         run: echo "${{ secrets.GOOGLE_SERVICES_DEV_JSON_BASE64 }}" | base64 --decode > google-services-dev.json
 
+      # 포털 URL은 잡 env가 아니라 .env.local 파일로 넘긴다. env만으로는
+      # 안 되는 게 실측으로 확인됐다(run 34024945756): 잡 env에는 분명히
+      # EXPO_PUBLIC_ROOT_URL이 있었는데도 나온 IPA의 main.jsbundle에는
+      # intip-test.pages.dev가 0회, intip.inuappcenter.kr이 1회 들어 있었다 —
+      # constants.ts의 process.env.EXPO_PUBLIC_ROOT_URL이 인라인되지 않고
+      # 폴백이 그대로 박힌 것이다. JS 번들링은 prebuild가 아니라 gradle /
+      # Xcode 스크립트 페이즈가 띄우는 하위 프로세스(expo export:embed)에서
+      # 도는데, 거기까지 잡 env가 전달되지 않는다. Expo CLI는 프로젝트 루트의
+      # .env.local을 언제나 읽으므로(우선순위도 .env.production보다 높다) 이
+      # 경로는 누가 번들러를 띄우든 무관하게 동작한다.
+      #
+      # 이 파일은 .gitignore(.env*.local) 대상이고, 같은 러너를 쓰는 ci.yml의
+      # 운영 릴리스에 새어 들어가면 운영 앱이 테스트 포털을 보게 되므로
+      # 아래 정리 스텝에서 반드시 지운다.
+      - name: Write .env.local (포털 URL)
+        run: echo "EXPO_PUBLIC_ROOT_URL=${EXPO_PUBLIC_ROOT_URL}" > .env.local
+
       - name: Prebuild (android)
         run: npx expo prebuild --clean --platform android
 
@@ -125,7 +142,7 @@ jobs:
 
       - name: Remove decoded secrets
         if: always()
-        run: rm -f intip.jks google-services-dev.json
+        run: rm -f intip.jks google-services-dev.json .env.local
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -207,6 +224,23 @@ jobs:
       # withIOSManualSigning은 IOS_PROVISIONING_PROFILE_NAME이 세팅된 채로
       # prebuild가 돌 때만 활성화된다 — 위 스텝에서 이미 넣었으므로 그대로
       # 재사용한다(운영 릴리스 잡과 동일한 플러그인).
+      # 포털 URL은 잡 env가 아니라 .env.local 파일로 넘긴다. env만으로는
+      # 안 되는 게 실측으로 확인됐다(run 34024945756): 잡 env에는 분명히
+      # EXPO_PUBLIC_ROOT_URL이 있었는데도 나온 IPA의 main.jsbundle에는
+      # intip-test.pages.dev가 0회, intip.inuappcenter.kr이 1회 들어 있었다 —
+      # constants.ts의 process.env.EXPO_PUBLIC_ROOT_URL이 인라인되지 않고
+      # 폴백이 그대로 박힌 것이다. JS 번들링은 prebuild가 아니라 gradle /
+      # Xcode 스크립트 페이즈가 띄우는 하위 프로세스(expo export:embed)에서
+      # 도는데, 거기까지 잡 env가 전달되지 않는다. Expo CLI는 프로젝트 루트의
+      # .env.local을 언제나 읽으므로(우선순위도 .env.production보다 높다) 이
+      # 경로는 누가 번들러를 띄우든 무관하게 동작한다.
+      #
+      # 이 파일은 .gitignore(.env*.local) 대상이고, 같은 러너를 쓰는 ci.yml의
+      # 운영 릴리스에 새어 들어가면 운영 앱이 테스트 포털을 보게 되므로
+      # 아래 정리 스텝에서 반드시 지운다.
+      - name: Write .env.local (포털 URL)
+        run: echo "EXPO_PUBLIC_ROOT_URL=${EXPO_PUBLIC_ROOT_URL}" > .env.local
+
       - name: Prebuild (ios)
         run: npx expo prebuild --clean --platform ios
 
@@ -268,7 +302,7 @@ jobs:
             security list-keychain -d user -s $(cat "$RUNNER_TEMP/keychains.before") || true
           fi
           security delete-keychain "$RUNNER_TEMP/ios-ci.keychain-db" 2>/dev/null || true
-          rm -f GoogleService-Info-Dev.plist
+          rm -f GoogleService-Info-Dev.plist .env.local
           rm -f "$RUNNER_TEMP/INTIP-Dev.mobileprovision.plist"
           rm -f ~/Library/MobileDevice/"Provisioning Profiles"/INTIP-Dev.mobileprovision
 

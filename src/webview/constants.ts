@@ -15,8 +15,15 @@
  * separate from `APP_VARIANT` (native-only, read by `app.config.js`): the
  * internal dev build (`.github/workflows/dev-build.yml`) is bundled in
  * *release* JS mode just like the store build, so `.env.production` alone
- * can't tell the two apart — the dev-build job sets this env var directly so
- * the dev variant loads `intip-test.pages.dev` instead of production.
+ * can't tell the two apart — the dev-build job writes this var into
+ * `.env.local` so the dev variant loads `intip-test.pages.dev` instead.
+ *
+ * It must be a file, not a job-level env var: the JS bundle is produced by
+ * `expo export:embed`, which gradle and the Xcode script phase spawn as a
+ * child process during the *native* build, and the job environment does not
+ * reach it — a run with `EXPO_PUBLIC_ROOT_URL` set in the job still shipped
+ * an IPA with the production fallback baked in. Expo CLI always reads
+ * `.env.local` from the project root, so the file survives that hand-off.
  */
 export const ROOT_URL = process.env.EXPO_PUBLIC_ROOT_URL ?? "https://intip.inuappcenter.kr";
 

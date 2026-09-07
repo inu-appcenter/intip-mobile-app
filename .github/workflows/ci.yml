@@ -370,6 +370,13 @@ jobs:
       # 실행이 남긴 android/ 가 그대로 있다. clean 없이 돌리면 mod 가 이미 패치된
       # 파일 위에 다시 적용될 뿐 아니라, app.json 에서 **빼낸** 플러그인이
       # 만들어 둔 타깃/entitlement 가 지워지지 않고 그대로 빌드에 들어간다.
+      # 방어: dev-build.yml이 개발 빌드에서 만드는 .env.local(테스트 포털을
+      # 가리킨다)이 같은 self-hosted 러너의 워크스페이스에 남아 있으면, 운영
+      # 릴리스가 조용히 intip-test.pages.dev를 보게 된다. actions/checkout이
+      # 보통 untracked 파일을 지우지만 그 동작에 기대지 않는다.
+      - name: Remove stray .env.local
+        run: rm -f .env.local
+
       - name: Prebuild (android)
         run: npx expo prebuild --clean --platform android
 
@@ -559,6 +566,13 @@ jobs:
       # 실행이 남긴 ios/ 가 그대로 있다. clean 없이 돌리면 mod 가 이미 패치된
       # 파일 위에 다시 적용될 뿐 아니라, app.json 에서 **빼낸** 플러그인이
       # 만들어 둔 타깃/entitlement 가 지워지지 않고 그대로 빌드에 들어간다.
+      # 방어: dev-build.yml이 개발 빌드에서 만드는 .env.local(테스트 포털을
+      # 가리킨다)이 같은 self-hosted 러너의 워크스페이스에 남아 있으면, 운영
+      # 릴리스가 조용히 intip-test.pages.dev를 보게 된다. actions/checkout이
+      # 보통 untracked 파일을 지우지만 그 동작에 기대지 않는다.
+      - name: Remove stray .env.local
+        run: rm -f .env.local
+
       - name: Prebuild (ios)
         run: npx expo prebuild --clean --platform ios
 
