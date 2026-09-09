@@ -269,12 +269,18 @@ export default function WebViewContainer({ url, mode }: Props) {
   // 문서 끝 스크립트와 시스템 백 제스처 영역 가드를 구성한다.
   const gestureBand = useSystemGestureBand();
 
+  // 가드는 안드로이드 전용이다. WKWebView는 롱프레스 햅틱 문제가 없고,
+  // 가장자리 touchstart를 preventDefault하면 인터랙티브 백 스와이프가 씹힌다.
+  const edgeGuardEnabled = Platform.OS === "android";
+
   // 초기 로드 후에는 아래 effect에서 변경된 폭을 주입한다.
   const documentEndScript = useMemo(
     () =>
       INJECTED_SCRIPT +
-      buildEdgeLongPressGuardScript(gestureBand.left, gestureBand.right) +
-      (__DEV__ ? buildEdgeGuardDiagnosticsScript() : ""),
+      (edgeGuardEnabled
+        ? buildEdgeLongPressGuardScript(gestureBand.left, gestureBand.right) +
+          (__DEV__ ? buildEdgeGuardDiagnosticsScript() : "")
+        : ""),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -518,10 +524,11 @@ export default function WebViewContainer({ url, mode }: Props) {
       skipFirstBandPushRef.current = false;
       return;
     }
+    if (!edgeGuardEnabled) return;
     webViewRef.current?.injectJavaScript(
       buildEdgeGuardBandScript(gestureBand.left, gestureBand.right),
     );
-  }, [gestureBand.left, gestureBand.right]);
+  }, [edgeGuardEnabled, gestureBand.left, gestureBand.right]);
 
   // Keep the page's safe-area CSS vars current across an insets change after
   // the initial load (rotation, foldable fold/unfold). The initial value is

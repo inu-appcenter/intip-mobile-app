@@ -295,9 +295,12 @@ export function buildEdgeLongPressGuardScript(
     try { document.documentElement.classList.remove(CLASS); } catch (e) {}
   }
 
+  // 폭이 0이면(버튼 내비게이션·iOS) 그 가장자리는 가드하지 않는다.
   function inBand(clientX) {
     var width = window.innerWidth || document.documentElement.clientWidth || 0;
-    return clientX <= handle.left || clientX >= width - handle.right;
+    if (handle.left > 0 && clientX <= handle.left) return true;
+    if (handle.right > 0 && clientX >= width - handle.right) return true;
+    return false;
   }
 
   // 단일 손가락 터치의 시작 x 좌표를 반환한다.
