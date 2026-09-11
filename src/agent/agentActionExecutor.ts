@@ -136,15 +136,42 @@ export async function executeAgentAction(
       }
     }
 
-    const isSuccess = response.ok && (!resData || resData.success !== false);
+    // LMS 세션 만료(invalidtoken/accessexception) 발생 시 1회 자동 갱신 및 재시도 로직
+    if (
+      authDomain === 'LMS' &&
+      resData &&
+      (resData.errorcode === 'invalidtoken' || resData.errorcode === 'accessexception')
+    ) {
+      const relogin = await LmsAuthService.login();
+      if (relogin.success && relogin.token) {
+        const retryUrlObj = new URL(finalUrl);
+        retryUrlObj.searchParams.set('wstoken', relogin.token);
+        const retryRes = await fetch(retryUrlObj.toString(), fetchOptions);
+        const retryData = await retryRes.json().catch(() => null);
+        const isRetrySuccess = retryRes.ok && (!retryData || (!retryData.error && !retryData.exception));
+        return {
+          actionId,
+          success: isRetrySuccess,
+          statusCode: retryRes.status,
+          data: retryData,
+          errorCode: isRetrySuccess ? undefined : (retryData?.errorcode || 'LMS_ERROR'),
+          errorMessage: isRetrySuccess ? undefined : (retryData?.message || 'LMS 요청 실패'),
+        };
+      }
+    }
+
+    let isSuccess = response.ok && (!resData || resData.success !== false);
+    if (authDomain === 'LMS' && resData && (resData.error || resData.exception)) {
+      isSuccess = false;
+    }
 
     return {
       actionId,
       success: isSuccess,
       statusCode: response.status,
       data: resData,
-      errorCode: isSuccess ? undefined : (resData?.code || `HTTP_${response.status}`),
-      errorMessage: isSuccess ? undefined : (resData?.message || response.statusText),
+      errorCode: isSuccess ? undefined : (resData?.code || resData?.errorcode || `HTTP_${response.status}`),
+      errorMessage: isSuccess ? undefined : (resData?.message || resData?.error || response.statusText),
     };
   } catch (error: any) {
     return {

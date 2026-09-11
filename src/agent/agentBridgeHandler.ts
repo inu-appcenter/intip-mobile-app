@@ -56,6 +56,9 @@ export async function handleAgentBridgeMessage(
       try {
         const { studentId, password } = payload || {};
         await PortalSecureStore.saveCredentials({ studentId, password });
+        // 백그라운드에서 LMS 및 도서관 토큰도 즉시 선발급 시도 (1회 등록으로 올패스 연동)
+        LmsAuthService.login({ username: studentId, password }).catch(() => {});
+        LibraryAuthService.login({ loginId: studentId, password }).catch(() => {});
         sendResponse({
           type: 'savePortalAccountResult',
           success: true,
@@ -74,6 +77,8 @@ export async function handleAgentBridgeMessage(
     case 'deletePortalAccount': {
       try {
         await PortalSecureStore.clearCredentials();
+        await LmsAuthService.clear().catch(() => {});
+        await LibraryAuthService.clear().catch(() => {});
         sendResponse({
           type: 'deletePortalAccountResult',
           success: true,
@@ -132,7 +137,13 @@ export async function handleAgentBridgeMessage(
 
     case 'checkLibraryAccount': {
       try {
-        const token = await LibraryAuthService.getToken();
+        let token = await LibraryAuthService.getToken();
+        if (!token) {
+          const autoLogin = await LibraryAuthService.login();
+          if (autoLogin.success) {
+            token = autoLogin.token || null;
+          }
+        }
         const user = await LibraryAuthService.getUserInfo();
         sendResponse({
           type: 'checkLibraryAccountResult',
@@ -171,7 +182,13 @@ export async function handleAgentBridgeMessage(
 
     case 'checkLmsAccount': {
       try {
-        const token = await LmsAuthService.getToken();
+        let token = await LmsAuthService.getToken();
+        if (!token) {
+          const autoLogin = await LmsAuthService.login();
+          if (autoLogin.success) {
+            token = autoLogin.token || null;
+          }
+        }
         const user = await LmsAuthService.getUserInfo();
         sendResponse({
           type: 'checkLmsAccountResult',

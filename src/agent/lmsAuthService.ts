@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { PortalSecureStore } from './secureStore';
 
 const KEY_LMS_TOKEN = 'intip_lms_access_token';
 const KEY_LMS_USER = 'intip_lms_user_info';
@@ -25,16 +26,34 @@ export const LmsAuthService = {
     await SecureStore.setItemAsync(KEY_LMS_CREDENTIALS, JSON.stringify(credentials), {
       keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
     });
+    // 통합 포털 계정(학번/비밀번호)에도 자동 동기화하여 1회 로그인으로 전체 서비스 연동
+    try {
+      await PortalSecureStore.saveCredentials({
+        studentId: credentials.username,
+        password: credentials.password,
+      });
+    } catch {}
   },
 
   async getCredentials(): Promise<LmsCredentials | null> {
     const raw = await SecureStore.getItemAsync(KEY_LMS_CREDENTIALS);
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.username && parsed?.password) return parsed;
+      } catch {}
     }
+    // 포털 통합 계정이 이미 기기에 등록되어 있다면 자동 상속
+    try {
+      const portalCreds = await PortalSecureStore.getCredentials();
+      if (portalCreds?.studentId && portalCreds?.password) {
+        return {
+          username: portalCreds.studentId,
+          password: portalCreds.password,
+        };
+      }
+    } catch {}
+    return null;
   },
 
   async saveToken(token: string): Promise<void> {
