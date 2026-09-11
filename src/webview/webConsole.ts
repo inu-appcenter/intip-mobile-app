@@ -72,7 +72,6 @@ export const WEB_CONSOLE_SCRIPT = `
 true;
 `;
 
-/* eslint-disable no-console */
 const NATIVE_LOGGERS: Record<Level, (...args: unknown[]) => void> = {
   log: console.log,
   info: console.info,
@@ -80,7 +79,6 @@ const NATIVE_LOGGERS: Record<Level, (...args: unknown[]) => void> = {
   error: console.error,
   debug: console.debug,
 };
-/* eslint-enable no-console */
 
 /**
  * If `raw` is a relayed console message, log it natively (prefixed with the
