@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import WebViewControllerPanel from "../components/WebViewControllerPanel";
+import { AcademicScraperWebView } from "../agent/AcademicScraperWebView";
 import { checkForUpdate } from "../native/updateCheck";
 import {
   registerBackgroundHandlers,
@@ -92,6 +93,8 @@ export default function RootLayout() {
             </Stack>
             {/* Debug-only GUI controller, rendered above the whole stack. */}
             <WebViewControllerPanel />
+            {/* Hidden WebView for background portal SSO & academic scraping */}
+            <AcademicScraperWebView />
           </WebViewProvider>
         </ShareIntentProvider>
       </KeyboardProvider>

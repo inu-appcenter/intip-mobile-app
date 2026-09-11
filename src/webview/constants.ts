@@ -51,6 +51,7 @@ export const PUSH_EXTERNAL_HOSTS = ["inu.ac.kr"] as const;
 export const DEEP_LINK_HOSTS = [
   "intip.inuappcenter.kr",
   "intip-test.pages.dev",
+  "6c90707e.intip-test.pages.dev",
 ] as const;
 
 /**

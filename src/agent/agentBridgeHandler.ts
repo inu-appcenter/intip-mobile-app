@@ -1,5 +1,7 @@
 import { PortalSecureStore } from './secureStore';
 import { fetchAcademicInfoLocally } from './academicWorker';
+import { LibraryAuthService } from './libraryAuthService';
+import { executeAgentAction } from './agentActionExecutor';
 
 export interface AgentBridgeResponse {
   type: string;
@@ -102,6 +104,67 @@ export async function handleAgentBridgeMessage(
           success: false,
           errorCode: 'NETWORK_ERROR',
           errorMessage: err?.message || '학적 정보 조회 실패',
+        });
+      }
+      return true;
+    }
+
+    case 'saveLibraryAccount': {
+      try {
+        const { loginId, password } = payload || {};
+        const loginRes = await LibraryAuthService.login({ loginId, password });
+        sendResponse({
+          type: 'saveLibraryAccountResult',
+          success: loginRes.success,
+          data: loginRes.user,
+          errorMessage: loginRes.errorMessage,
+        });
+      } catch (err: any) {
+        sendResponse({
+          type: 'saveLibraryAccountResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'checkLibraryAccount': {
+      try {
+        const token = await LibraryAuthService.getToken();
+        const user = await LibraryAuthService.getUserInfo();
+        sendResponse({
+          type: 'checkLibraryAccountResult',
+          success: true,
+          data: { linked: Boolean(token), user },
+        });
+      } catch (err: any) {
+        sendResponse({
+          type: 'checkLibraryAccountResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'executeAgentAction': {
+      try {
+        const instruction = payload?.instruction;
+        if (!instruction) {
+          throw new Error('instruction 파라미터가 누락되었습니다.');
+        }
+        const actionResult = await executeAgentAction(instruction);
+        sendResponse({
+          type: 'executeAgentActionResult',
+          success: actionResult.success,
+          data: actionResult,
+        });
+      } catch (err: any) {
+        sendResponse({
+          type: 'executeAgentActionResult',
+          success: false,
+          errorMessage: err?.message,
         });
       }
       return true;

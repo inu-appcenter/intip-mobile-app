@@ -34,7 +34,10 @@ module.exports = () => ({
         bundleIdentifier: "kr.inuappcenter.intip.dev",
         icon: "./assets/icon-dev.icon",
         googleServicesFile: "./GoogleService-Info-Dev.plist",
-        associatedDomains: ["applinks:intip-test.pages.dev"],
+        associatedDomains: [
+          "applinks:intip-test.pages.dev",
+          "applinks:6c90707e.intip-test.pages.dev",
+        ],
         // aps-environment는 운영과 같은 "production"으로 둔다(app.json에서 상속).
         // 개발 빌드는 ad-hoc 배포 서명인데, ad-hoc/App Store 프로파일의
         // 엔타이틀먼트에는 항상 aps-environment=production만 들어간다 —
@@ -61,7 +64,10 @@ module.exports = () => ({
           {
             action: "VIEW",
             autoVerify: true,
-            data: [{ scheme: "https", host: "intip-test.pages.dev" }],
+            data: [
+              { scheme: "https", host: "intip-test.pages.dev" },
+              { scheme: "https", host: "6c90707e.intip-test.pages.dev" },
+            ],
             category: ["BROWSABLE", "DEFAULT"],
           },
         ],

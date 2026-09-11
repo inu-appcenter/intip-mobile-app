@@ -49,46 +49,58 @@ export function parseRows(responseBody: string, datasetName: string): Record<str
   }
 
   const rows: Record<string, string>[] = [];
-  const columnNames: string[] = [];
+  let columnNames: string[] | null = null;
+  let hasRowTypeColumn = false;
 
   for (let i = datasetIndex + 1; i < records.length; i++) {
     const record = records[i];
+    if (!record) continue;
     if (record.startsWith('Dataset:')) {
       break;
     }
 
-    if (record.startsWith('_Const_')) {
+    if (
+      record.startsWith('ErrorCode') ||
+      record.startsWith('ErrorMsg') ||
+      record.startsWith('_Const_') ||
+      record.startsWith('ConstColumnInfo')
+    ) {
       continue;
     }
 
-    if (record.startsWith('_Column_')) {
+    // 컬럼 정의 행: _RowType_ 또는 _Column_ 또는 ColumnInfo
+    if (columnNames === null) {
       const parts = record.split(UNIT_SEPARATOR);
+      const parsedCols: string[] = [];
       for (const part of parts) {
-        if (!part || part === '_Column_') continue;
-        const colDef = part.split(':');
-        if (colDef.length > 0 && colDef[0]) {
-          columnNames.push(colDef[0]);
-        }
+        if (!part) continue;
+        const colName = part.split(':')[0];
+        parsedCols.push(colName);
       }
-      continue;
+
+      if (parsedCols.length > 0) {
+        hasRowTypeColumn = parsedCols[0] === ROW_TYPE;
+        columnNames = hasRowTypeColumn ? parsedCols.slice(1) : parsedCols;
+        console.log(`[ssvParser] Dataset ${datasetName} columns:`, columnNames.slice(0, 10), `(total ${columnNames.length})`);
+        continue;
+      }
     }
 
-    if (record.startsWith('N') || record.startsWith('U') || record.startsWith('I') || record.startsWith('D')) {
-      const units = record.split(UNIT_SEPARATOR);
+    // 데이터 행 파싱
+    if (!columnNames) continue;
+    const tokens = record.split(UNIT_SEPARATOR);
+    const startIndex = hasRowTypeColumn || tokens.length === columnNames.length + 1 ? 1 : 0;
+
+    if (tokens.length >= columnNames.length + startIndex) {
       const row: Record<string, string> = {};
+      row[ROW_TYPE] = tokens[0];
 
-      row[ROW_TYPE] = units[0];
-
-      let unitIndex = 1;
-      for (const colName of columnNames) {
-        if (unitIndex < units.length) {
-          const rawVal = units[unitIndex];
-          if (rawVal === NULL_MARKER || rawVal === '') {
-            row[colName] = '';
-          } else {
-            row[colName] = rawVal;
-          }
-          unitIndex++;
+      for (let c = 0; c < columnNames.length; c++) {
+        const rawVal = tokens[c + startIndex];
+        if (rawVal === NULL_MARKER || rawVal === '' || rawVal === undefined) {
+          row[columnNames[c]] = '';
+        } else {
+          row[columnNames[c]] = rawVal;
         }
       }
       rows.push(row);
@@ -100,7 +112,9 @@ export function parseRows(responseBody: string, datasetName: string): Record<str
 
 export function parseAcademicBasicInfo(responseBody: string): AcademicBasicInfo {
   if (!responseBody || !responseBody.includes('ErrorCode:int=0')) {
-    throw new Error('인천대 학사 시스템(ERP) 응답 오류 또는 세션 만료');
+    const preview = responseBody ? responseBody.substring(0, 200).replace(/[\r\n\x1e\x1f]/g, ' ') : 'EMPTY_RESPONSE';
+    console.warn('[ssvParser] Invalid ERP response:', preview);
+    throw new Error(`인천대 학사 시스템(ERP) 응답 오류 또는 세션 만료 (${preview})`);
   }
 
   const rows = parseRows(responseBody, 'DS_SREG101');
@@ -109,6 +123,15 @@ export function parseAcademicBasicInfo(responseBody: string): AcademicBasicInfo 
   }
 
   const row = rows[0];
+  console.log('[ssvParser] Parsed row keys count:', Object.keys(row).length);
+  console.log('[ssvParser] Sample values:', {
+    stuno: row['stuno'],
+    korNm: row['korNm'],
+    acqHp: row['acqHp'],
+    mrksAvg: row['mrksAvg'],
+    schregStGbn: row['schregStGbn'],
+    hgNm: row['hgNm'],
+  });
 
   // 학적 상태 한글 매핑 기본값
   let status = row['schregStGbn'] || '재학';
