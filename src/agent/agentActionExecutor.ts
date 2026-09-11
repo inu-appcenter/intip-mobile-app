@@ -1,4 +1,5 @@
 import { LibraryAuthService } from './libraryAuthService';
+import { LmsAuthService } from './lmsAuthService';
 import { PortalSecureStore } from './secureStore';
 
 /**
@@ -72,6 +73,27 @@ export async function executeAgentAction(
         }
       }
       headers['Pyxis-Auth-Token'] = token;
+    } else if (authDomain === 'LMS') {
+      let lmsToken = await LmsAuthService.getToken();
+      if (!lmsToken) {
+        const loginRes = await LmsAuthService.login();
+        if (loginRes.success && loginRes.token) {
+          lmsToken = loginRes.token;
+        } else {
+          return {
+            actionId,
+            success: false,
+            errorCode: 'AUTH_REQUIRED',
+            errorMessage: 'LMS 로그인이 필요합니다.',
+          };
+        }
+      }
+
+      // Moodle WebService는 wstoken을 쿼리 또는 파라미터로 전달
+      const urlObj = new URL(finalUrl);
+      urlObj.searchParams.set('wstoken', lmsToken);
+      urlObj.searchParams.set('moodlewsrestformat', 'json');
+      finalUrl = urlObj.toString();
     }
 
     // 2. HTTP 요청 실행

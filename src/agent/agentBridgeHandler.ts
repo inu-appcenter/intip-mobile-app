@@ -1,6 +1,7 @@
 import { PortalSecureStore } from './secureStore';
 import { fetchAcademicInfoLocally } from './academicWorker';
 import { LibraryAuthService } from './libraryAuthService';
+import { LmsAuthService } from './lmsAuthService';
 import { executeAgentAction } from './agentActionExecutor';
 
 export interface AgentBridgeResponse {
@@ -141,6 +142,45 @@ export async function handleAgentBridgeMessage(
       } catch (err: any) {
         sendResponse({
           type: 'checkLibraryAccountResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'saveLmsAccount': {
+      try {
+        const { username, password } = payload || {};
+        const loginRes = await LmsAuthService.login({ username, password });
+        sendResponse({
+          type: 'saveLmsAccountResult',
+          success: loginRes.success,
+          data: loginRes.user,
+          errorMessage: loginRes.errorMessage,
+        });
+      } catch (err: any) {
+        sendResponse({
+          type: 'saveLmsAccountResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'checkLmsAccount': {
+      try {
+        const token = await LmsAuthService.getToken();
+        const user = await LmsAuthService.getUserInfo();
+        sendResponse({
+          type: 'checkLmsAccountResult',
+          success: true,
+          data: { linked: Boolean(token), user },
+        });
+      } catch (err: any) {
+        sendResponse({
+          type: 'checkLmsAccountResult',
           success: false,
           errorMessage: err?.message,
         });
