@@ -52,6 +52,7 @@ export const DEEP_LINK_HOSTS = [
   "intip.inuappcenter.kr",
   "intip-test.pages.dev",
   "6c90707e.intip-test.pages.dev",
+  "25a58911.intip-test.pages.dev",
 ] as const;
 
 /**
