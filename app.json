@@ -114,7 +114,129 @@
           ]
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-widgets",
+        {
+          "widgets": [
+            {
+              "name": "TestWidget",
+              "displayName": "테스트 카운트다운",
+              "description": "expo-widgets 동작 확인용 테스트 위젯입니다.",
+              "ios": {
+                "supportedFamilies": ["systemSmall", "systemMedium"]
+              }
+            },
+            {
+              "name": "NextClassWidget",
+              "displayName": "다음 수업",
+              "description": "오늘 다음 수업 또는 진행 중인 수업을 보여줍니다.",
+              "ios": {
+                "supportedFamilies": ["systemSmall"]
+              }
+            },
+            {
+              "name": "TodayClassesWidget",
+              "displayName": "오늘 수업",
+              "description": "오늘 하루의 수업 목록을 보여줍니다.",
+              "ios": {
+                "supportedFamilies": ["systemMedium"]
+              }
+            },
+            {
+              "name": "BusArrivalWidget",
+              "displayName": "인입런",
+              "description": "가까운 정류장의 버스 도착 정보를 보여줍니다.",
+              "ios": {
+                "supportedFamilies": ["systemSmall"]
+              }
+            },
+            {
+              "name": "CafeteriaMenuWidget",
+              "displayName": "학식 메뉴",
+              "description": "오늘의 학생식당 메뉴를 보여줍니다.",
+              "ios": {
+                "supportedFamilies": ["systemMedium"]
+              }
+            },
+            {
+              "name": "TimetableWidget",
+              "displayName": "시간표",
+              "description": "오늘의 시간표를 보여줍니다.",
+              "ios": {
+                "supportedFamilies": ["systemLarge"]
+              }
+            }
+          ]
+        }
+      ],
+      [
+        "expo-widgets-glance",
+        {
+          "widgets": [
+            {
+              "name": "NextClassWidget",
+              "displayName": "다음 수업",
+              "description": "오늘 다음 수업 또는 진행 중인 수업을 보여줍니다.",
+              "android": {
+                "minWidth": 110,
+                "minHeight": 110,
+                "targetCellWidth": 2,
+                "targetCellHeight": 2,
+                "resizeMode": "none"
+              }
+            },
+            {
+              "name": "TodayClassesWidget",
+              "displayName": "오늘 수업",
+              "description": "오늘 하루의 수업 목록을 보여줍니다.",
+              "android": {
+                "minWidth": 250,
+                "minHeight": 200,
+                "targetCellWidth": 4,
+                "targetCellHeight": 3,
+                "resizeMode": "horizontal"
+              }
+            },
+            {
+              "name": "BusArrivalWidget",
+              "displayName": "인입런",
+              "description": "가까운 정류장의 버스 도착 정보를 보여줍니다.",
+              "android": {
+                "minWidth": 110,
+                "minHeight": 110,
+                "targetCellWidth": 2,
+                "targetCellHeight": 2,
+                "resizeMode": "none"
+              }
+            },
+            {
+              "name": "CafeteriaMenuWidget",
+              "displayName": "학식 메뉴",
+              "description": "오늘의 학생식당 메뉴를 보여줍니다.",
+              "android": {
+                "minWidth": 250,
+                "minHeight": 180,
+                "targetCellWidth": 4,
+                "targetCellHeight": 2,
+                "resizeMode": "horizontal"
+              }
+            },
+            {
+              "name": "TimetableWidget",
+              "displayName": "시간표",
+              "description": "오늘의 시간표를 보여줍니다.",
+              "android": {
+                "minWidth": 250,
+                "minHeight": 300,
+                "targetCellWidth": 4,
+                "targetCellHeight": 4,
+                "resizeMode": "vertical"
+              }
+            }
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
