@@ -67,10 +67,20 @@ export async function fetchAcademicInfoLocally(): Promise<AcademicWorkerResult> 
       redirect: 'follow',
     });
 
+    const loginText = await loginResp.text();
+
     // 2단계: 쿠키 헤더 추출
     const setCookie = loginResp.headers.get('set-cookie') || '';
     const jsessionIdMatch = setCookie.match(/JSESSIONID=([^;]+)/i);
     const jsessionId = jsessionIdMatch ? jsessionIdMatch[1] : '';
+
+    if (!jsessionId && !loginText.includes('logout') && (loginText.includes('비밀번호') || loginText.includes('아이디') || loginText.includes('실패') || loginText.includes('오류'))) {
+      return {
+        success: false,
+        errorCode: 'LOGIN_FAILED',
+        errorMessage: '포털 로그인에 실패했습니다. 학번이나 비밀번호가 올바른지 확인해 주세요.',
+      };
+    }
 
     // 3단계: ERP SSO 접근하여 세션 확장
     const erpHeaders: Record<string, string> = {
@@ -127,9 +137,10 @@ export async function fetchAcademicInfoLocally(): Promise<AcademicWorkerResult> 
       data: academicInfo,
     };
   } catch (error: any) {
+    console.warn('[academicWorker] fetchAcademicInfoLocally error:', error);
     return {
       success: false,
-      errorCode: 'NETWORK_ERROR',
+      errorCode: error?.message?.includes('ERP') ? 'ERP_ERROR' : 'NETWORK_ERROR',
       errorMessage: error?.message || '학적 정보 조회 중 오류가 발생했습니다.',
     };
   }
