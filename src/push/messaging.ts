@@ -115,6 +115,11 @@ function chatRoomIdOf(data?: Record<string, unknown>): string | null {
 async function handleDisplayNotification(remoteMessage: any): Promise<void> {
   await ensureAndroidChannels();
 
+  // Sweep up summaries whose children are already gone before adding anything
+  // — they are invisible to the rest of this function but very visible in the
+  // tray (an empty, expandable "새 메시지"). See `pruneOrphanSummaries`.
+  await pruneOrphanSummaries();
+
   const data = remoteMessage.data as Record<string, unknown> | undefined;
   const chatRoomId = chatRoomIdOf(data);
   // Per-room mute: the server sends chat as data-only on Android, so the
@@ -126,9 +131,26 @@ async function handleDisplayNotification(remoteMessage: any): Promise<void> {
       : CHAT_CHANNEL_ID
     : ANDROID_CHANNEL_ID;
 
+  // "새 메시지" only makes sense for chat; a titleless notice/general push used
+  // to inherit it and read as a phantom message.
   const title =
-    remoteMessage.notification?.title || data?.chatRoomName || data?.title || '새 메시지';
+    remoteMessage.notification?.title ||
+    data?.chatRoomName ||
+    data?.title ||
+    (chatRoomId ? '새 메시지' : '알림');
   const body = remoteMessage.notification?.body || data?.messageText || data?.body || '';
+
+  const notificationId = remoteMessage.messageId || String(Date.now());
+
+  // Android shows a one-child group as the bare child and keeps the summary
+  // hidden, so a summary posted for the first message of a room is invisible
+  // until the user swipes that child away — at which point it pops out as an
+  // empty "새 메시지" they have to dismiss a second time. Post the summary only
+  // once a *second* notification actually needs collapsing.
+  const siblingIds =
+    Platform.OS === 'android' && chatRoomId
+      ? (await displayedChatGroup(chatRoomId)).childIds.filter((id) => id !== notificationId)
+      : [];
 
   await notifee.displayNotification({
     // Mirror the FCM messageId as notifee's own id so a later
@@ -136,7 +158,7 @@ async function handleDisplayNotification(remoteMessage: any): Promise<void> {
     // independent RNFirebase "opened from notification" report share one
     // dedupe key (see `pendingIntent.ts`) instead of living in two
     // unrelated id spaces.
-    id: remoteMessage.messageId || String(Date.now()),
+    id: notificationId,
     title,
     body,
     data: remoteMessage.data,
@@ -152,7 +174,7 @@ async function handleDisplayNotification(remoteMessage: any): Promise<void> {
     },
   });
 
-  if (Platform.OS === 'android' && chatRoomId) {
+  if (Platform.OS === 'android' && chatRoomId && siblingIds.length > 0) {
     await notifee.displayNotification({
       // Stable per room so the tray keeps exactly one summary, and prefixed so
       // the tap-dedupe ring lets a repeat tap on it through (pendingIntent.ts).
@@ -177,6 +199,53 @@ async function handleDisplayNotification(remoteMessage: any): Promise<void> {
 }
 
 /**
+ * Cancel every group summary we posted that has no children left in the tray.
+ *
+ * The system only auto-cancels summaries it created itself, so ours survive
+ * their group and surface as a collapsible notification with nothing inside
+ * it. This is the catch-all for however one got orphaned — including the ones
+ * already stuck on devices that ran the previous build.
+ */
+async function pruneOrphanSummaries(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    const displayed = await notifee.getDisplayedNotifications();
+    const summaryIds: string[] = [];
+    const roomsWithChildren = new Set<string>();
+    for (const { id, notification } of displayed) {
+      if (!id) continue;
+      if (id.startsWith(GROUP_SUMMARY_ID_PREFIX)) {
+        summaryIds.push(id);
+        continue;
+      }
+      const room = chatRoomIdOf(notification.data);
+      if (room) roomsWithChildren.add(room);
+    }
+    const orphans = summaryIds.filter(
+      (id) => !roomsWithChildren.has(id.slice(GROUP_SUMMARY_ID_PREFIX.length))
+    );
+    if (orphans.length > 0) await notifee.cancelDisplayedNotifications(orphans);
+  } catch (err) {
+    console.warn('[fcm] failed to prune orphan group summaries', err);
+  }
+}
+
+/** Ids of everything currently in the tray for `chatRoomId`, summary apart. */
+async function displayedChatGroup(
+  chatRoomId: string
+): Promise<{ childIds: string[]; summaryIds: string[] }> {
+  const displayed = await notifee.getDisplayedNotifications();
+  const ids = displayed
+    .filter((d) => chatRoomIdOf(d.notification.data) === chatRoomId)
+    .map((d) => d.id)
+    .filter((id): id is string => !!id);
+  return {
+    childIds: ids.filter((id) => !id.startsWith(GROUP_SUMMARY_ID_PREFIX)),
+    summaryIds: ids.filter((id) => id.startsWith(GROUP_SUMMARY_ID_PREFIX)),
+  };
+}
+
+/**
  * Clear every notification still showing for a chat room once one of them is
  * tapped. The children auto-cancel themselves, but the summary we posted by
  * hand does not — left alone it keeps "새로운 메시지가 있습니다." in the tray
@@ -186,14 +255,37 @@ async function clearChatGroup(data?: Record<string, unknown>): Promise<void> {
   const chatRoomId = chatRoomIdOf(data);
   if (!chatRoomId) return;
   try {
-    const displayed = await notifee.getDisplayedNotifications();
-    const ids = displayed
-      .filter((d) => chatRoomIdOf(d.notification.data) === chatRoomId)
-      .map((d) => d.id)
-      .filter((id): id is string => !!id);
+    const { childIds, summaryIds } = await displayedChatGroup(chatRoomId);
+    const ids = [...childIds, ...summaryIds];
     if (ids.length > 0) await notifee.cancelDisplayedNotifications(ids);
   } catch (err) {
     console.warn('[fcm] failed to clear chat notification group', err);
+  }
+}
+
+/**
+ * Drop a room's group summary once the user has swiped away its last child.
+ *
+ * Android hides the summary while a group has only one child (it shows that
+ * child directly), so dismissing what looks like "the notification" leaves the
+ * summary behind — and it then becomes visible on its own, stuck in the tray as
+ * "새로운 메시지가 있습니다." until the next push. The system only auto-cancels
+ * summaries it owns, not ones an app posted by hand, so we do it here.
+ *
+ * Only the summary is cancelled, and only when no children are left: swiping
+ * one message away while others are still unread must not clear the rest.
+ */
+async function pruneChatGroupSummary(data?: Record<string, unknown>): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const chatRoomId = chatRoomIdOf(data);
+  if (!chatRoomId) return;
+  try {
+    const { childIds, summaryIds } = await displayedChatGroup(chatRoomId);
+    if (childIds.length === 0 && summaryIds.length > 0) {
+      await notifee.cancelDisplayedNotifications(summaryIds);
+    }
+  } catch (err) {
+    console.warn('[fcm] failed to prune chat group summary', err);
   }
 }
 
@@ -245,6 +337,11 @@ export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () =
     if (intent) deliver(intent);
   });
   const unsubNotifee = notifee.onForegroundEvent(({ type, detail }) => {
+    if (type === EventType.DISMISSED) {
+      // User swiped it away — no routing, just don't leave the summary behind.
+      void pruneChatGroupSummary(detail.notification?.data);
+      return;
+    }
     if (type === EventType.PRESS) {
       if (isDuplicate(detail.notification?.id)) return;
       void clearChatGroup(detail.notification?.data);
@@ -300,6 +397,12 @@ export function registerBackgroundHandlers(): void {
   // `getInitialNotification()` alone, which only ever resolves for a killed
   // -> cold-start launch, not a plain background tap (spec G4).
   notifee.onBackgroundEvent(async ({ type, detail }) => {
+    // Dismissals happen in the tray, i.e. almost always while backgrounded —
+    // this is the path that actually keeps the stale summary from sticking.
+    if (type === EventType.DISMISSED) {
+      await pruneChatGroupSummary(detail.notification?.data);
+      return;
+    }
     if (type !== EventType.PRESS) return;
     if (isDuplicate(detail.notification?.id)) return;
     await clearChatGroup(detail.notification?.data);
