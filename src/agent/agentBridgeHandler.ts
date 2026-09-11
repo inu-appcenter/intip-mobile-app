@@ -3,6 +3,7 @@ import { fetchAcademicInfoLocally } from './academicWorker';
 import { LibraryAuthService } from './libraryAuthService';
 import { LmsAuthService } from './lmsAuthService';
 import { executeAgentAction } from './agentActionExecutor';
+import { LocalWatchManager } from './localWatchManager';
 
 export interface AgentBridgeResponse {
   type: string;
@@ -224,6 +225,88 @@ export async function handleAgentBridgeMessage(
           type: 'executeAgentActionResult',
           success: false,
           errorCode: 'EXECUTION_ERROR',
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'getLocalWatchJobs': {
+      try {
+        const jobs = await LocalWatchManager.getJobs();
+        sendResponse({
+          type: 'getLocalWatchJobsResult',
+          success: true,
+          data: jobs,
+        });
+      } catch (err: any) {
+        sendResponse({
+          type: 'getLocalWatchJobsResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'registerLocalWatchJob': {
+      try {
+        const { watchType, roomId, roomName, hopeDate, targetHour, durationMinutes, seatName, endTime } = payload || {};
+        let job;
+        if (watchType === 'STUDY_ROOM_SNIPER') {
+          if (!roomId || !targetHour) {
+            throw new Error('roomId 및 targetHour 파라미터가 필요합니다.');
+          }
+          job = await LocalWatchManager.registerStudyRoomSniper({
+            roomId: Number(roomId),
+            roomName: roomName || `${roomId}호`,
+            hopeDate: hopeDate || new Date().toISOString().split('T')[0],
+            targetHour: Number(targetHour),
+            durationMinutes: durationMinutes ? Number(durationMinutes) : 60,
+          });
+        } else if (watchType === 'SEAT_EXPIRATION') {
+          if (!seatName || !endTime) {
+            throw new Error('seatName 및 endTime 파라미터가 필요합니다.');
+          }
+          job = await LocalWatchManager.registerSeatExpirationReminder({
+            seatName,
+            endTime,
+          });
+        } else {
+          throw new Error(`지원하지 않는 로컬 감시 타입입니다: ${watchType}`);
+        }
+
+        sendResponse({
+          type: 'registerLocalWatchJobResult',
+          success: true,
+          data: job,
+        });
+      } catch (err: any) {
+        sendResponse({
+          type: 'registerLocalWatchJobResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'cancelLocalWatchJob': {
+      try {
+        const { id } = payload || {};
+        if (!id) {
+          throw new Error('job id가 필요합니다.');
+        }
+        const cancelled = await LocalWatchManager.cancelJob(id);
+        sendResponse({
+          type: 'cancelLocalWatchJobResult',
+          success: cancelled,
+          data: { id, cancelled },
+        });
+      } catch (err: any) {
+        sendResponse({
+          type: 'cancelLocalWatchJobResult',
+          success: false,
           errorMessage: err?.message,
         });
       }
