@@ -198,12 +198,15 @@ export async function handleAgentBridgeMessage(
         sendResponse({
           type: 'executeAgentActionResult',
           success: actionResult.success,
-          data: actionResult,
+          data: actionResult.data !== undefined ? actionResult.data : actionResult,
+          errorCode: actionResult.errorCode,
+          errorMessage: actionResult.errorMessage,
         });
       } catch (err: any) {
         sendResponse({
           type: 'executeAgentActionResult',
           success: false,
+          errorCode: 'EXECUTION_ERROR',
           errorMessage: err?.message,
         });
       }
