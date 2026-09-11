@@ -24,6 +24,26 @@ const { expo } = require("./app.json");
 
 const isDevVariant = process.env.APP_VARIANT === "development";
 
+// expo-widgets computes its widget target's bundle id and App Group from
+// `config.ios.bundleIdentifier` — which the dev variant overrides below to
+// `kr.inuappcenter.intip.dev`. That means a dev build would need its own
+// `.dev.ExpoWidgetsTarget` Bundle ID, its own `group.kr.inuappcenter.intip.dev`
+// App Group, and its own signing (dev-build.yml only wires up
+// IOS_PROVISIONING_PROFILE_NAME for the app target, not a widget one) — none
+// of which exist on Apple's side. Without this exclusion, dev Archive fails
+// with "Signing for ExpoWidgetsTarget requires a development team" and the
+// app target's own dev ad-hoc profile stops matching once expo-widgets adds
+// the App Groups entitlement to it. Simplest fix: dev builds don't get the
+// home screen widgets at all — `src/widgets/refresh.ts`'s calls still run,
+// they just have no widget extension to display the snapshot they write.
+const WIDGET_PLUGIN_NAMES = new Set(["expo-widgets", "expo-widgets-glance"]);
+const plugins = isDevVariant
+  ? expo.plugins.filter((plugin) => {
+      const name = Array.isArray(plugin) ? plugin[0] : plugin;
+      return !WIDGET_PLUGIN_NAMES.has(name);
+    })
+  : expo.plugins;
+
 module.exports = () => ({
   expo: {
     ...expo,
@@ -74,6 +94,6 @@ module.exports = () => ({
       }),
     },
     ...(isDevVariant && { scheme: "intipmobileappdev" }),
-    plugins: [...expo.plugins, ...(isDevVariant ? ["./plugins/withDevAppLabel"] : [])],
+    plugins: [...plugins, ...(isDevVariant ? ["./plugins/withDevAppLabel"] : [])],
   },
 });
