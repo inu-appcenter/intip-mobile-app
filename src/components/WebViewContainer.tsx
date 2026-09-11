@@ -58,6 +58,7 @@ import { PROTOCOL_VERSION } from "../../packages/intip-bridge/src/messages";
 import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
 import { saveDownload } from "../native/downloads";
 import { ensureLocationPermission } from "../native/permissions";
+import { handleAgentBridgeMessage } from "../agent/agentBridgeHandler";
 import { clearTokenInfo, saveTokenInfo } from "../native/secureTokenStore";
 import { shareContent } from "../native/share";
 import { flushPendingFcmToken } from "../push/fcmTokenSync";
@@ -237,7 +238,21 @@ export default function WebViewContainer({ url, mode }: Props) {
         primeLocationPermission();
         return;
       }
-      bridge.onMessage(event);
+
+      // AI Agent: Portal account & Academic info messages
+      handleAgentBridgeMessage(raw, (response) => {
+        const script = `
+          window.dispatchEvent(new CustomEvent('intipAgentResult', {
+            detail: ${JSON.stringify(response)}
+          }));
+          true;
+        `;
+        webViewRef.current?.injectJavaScript(script);
+      }).then((handled) => {
+        if (!handled) {
+          bridge.onMessage(event);
+        }
+      });
     },
     [bridge, url, primeLocationPermission],
   );
