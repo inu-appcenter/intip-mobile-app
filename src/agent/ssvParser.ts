@@ -152,6 +152,7 @@ export function parseAcademicBasicInfo(responseBody: string): AcademicBasicInfo 
   if (status === '10' || status === '1') status = '재학';
   else if (status === '20' || status === '2') status = '휴학';
   else if (status === '30' || status === '3') status = '졸업';
+  else if (status === '70') status = '정상';
 
   return {
     studentId: row['stuno'] || '',
