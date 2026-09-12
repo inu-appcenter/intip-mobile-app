@@ -83,6 +83,8 @@ module.exports = () => ({
         requestHeaders: { "expo-channel-name": "development" },
       }),
     },
+    // 네이티브 SSO 동작이 바뀐 개발 설치본은 기존 OTA 캐시를 로드하면 안 된다.
+    ...(isDevVariant && { runtimeVersion: "3.0.13-sso.1" }),
     ...(isDevVariant && { scheme: "intipmobileappdev" }),
     plugins: [
       ...expo.plugins,
