@@ -84,6 +84,10 @@ module.exports = () => ({
       }),
     },
     ...(isDevVariant && { scheme: "intipmobileappdev" }),
-    plugins: [...expo.plugins, ...(isDevVariant ? ["./plugins/withDevAppLabel"] : [])],
+    plugins: [
+      ...expo.plugins,
+      "./plugins/withErpSsoCleartext",
+      ...(isDevVariant ? ["./plugins/withDevAppLabel"] : []),
+    ],
   },
 });
