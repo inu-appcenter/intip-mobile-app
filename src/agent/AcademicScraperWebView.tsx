@@ -18,7 +18,7 @@ let activeScrape: ScrapeResolver | null = null;
 let triggerComponentScrape: ((creds: PortalCredentials) => void) | null = null;
 let resolveScraperMount: (() => void) | null = null;
 
-function waitForScraperMount(timeoutMs = 5000): Promise<void> {
+function waitForScraperMount(timeoutMs = 15000): Promise<void> {
   if (triggerComponentScrape) return Promise.resolve();
 
   return new Promise((resolve, reject) => {
@@ -52,6 +52,16 @@ export const AcademicScraperManager = {
         .then(() => {
           if (activeScrape?.creds !== creds) return;
           triggerComponentScrape?.(creds);
+
+          // The actual ERP timeout starts only after the hidden WebView is
+          // available. Otherwise a slow React root mount steals time from an
+          // otherwise valid portal SSO request.
+          setTimeout(() => {
+            if (activeScrape?.creds === creds) {
+              activeScrape.reject(new Error('학적 정보 조회 시간 초과 (35초)'));
+              activeScrape = null;
+            }
+          }, SCRAPE_TIMEOUT_MS);
         })
         .catch((error: Error) => {
           if (activeScrape?.creds === creds) {
@@ -60,12 +70,6 @@ export const AcademicScraperManager = {
           }
         });
 
-      setTimeout(() => {
-        if (activeScrape) {
-          activeScrape.reject(new Error('학적 정보 조회 시간 초과 (35초)'));
-          activeScrape = null;
-        }
-      }, SCRAPE_TIMEOUT_MS);
     });
   },
 };
