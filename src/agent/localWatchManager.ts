@@ -12,7 +12,11 @@ import { LibraryAgentTools } from './libraryTools';
 const STORAGE_KEY_LOCAL_WATCH = 'intip_local_watch_jobs';
 const LOCAL_WATCH_CHANNEL_ID = 'local_watch_channel';
 
-export type LocalWatchType = 'STUDY_ROOM_SNIPER' | 'SEAT_EXPIRATION' | 'ASSIGNMENT_REMINDER';
+export type LocalWatchType =
+  | 'STUDY_ROOM_SNIPER'
+  | 'SPECIFIC_SEAT_SNIPER'
+  | 'SEAT_EXPIRATION'
+  | 'ASSIGNMENT_REMINDER';
 
 export interface LocalWatchJob {
   id: string;
@@ -20,6 +24,10 @@ export interface LocalWatchJob {
   title: string;
   targetName: string;
   targetId?: string | number;
+  roomId?: number;
+  roomName?: string;
+  seatId?: number;
+  seatNo?: string;
   hopeDate?: string; // YYYY-MM-DD
   targetHour?: number; // e.g. 15 (15:00)
   createdAt: number;
@@ -143,6 +151,81 @@ export const LocalWatchManager = {
         id,
         title: '🎯 스터디룸 취소표 감시 시작',
         body: `${params.roomName} ${params.targetHour}:00 취소표가 나오면 즉시 알려드릴게요. (최대 ${duration}분)`,
+        android: {
+          channelId: LOCAL_WATCH_CHANNEL_ID,
+          pressAction: { id: 'default' },
+          ongoing: false,
+        },
+      });
+    } catch {}
+
+    return newJob;
+  },
+
+  /**
+   * 열람실 특정 좌석 번호 빈자리 스나이퍼 등록
+   * @param roomId 열람실 ID (예: 1)
+   * @param roomName 열람실 이름 (예: "제1열람실")
+   * @param seatId 좌석 ID (예: 105)
+   * @param seatNo 좌석 번호 (예: "43")
+   * @param durationMinutes 최대 감시 시간(분) - 기본 90분
+   */
+  async registerSpecificSeatSniper(params: {
+    roomId: number;
+    roomName: string;
+    seatId?: number;
+    seatNo: string;
+    durationMinutes?: number;
+  }): Promise<LocalWatchJob> {
+    await ensureLocalWatchChannel();
+
+    const duration = params.durationMinutes || 90;
+    const now = Date.now();
+    const expiresAt = now + duration * 60 * 1000;
+    const id = `watch_seat_${params.roomId}_${params.seatNo}_${now}`;
+
+    const newJob: LocalWatchJob = {
+      id,
+      type: 'SPECIFIC_SEAT_SNIPER',
+      title: `${params.roomName} ${params.seatNo}번 좌석 빈자리 감시`,
+      targetName: `${params.roomName} ${params.seatNo}번`,
+      targetId: params.seatId || params.seatNo,
+      roomId: params.roomId,
+      roomName: params.roomName,
+      seatId: params.seatId,
+      seatNo: params.seatNo,
+      createdAt: now,
+      expiresAt,
+      status: 'ACTIVE',
+      intervalSeconds: 60,
+    };
+
+    const jobs = await this.getJobs();
+    // 동일 열람실 동일 좌석 활성 작업이 있다면 이전 것은 취소 처리
+    jobs.forEach((j) => {
+      if (
+        j.status === 'ACTIVE' &&
+        j.type === 'SPECIFIC_SEAT_SNIPER' &&
+        j.roomId === params.roomId &&
+        j.seatNo === params.seatNo
+      ) {
+        j.status = 'CANCELLED';
+        this.stopPoller(j.id);
+      }
+    });
+
+    jobs.unshift(newJob);
+    await this.saveJobs(jobs);
+
+    // 감시 폴러 즉시 시작
+    this.startSpecificSeatPoller(newJob);
+
+    // 알림바에 상주 알림 등록
+    try {
+      await notifee.displayNotification({
+        id,
+        title: '🎯 특정 좌석 빈자리 감시 시작',
+        body: `${params.roomName} ${params.seatNo}번 좌석이 비면 즉시 알려드릴게요. (최대 ${duration}분)`,
         android: {
           channelId: LOCAL_WATCH_CHANNEL_ID,
           pressAction: { id: 'default' },
@@ -327,6 +410,83 @@ export const LocalWatchManager = {
   },
 
   /**
+   * 열람실 특정 좌석 빈자리 주기적 폴러 실행
+   */
+  startSpecificSeatPoller(job: LocalWatchJob) {
+    this.stopPoller(job.id);
+
+    const checkSeatAvailability = async () => {
+      const now = Date.now();
+      if (job.expiresAt <= now) {
+        console.log(`[LocalWatch] Seat Job ${job.id} expired.`);
+        this.stopPoller(job.id);
+        const jobs = await this.getJobs();
+        const target = jobs.find((j) => j.id === job.id);
+        if (target && target.status === 'ACTIVE') {
+          target.status = 'EXPIRED';
+          await this.saveJobs(jobs);
+        }
+        return;
+      }
+
+      try {
+        const roomId = Number(job.roomId || job.targetId);
+        if (!roomId) return;
+
+        const instruction = LibraryAgentTools.getRoomSeats(roomId);
+        const res = await executeAgentAction(instruction);
+
+        if (res.success) {
+          const rawList: any[] =
+            res.data?.list ||
+            res.data?.data?.list ||
+            (Array.isArray(res.data) ? res.data : []);
+
+          // seatNo 또는 seatId 매칭
+          const targetSeat = rawList.find((s: any) => {
+            const sCode = String(s.code || s.name || s.id);
+            const targetCode = String(job.seatNo || job.targetId || '');
+            if (job.seatId && s.id === job.seatId) return true;
+            return sCode === targetCode;
+          });
+
+          if (targetSeat) {
+            // 좌석이 점유 중이 아니거나(isOccupied === false) 배정 가능한 상태(isReservable === true)
+            const isFree = !targetSeat.isOccupied || targetSeat.isReservable;
+            if (isFree) {
+              console.log(
+                `[LocalWatch] 빈자리 발견! Room ${roomId}, Seat ${job.seatNo || targetSeat.code}`
+              );
+
+              // 1. 헤드업 로컬 푸시 발송
+              await notifee.displayNotification({
+                id: job.id,
+                title: '🎉 열람실 좌석 빈자리 발생!',
+                body: `기다리시던 [${job.targetName}] 좌석이 지금 비었습니다! 서둘러 배정하세요.`,
+                android: {
+                  channelId: LOCAL_WATCH_CHANNEL_ID,
+                  pressAction: { id: 'default' },
+                  importance: AndroidImportance.HIGH,
+                },
+              });
+
+              // 2. 상태 완료로 전환
+              await this.markJobNotified(job.id);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[LocalWatch] Seat poll error for job ${job.id}:`, err);
+      }
+    };
+
+    // 1회 즉시 실행 후 60초 간격 폴링
+    checkSeatAvailability();
+    const interval = setInterval(checkSeatAvailability, 60 * 1000);
+    activePollers.set(job.id, interval);
+  },
+
+  /**
    * 앱 시작 시 기존 ACTIVE 상태인 작업들 자동 복구
    */
   async restoreActiveJobs() {
@@ -338,6 +498,8 @@ export const LocalWatchManager = {
           job.status = 'EXPIRED';
         } else if (job.type === 'STUDY_ROOM_SNIPER') {
           this.startStudyRoomPoller(job);
+        } else if (job.type === 'SPECIFIC_SEAT_SNIPER') {
+          this.startSpecificSeatPoller(job);
         }
       }
     }

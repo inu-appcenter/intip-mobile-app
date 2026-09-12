@@ -251,7 +251,7 @@ export async function handleAgentBridgeMessage(
 
     case 'registerLocalWatchJob': {
       try {
-        const { watchType, roomId, roomName, hopeDate, targetHour, durationMinutes, seatName, endTime } = payload || {};
+        const { watchType, roomId, roomName, hopeDate, targetHour, durationMinutes, seatName, seatNo, seatId, endTime } = payload || {};
         let job;
         if (watchType === 'STUDY_ROOM_SNIPER') {
           if (!roomId || !targetHour) {
@@ -263,6 +263,17 @@ export async function handleAgentBridgeMessage(
             hopeDate: hopeDate || new Date().toISOString().split('T')[0],
             targetHour: Number(targetHour),
             durationMinutes: durationMinutes ? Number(durationMinutes) : 60,
+          });
+        } else if (watchType === 'SPECIFIC_SEAT_SNIPER') {
+          if (!roomId || (!seatNo && !seatId)) {
+            throw new Error('roomId 및 seatNo(또는 seatId) 파라미터가 필요합니다.');
+          }
+          job = await LocalWatchManager.registerSpecificSeatSniper({
+            roomId: Number(roomId),
+            roomName: roomName || `${roomId}번 열람실`,
+            seatId: seatId ? Number(seatId) : undefined,
+            seatNo: String(seatNo || seatId),
+            durationMinutes: durationMinutes ? Number(durationMinutes) : 90,
           });
         } else if (watchType === 'SEAT_EXPIRATION') {
           if (!seatName || !endTime) {
