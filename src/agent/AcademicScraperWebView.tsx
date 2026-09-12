@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { PortalCredentials } from './secureStore';
@@ -16,13 +16,27 @@ type ScrapeResolver = {
 
 let activeScrape: ScrapeResolver | null = null;
 let triggerComponentScrape: ((creds: PortalCredentials) => void) | null = null;
+let resolveScraperMount: (() => void) | null = null;
+
+function waitForScraperMount(timeoutMs = 5000): Promise<void> {
+  if (triggerComponentScrape) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      if (resolveScraperMount === onMounted) resolveScraperMount = null;
+      reject(new Error('학적 조회 준비 시간이 초과되었습니다.'));
+    }, timeoutMs);
+
+    const onMounted = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    resolveScraperMount = onMounted;
+  });
+}
 
 export const AcademicScraperManager = {
   executeScrape(creds: PortalCredentials): Promise<string> {
-    if (!triggerComponentScrape) {
-      return Promise.reject(new Error('AcademicScraperWebView가 마운트되지 않았습니다.'));
-    }
-
     if (activeScrape) {
       activeScrape.reject(new Error('다른 학적 조회 작업이 진행 중입니다.'));
       activeScrape = null;
@@ -30,7 +44,21 @@ export const AcademicScraperManager = {
 
     return new Promise((resolve, reject) => {
       activeScrape = { resolve, reject, creds };
-      triggerComponentScrape!(creds);
+
+      // The root WebView can receive a chat request before this hidden WebView
+      // has committed its first effect. Queue the scrape briefly instead of
+      // incorrectly treating a linked account as unavailable.
+      waitForScraperMount()
+        .then(() => {
+          if (activeScrape?.creds !== creds) return;
+          triggerComponentScrape?.(creds);
+        })
+        .catch((error: Error) => {
+          if (activeScrape?.creds === creds) {
+            activeScrape.reject(error);
+            activeScrape = null;
+          }
+        });
 
       setTimeout(() => {
         if (activeScrape) {
@@ -68,13 +96,17 @@ export const AcademicScraperWebView: React.FC = () => {
     setTargetUrl('about:blank');
   }, []);
 
-  useEffect(() => {
+  // Register synchronously after the native tree commits, before the hosted
+  // portal can issue its first bridge request.
+  useLayoutEffect(() => {
     triggerComponentScrape = (creds: PortalCredentials) => {
       credsRef.current = creds;
       stepRef.current = 'LOGIN';
       console.log('[AcademicScraper] Starting scraper for student:', creds.studentId);
       setTargetUrl(PORTAL_LOGIN_URL);
     };
+    resolveScraperMount?.();
+    resolveScraperMount = null;
 
     return () => {
       triggerComponentScrape = null;
