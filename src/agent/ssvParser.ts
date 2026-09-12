@@ -33,6 +33,11 @@ function formatNexacroDate(raw?: string): string | undefined {
   return `${raw.substring(0, 4)}-${raw.substring(4, 6)}-${raw.substring(6, 8)}`;
 }
 
+/** ERP 화면·학번에 따라 소속 학과 컬럼명이 달라진다. */
+function firstValue(row: Record<string, string>, keys: string[]): string | undefined {
+  return keys.map((key) => row[key]?.trim()).find(Boolean);
+}
+
 export function parseRows(responseBody: string, datasetName: string): Record<string, string>[] {
   const records = responseBody.split(RECORD_SEPARATOR);
   let datasetIndex = -1;
@@ -123,6 +128,10 @@ export function parseAcademicBasicInfo(responseBody: string): AcademicBasicInfo 
   }
 
   const row = rows[0];
+  const departmentName = firstValue(row, [
+    'hgNm', 'deptNm', 'dptNm', 'sustNm', 'dpmjNm', 'dpmjKorNm', 'deptKorNm',
+  ]);
+  const departmentCode = firstValue(row, ['hgCd', 'deptCd', 'dptCd', 'sustCd', 'dpmjCd']);
   console.log('[ssvParser] Parsed row keys count:', Object.keys(row).length);
   console.log('[ssvParser] Sample values:', {
     stuno: row['stuno'],
@@ -130,7 +139,10 @@ export function parseAcademicBasicInfo(responseBody: string): AcademicBasicInfo 
     acqHp: row['acqHp'],
     mrksAvg: row['mrksAvg'],
     schregStGbn: row['schregStGbn'],
-    hgNm: row['hgNm'],
+    departmentName,
+    departmentCandidates: Object.fromEntries(
+      Object.entries(row).filter(([key, value]) => /(?:hg|dept|dpt|sust|dpmj).*?(?:nm|cd)/i.test(key) && value),
+    ),
   });
 
   // 학적 상태 한글 매핑 기본값
@@ -151,8 +163,8 @@ export function parseAcademicBasicInfo(responseBody: string): AcademicBasicInfo 
     latestEnrollmentChangeDate: formatNexacroDate(row['flSchregModDt']),
     gender: row['genGbn'] === '1' ? '남' : row['genGbn'] === '2' ? '여' : row['genGbn'],
     birthDate: formatNexacroDate(row['birthDt']),
-    departmentCode: row['hgCd'],
-    departmentName: row['hgNm'] || '학과 미지정',
+    departmentCode,
+    departmentName: departmentName || '학과 미지정',
     majorCode: row['hgMjCd'],
     majorName: row['mjNm'],
     collegeName: row['colgNm'],
