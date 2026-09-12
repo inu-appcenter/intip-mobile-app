@@ -210,12 +210,19 @@ export const AcademicScraperWebView: React.FC = () => {
 
     // 2단계 -> 3단계: ERP 메인 도달 감지
     if (stepRef.current === 'ERP_REDIRECT') {
-      if (
-        url.includes('erp.inu.ac.kr:8443') ||
-        url.includes('erp.inu.ac.kr/nx/') ||
-        url.includes('erp.inu.ac.kr:8443/nx') ||
-        (url.includes('erp.inu.ac.kr') && !url.includes('8881'))
-      ) {
+      // SSO can temporarily load portal.inu.ac.kr:7780 with the ERP URL in
+      // its query string. A substring match mistakes that blocked redirect
+      // page for an ERP document, where document.cookie is inaccessible.
+      let isHttpsErpDocument = false;
+      try {
+        const currentUrl = new URL(url);
+        isHttpsErpDocument = currentUrl.protocol === 'https:'
+          && currentUrl.hostname === 'erp.inu.ac.kr';
+      } catch {
+        // Keep waiting for a valid ERP navigation.
+      }
+
+      if (isHttpsErpDocument) {
         if (!loading) {
           console.log('[AcademicScraper] ERP session reached. Injecting academic query script...');
           stepRef.current = 'ERP_QUERY';
@@ -225,8 +232,13 @@ export const AcademicScraperWebView: React.FC = () => {
             (async function() {
               try {
                 var wmonid = '';
-                var m = document.cookie.match(/WMONID=([^;]+)/);
-                if (m) wmonid = m[1];
+                try {
+                  var m = document.cookie.match(/WMONID=([^;]+)/);
+                  if (m) wmonid = m[1];
+                } catch (cookieError) {
+                  // Some transition documents deny cookie reads. The ERP
+                  // request still accepts its default WMONID fallback below.
+                }
                 if (!wmonid && window.WMONID) wmonid = window.WMONID;
                 if (!wmonid) wmonid = 'wmon_mobile';
 
