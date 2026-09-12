@@ -7,6 +7,7 @@ import { LocalWatchManager } from './localWatchManager';
 
 export interface AgentBridgeResponse {
   type: string;
+  requestId?: string;
   success: boolean;
   data?: any;
   errorCode?: string;
@@ -33,18 +34,27 @@ export async function handleAgentBridgeMessage(
   }
 
   const { type, payload } = parsed;
+  const targetRequestId = parsed.requestId || payload?.instruction?.actionId;
+
+  // 모든 응답에 요청 고유 ID(requestId)를 동기화하여 다중 비동기 브릿지 호출 시 충돌/혼선 방지
+  const sendWrappedResponse = (res: AgentBridgeResponse) => {
+    sendResponse({
+      ...res,
+      ...(targetRequestId ? { requestId: targetRequestId } : {}),
+    });
+  };
 
   switch (type) {
     case 'checkPortalAccount': {
       try {
         const has = await PortalSecureStore.hasCredentials();
-        sendResponse({
+        sendWrappedResponse({
           type: 'checkPortalAccountResult',
           success: true,
           data: { linked: has },
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'checkPortalAccountResult',
           success: false,
           errorMessage: err?.message,
@@ -60,13 +70,13 @@ export async function handleAgentBridgeMessage(
         // 백그라운드에서 LMS 및 도서관 토큰도 즉시 선발급 시도 (1회 등록으로 올패스 연동)
         LmsAuthService.login({ username: studentId, password }).catch(() => {});
         LibraryAuthService.login({ loginId: studentId, password }).catch(() => {});
-        sendResponse({
+        sendWrappedResponse({
           type: 'savePortalAccountResult',
           success: true,
           data: { linked: true },
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'savePortalAccountResult',
           success: false,
           errorMessage: err?.message,
@@ -80,13 +90,13 @@ export async function handleAgentBridgeMessage(
         await PortalSecureStore.clearCredentials();
         await LmsAuthService.clear().catch(() => {});
         await LibraryAuthService.clear().catch(() => {});
-        sendResponse({
+        sendWrappedResponse({
           type: 'deletePortalAccountResult',
           success: true,
           data: { linked: false },
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'deletePortalAccountResult',
           success: false,
           errorMessage: err?.message,
@@ -98,7 +108,7 @@ export async function handleAgentBridgeMessage(
     case 'fetchAcademicInfo': {
       try {
         const result = await fetchAcademicInfoLocally();
-        sendResponse({
+        sendWrappedResponse({
           type: 'fetchAcademicInfoResult',
           success: result.success,
           data: result.data,
@@ -106,7 +116,7 @@ export async function handleAgentBridgeMessage(
           errorMessage: result.errorMessage,
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'fetchAcademicInfoResult',
           success: false,
           errorCode: 'NETWORK_ERROR',
@@ -120,14 +130,14 @@ export async function handleAgentBridgeMessage(
       try {
         const { loginId, password } = payload || {};
         const loginRes = await LibraryAuthService.login({ loginId, password });
-        sendResponse({
+        sendWrappedResponse({
           type: 'saveLibraryAccountResult',
           success: loginRes.success,
           data: loginRes.user,
           errorMessage: loginRes.errorMessage,
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'saveLibraryAccountResult',
           success: false,
           errorMessage: err?.message,
@@ -146,13 +156,13 @@ export async function handleAgentBridgeMessage(
           }
         }
         const user = await LibraryAuthService.getUserInfo();
-        sendResponse({
+        sendWrappedResponse({
           type: 'checkLibraryAccountResult',
           success: true,
           data: { linked: Boolean(token), user },
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'checkLibraryAccountResult',
           success: false,
           errorMessage: err?.message,
@@ -165,14 +175,14 @@ export async function handleAgentBridgeMessage(
       try {
         const { username, password } = payload || {};
         const loginRes = await LmsAuthService.login({ username, password });
-        sendResponse({
+        sendWrappedResponse({
           type: 'saveLmsAccountResult',
           success: loginRes.success,
           data: loginRes.user,
           errorMessage: loginRes.errorMessage,
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'saveLmsAccountResult',
           success: false,
           errorMessage: err?.message,
@@ -191,13 +201,13 @@ export async function handleAgentBridgeMessage(
           }
         }
         const user = await LmsAuthService.getUserInfo();
-        sendResponse({
+        sendWrappedResponse({
           type: 'checkLmsAccountResult',
           success: true,
           data: { linked: Boolean(token), user },
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'checkLmsAccountResult',
           success: false,
           errorMessage: err?.message,
@@ -213,7 +223,7 @@ export async function handleAgentBridgeMessage(
           throw new Error('instruction 파라미터가 누락되었습니다.');
         }
         const actionResult = await executeAgentAction(instruction);
-        sendResponse({
+        sendWrappedResponse({
           type: 'executeAgentActionResult',
           success: actionResult.success,
           data: actionResult.data !== undefined ? actionResult.data : actionResult,
@@ -221,7 +231,7 @@ export async function handleAgentBridgeMessage(
           errorMessage: actionResult.errorMessage,
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'executeAgentActionResult',
           success: false,
           errorCode: 'EXECUTION_ERROR',
@@ -234,13 +244,13 @@ export async function handleAgentBridgeMessage(
     case 'getLocalWatchJobs': {
       try {
         const jobs = await LocalWatchManager.getJobs();
-        sendResponse({
+        sendWrappedResponse({
           type: 'getLocalWatchJobsResult',
           success: true,
           data: jobs,
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'getLocalWatchJobsResult',
           success: false,
           errorMessage: err?.message,
@@ -287,13 +297,13 @@ export async function handleAgentBridgeMessage(
           throw new Error(`지원하지 않는 로컬 감시 타입입니다: ${watchType}`);
         }
 
-        sendResponse({
+        sendWrappedResponse({
           type: 'registerLocalWatchJobResult',
           success: true,
           data: job,
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'registerLocalWatchJobResult',
           success: false,
           errorMessage: err?.message,
@@ -309,13 +319,13 @@ export async function handleAgentBridgeMessage(
           throw new Error('job id가 필요합니다.');
         }
         const cancelled = await LocalWatchManager.cancelJob(id);
-        sendResponse({
+        sendWrappedResponse({
           type: 'cancelLocalWatchJobResult',
           success: cancelled,
           data: { id, cancelled },
         });
       } catch (err: any) {
-        sendResponse({
+        sendWrappedResponse({
           type: 'cancelLocalWatchJobResult',
           success: false,
           errorMessage: err?.message,
