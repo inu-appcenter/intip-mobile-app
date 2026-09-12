@@ -6,6 +6,7 @@ import { PortalCredentials } from './secureStore';
 const PORTAL_LOGIN_URL = 'https://portal.inu.ac.kr:444/enview/user/login.face';
 const ERP_SSO_URL = 'http://erp.inu.ac.kr:8881/com/SsoCtr/initPageWork.do?loginGbn=sso';
 const SCRAPE_TIMEOUT_MS = 35000;
+const MIN_SCRAPER_VIEW_SIZE = 1;
 
 type ScrapeResolver = {
   resolve: (data: string) => void;
@@ -271,8 +272,10 @@ export const AcademicScraperWebView: React.FC = () => {
 
 const styles = StyleSheet.create({
   hiddenContainer: {
-    width: 0,
-    height: 0,
+    // Android may defer layout/loading for a zero-sized WebView. Keep it
+    // invisible and offscreen, but give the SSO WebView a real render surface.
+    width: MIN_SCRAPER_VIEW_SIZE,
+    height: MIN_SCRAPER_VIEW_SIZE,
     position: 'absolute',
     top: -1000,
     left: -1000,
