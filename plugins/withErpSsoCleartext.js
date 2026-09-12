@@ -1,7 +1,7 @@
 /**
  * Allows the legacy INU ERP SSO hand-off only. The portal authenticates over
- * HTTPS, then redirects to http://erp.inu.ac.kr:8881 before reaching the HTTPS
- * ERP application; Android 9+ otherwise blocks that single redirect.
+ * HTTPS, then passes through HTTP-only endpoints on the portal and ERP before
+ * reaching the HTTPS ERP application; Android 9+ otherwise blocks the SSO flow.
  */
 const { withAndroidManifest, withDangerousMod } = require("expo/config-plugins");
 const fs = require("fs");
@@ -10,6 +10,7 @@ const path = require("path");
 const NETWORK_SECURITY_CONFIG = `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">portal.inu.ac.kr</domain>
         <domain includeSubdomains="true">erp.inu.ac.kr</domain>
     </domain-config>
 </network-security-config>
