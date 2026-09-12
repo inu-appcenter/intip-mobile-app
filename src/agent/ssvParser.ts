@@ -21,6 +21,8 @@ export interface AcademicBasicInfo {
   acquiredCredits: string;
   gradeAverage: string;
   advisorProfessorName?: string;
+  /** 사용자 본인 조회 화면용 ERP 원본 필드. 외부 AI 전달에는 사용하지 않는다. */
+  rawFields: Record<string, string>;
 }
 
 const RECORD_SEPARATOR = String.fromCharCode(30);
@@ -174,5 +176,6 @@ export function parseAcademicBasicInfo(responseBody: string): AcademicBasicInfo 
     acquiredCredits: row['acqHp'] || '0',
     gradeAverage: row['mrksAvg'] || '0.0',
     advisorProfessorName: row['profNm'],
+    rawFields: row,
   };
 }
