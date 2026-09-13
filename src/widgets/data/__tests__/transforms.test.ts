@@ -299,6 +299,24 @@ describe('cafeteria', () => {
   });
 });
 
+describe('toCafeteriaMenuProps with the API\'s null slots', () => {
+  const LUNCHTIME = new Date(2026, 8, 14, 12, 0);
+
+  it('treats a slot array of nulls as no menu instead of throwing', () => {
+    // Exactly what `/api/cafeterias` returns on a day with nothing served:
+    // {"data":[null,null,null]}. This used to throw on `.trim()`, and
+    // `Promise.allSettled` swallowed it, so the widget kept the last meal.
+    const props = toCafeteriaMenuProps([null, null, null], '제1학생식당', LUNCHTIME);
+    expect(props.status).toBe('noMenu');
+  });
+
+  it('keeps the real items when only some slots are null', () => {
+    const props = toCafeteriaMenuProps([null, '돈까스카레', null, '순두부찌개'], '제1학생식당', LUNCHTIME);
+    if (props.status !== 'normal') throw new Error('expected normal');
+    expect(props.items).toEqual(['돈까스카레', '순두부찌개']);
+  });
+});
+
 describe('currentSemesterOf', () => {
   const SEMESTERS = [
     { id: 1, year: 2026, term: 'FIRST' as const, status: 'CLOSED' as const, startDate: '2026-03-02', endDate: '2026-06-21' },

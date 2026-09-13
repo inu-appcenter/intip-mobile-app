@@ -18,6 +18,13 @@ export const DEFAULT_CAFETERIA = '제1학생식당';
 
 export type Meal = 'breakfast' | 'lunch' | 'dinner';
 
+/**
+ * What the menu endpoint actually returns: a slot per meal, `null` where
+ * nothing is served. Typing it as `string[]` is what let the null case
+ * through to a `.trim()` call — see `toCafeteriaMenuProps`.
+ */
+export type MenuItems = (string | null)[];
+
 type MealWindow = {
   meal: Meal;
   label: string;
@@ -86,12 +93,22 @@ export function mealBoundariesOf(now: Date): Date[] {
  * them and a bullet with nothing after it looks like a bug.
  */
 export function toCafeteriaMenuProps(
-  items: string[] | null,
+  items: MenuItems | null,
   cafeteriaName: string,
   now: Date,
 ): CafeteriaMenuWidgetProps {
   const window = currentMealWindow(now);
-  const menu = (items ?? []).map((item) => item.trim()).filter((item) => item.length > 0);
+  // `typeof === 'string'` before `.trim()`, not just a truthiness check: the
+  // API sends a fixed-length slot array and fills the unserved slots with
+  // `null` — a day with no menu comes back as `{"data":[null,null,null]}`,
+  // not as an empty array. Calling `.trim()` on those threw, and because
+  // `refreshAllWidgets` runs on `Promise.allSettled` the rejection went
+  // nowhere: the widget just quietly kept showing the previous meal. Seen on
+  // a real device still displaying lunch at 20:39.
+  const menu = (items ?? [])
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
 
   if (!window || menu.length === 0) return { status: 'noMenu', cafeteriaName };
 
@@ -117,8 +134,8 @@ export function toCafeteriaMenuProps(
 export async function fetchCafeteriaMenu(
   cafeteria: string,
   now: Date,
-): Promise<string[] | null> {
-  return getJson<string[]>('/api/cafeterias', {
+): Promise<MenuItems | null> {
+  return getJson<MenuItems>('/api/cafeterias', {
     query: { cafeteria, day: now.getDay() },
   });
 }
