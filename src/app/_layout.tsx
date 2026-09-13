@@ -8,6 +8,8 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import WebViewControllerPanel from "../components/WebViewControllerPanel";
+import { AcademicScraperWebView } from "../agent/AcademicScraperWebView";
+import { LocalWatchManager } from "../agent/localWatchManager";
 import { checkForUpdate } from "../native/updateCheck";
 import {
   registerBackgroundHandlers,
@@ -40,6 +42,8 @@ export default function RootLayout() {
     void requestNotificationPermission();
     // Check for OTA updates (non-blocking; shows a prompt if one is available).
     void checkForUpdate();
+    // Restore active local watch jobs (study room sniper pollers, etc.)
+    void LocalWatchManager.restoreActiveJobs();
     // The home screen widget is not part of this release — the expo-widgets
     // plugin is off in app.json until the iOS App Group / provisioning profiles
     // are in place, so there is no widget target to seed. `src/widgets/` stays
@@ -92,6 +96,8 @@ export default function RootLayout() {
             </Stack>
             {/* Debug-only GUI controller, rendered above the whole stack. */}
             <WebViewControllerPanel />
+            {/* Hidden WebView for background portal SSO & academic scraping */}
+            <AcademicScraperWebView />
           </WebViewProvider>
         </ShareIntentProvider>
       </KeyboardProvider>
