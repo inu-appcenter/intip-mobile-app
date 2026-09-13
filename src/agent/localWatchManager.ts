@@ -301,6 +301,26 @@ export const LocalWatchManager = {
     return newJob;
   },
 
+  /** LMS 과제 마감 전용 알림. 좌석 만료 알림과 분리해 문구와 유형을 보존한다. */
+  async registerAssignmentReminder(params: { assignmentName: string; dueTime: string }): Promise<LocalWatchJob> {
+    await ensureLocalWatchChannel();
+    const dueTimestamp = new Date(params.dueTime).getTime();
+    const alertTime = dueTimestamp - 60 * 60 * 1000;
+    const id = `assignment_${Date.now()}`;
+    const job: LocalWatchJob = {
+      id, type: 'ASSIGNMENT_REMINDER', title: 'LMS 과제 마감 알림', targetName: params.assignmentName,
+      createdAt: Date.now(), expiresAt: dueTimestamp, status: 'ACTIVE',
+    };
+    const jobs = await this.getJobs(); jobs.push(job); await this.saveJobs(jobs);
+    if (alertTime <= Date.now()) {
+      await notifee.displayNotification({ id, title: '⏰ LMS 과제 마감 임박', body: `[${params.assignmentName}] 마감 시간을 확인하세요.`, android: { channelId: LOCAL_WATCH_CHANNEL_ID, pressAction: { id: 'default' } } });
+      await this.markJobNotified(id);
+    } else {
+      await notifee.createTriggerNotification({ id, title: '⏰ LMS 과제 마감 1시간 전', body: `[${params.assignmentName}] 마감이 1시간 남았습니다.`, android: { channelId: LOCAL_WATCH_CHANNEL_ID, pressAction: { id: 'default' } } }, { type: TriggerType.TIMESTAMP, timestamp: alertTime });
+    }
+    return job;
+  },
+
   /**
    * 감시 작업 취소
    */

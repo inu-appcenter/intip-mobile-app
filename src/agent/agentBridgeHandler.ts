@@ -293,6 +293,14 @@ export async function handleAgentBridgeMessage(
             seatName,
             endTime,
           });
+        } else if (watchType === 'ASSIGNMENT_REMINDER') {
+          if (!seatName || !endTime) {
+            throw new Error('assignmentName 및 dueTime 파라미터가 필요합니다.');
+          }
+          job = await LocalWatchManager.registerAssignmentReminder({
+            assignmentName: seatName,
+            dueTime: endTime,
+          });
         } else {
           throw new Error(`지원하지 않는 로컬 감시 타입입니다: ${watchType}`);
         }
