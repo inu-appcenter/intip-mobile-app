@@ -14,6 +14,8 @@ import {
 import { createWidget, type WidgetEnvironment } from 'expo-widgets';
 import { registerGlanceWidget } from 'expo-widgets-glance';
 
+import { SCHEDULE_REFRESH_MS } from './refreshIntervals';
+
 /**
  * One line of a class: what it's called and where (or how) it happens.
  * `location` also carries the design's "온라인 수업" case — a class held
@@ -270,6 +272,6 @@ const NextClassWidget = (props: NextClassWidgetProps, environment: WidgetEnviron
 // Android has no equivalent of createWidget()'s implicit iOS layout capture
 // (see expo-widgets-glance's README) — this explicit call is what stands in
 // for it. No-op on iOS.
-registerGlanceWidget('NextClassWidget', NextClassWidget);
+registerGlanceWidget('NextClassWidget', NextClassWidget, { refreshIntervalMs: SCHEDULE_REFRESH_MS });
 
 export default createWidget('NextClassWidget', NextClassWidget);

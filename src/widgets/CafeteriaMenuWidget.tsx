@@ -12,6 +12,8 @@ import {
 import { createWidget, type WidgetEnvironment } from 'expo-widgets';
 import { registerGlanceWidget } from 'expo-widgets-glance';
 
+import { CAFETERIA_REFRESH_MS } from './refreshIntervals';
+
 /**
  * States for the medium "학식 메뉴" (cafeteria menu) widget, named after the
  * Figma frame. Only one frame exists today — real data fetching isn't wired
@@ -180,6 +182,6 @@ const CafeteriaMenuWidget = (props: CafeteriaMenuWidgetProps, environment: Widge
 // Android has no equivalent of createWidget()'s implicit iOS layout capture
 // (see expo-widgets-glance's README) — this explicit call is what stands in
 // for it. No-op on iOS.
-registerGlanceWidget('CafeteriaMenuWidget', CafeteriaMenuWidget);
+registerGlanceWidget('CafeteriaMenuWidget', CafeteriaMenuWidget, { refreshIntervalMs: CAFETERIA_REFRESH_MS });
 
 export default createWidget('CafeteriaMenuWidget', CafeteriaMenuWidget);

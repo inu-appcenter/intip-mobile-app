@@ -11,6 +11,8 @@ import {
 import { createWidget, type WidgetEnvironment } from "expo-widgets";
 import { registerGlanceWidget } from "expo-widgets-glance";
 
+import { BUS_REFRESH_MS } from "./refreshIntervals";
+
 /** One bus route's next arrival. */
 type BusArrival = {
   route: string;
@@ -324,6 +326,6 @@ const BusArrivalWidget = (
 // Android has no equivalent of createWidget()'s implicit iOS layout capture
 // (see expo-widgets-glance's README) — this explicit call is what stands in
 // for it. No-op on iOS.
-registerGlanceWidget("BusArrivalWidget", BusArrivalWidget);
+registerGlanceWidget("BusArrivalWidget", BusArrivalWidget, { refreshIntervalMs: BUS_REFRESH_MS });
 
 export default createWidget("BusArrivalWidget", BusArrivalWidget);

@@ -12,6 +12,8 @@ import {
 import { createWidget, type WidgetEnvironment } from 'expo-widgets';
 import { registerGlanceWidget } from 'expo-widgets-glance';
 
+import { SCHEDULE_REFRESH_MS } from './refreshIntervals';
+
 /** One row of the day's schedule list. */
 type ScheduleRow = {
   timeRange: string;
@@ -287,6 +289,6 @@ const TodayClassesWidget = (props: TodayClassesWidgetProps, environment: WidgetE
 };
 
 // See the identical call in NextClassWidget.tsx for why this exists.
-registerGlanceWidget('TodayClassesWidget', TodayClassesWidget);
+registerGlanceWidget('TodayClassesWidget', TodayClassesWidget, { refreshIntervalMs: SCHEDULE_REFRESH_MS });
 
 export default createWidget('TodayClassesWidget', TodayClassesWidget);

@@ -16,6 +16,8 @@ import {
 import { createWidget, type WidgetEnvironment } from 'expo-widgets';
 import { registerGlanceWidget } from 'expo-widgets-glance';
 
+import { SCHEDULE_REFRESH_MS } from './refreshIntervals';
+
 /** One class block: when it happens (minutes since the grid's first hour), how long, and the pastel color Figma assigns it. */
 export type ClassBlock = {
   startMinutes: number;
@@ -423,6 +425,6 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
 // Android has no equivalent of createWidget()'s implicit iOS layout capture
 // (see expo-widgets-glance's README) — this explicit call is what stands in
 // for it. No-op on iOS.
-registerGlanceWidget('TimetableWidget', TimetableWidget);
+registerGlanceWidget('TimetableWidget', TimetableWidget, { refreshIntervalMs: SCHEDULE_REFRESH_MS });
 
 export default createWidget('TimetableWidget', TimetableWidget);
