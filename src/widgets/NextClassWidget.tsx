@@ -246,7 +246,16 @@ const NextClassWidget = (props: NextClassWidgetProps, environment: WidgetEnviron
         padding({ top: 20, bottom: 16, leading: 16, trailing: 16 }),
         containerBackground(background, 'widget'),
         ...(borderColor ? [border({ color: borderColor, width: 1 })] : []),
-        frame({ maxHeight: Infinity }),
+        // `maxWidth`/`maxHeight: Infinity` + `topLeading` — the frame has to
+        // claim BOTH axes of the widget. Without `maxHeight` the card's
+        // (usually shorter) content is centered vertically; without
+        // `maxWidth` the VStack sizes to its widest child and WidgetKit
+        // centers that block horizontally, which is what made every line
+        // look centered on device even though the VStack itself is
+        // `alignment="leading"`. Figma pins each text block to the full
+        // content width (138 of a 170pt small frame, x=16), so the frame
+        // must fill the widget and anchor top-leading.
+        frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' }),
         // Tapping anywhere on the widget opens the app.
         widgetURL('intipmobileapp://'),
       ]}

@@ -5,6 +5,7 @@ import {
   foregroundStyle,
   frame,
   padding,
+  resizable,
   widgetURL,
 } from "@expo/ui/swift-ui/modifiers";
 import { createWidget, type WidgetEnvironment } from "expo-widgets";
@@ -13,10 +14,32 @@ import { registerGlanceWidget } from "expo-widgets-glance";
 /** One bus route's next arrival. */
 type BusArrival = {
   route: string;
-  /** Already formatted ("4분 19초", "곧 도착", "정보 없음") — no live countdown here. */
+  /**
+   * The estimate as of `observedLabel`, already formatted ("4분 19초",
+   * "곧 도착"). Android renders this; iOS only falls back to it.
+   *
+   * On Android this number does not tick down — Glance has no self-updating
+   * text, so it is only as fresh as the last refresh, which is why the
+   * "기준" line under it is not optional.
+   */
   eta: string;
   /** The design's one emphasized case ("곧 도착") gets the brand color instead of tertiary. */
   soon?: boolean;
+  /**
+   * When the bus is expected, as an epoch millisecond timestamp.
+   *
+   * An absolute instant, not a duration, and that is the whole point: a
+   * widget cannot be refreshed once a minute on either platform (Android's
+   * WorkManager floor is 15 minutes; iOS meters timeline reloads), so a
+   * stored "4분 19초" is wrong almost immediately. An instant stays true, and
+   * iOS can count down to it on its own clock with no refresh at all.
+   *
+   * Numeric because the snapshot crosses into the widget process as JSON —
+   * a `Date` would arrive as a string (same reason `TestWidget` does this).
+   */
+  arrivesAt: number;
+  /** How old the reading is ("2분 전 기준"), for the honesty line below. */
+  observedLabel: string;
 };
 
 /**
@@ -35,9 +58,9 @@ export const DEFAULT_PROPS: BusArrivalWidgetProps = {
   status: "normal",
   exitLabel: "2번 출구",
   arrivals: [
-    { route: "6-1", eta: "곧 도착", soon: true },
-    { route: "8", eta: "4분 19초" },
-    { route: "순환41", eta: "16분 41초" },
+    { route: "6-1", eta: "곧 도착", soon: true, arrivesAt: Date.now() + 30_000, observedLabel: "방금 기준" },
+    { route: "8", eta: "4분 19초", arrivesAt: Date.now() + 259_000, observedLabel: "방금 기준" },
+    { route: "순환41", eta: "16분 41초", arrivesAt: Date.now() + 1_001_000, observedLabel: "방금 기준" },
   ],
 };
 
@@ -88,9 +111,21 @@ const BusArrivalWidget = (
   // no shared package between the two repos. Declared inside the widget
   // function, not at module scope: see the `'widget'` directive note above —
   // only this function's own source ships to the widget process.
-  const RED_BUS_NUMBERS = ["1301", "3002", "303-1", "6405", "M6405", "M6464", "6724", "6777"];
+  const RED_BUS_NUMBERS = [
+    "1301",
+    "3002",
+    "303-1",
+    "6405",
+    "M6405",
+    "M6464",
+    "6724",
+    "6777",
+  ];
   const busColor = (route: string): string => {
-    if (route.startsWith("순환") || ["41", "42", "43", "46", "47"].includes(route)) {
+    if (
+      route.startsWith("순환") ||
+      ["41", "42", "43", "46", "47"].includes(route)
+    ) {
       return "#2C9B37";
     }
     if (route.startsWith("M") || RED_BUS_NUMBERS.includes(route)) {
@@ -99,12 +134,17 @@ const BusArrivalWidget = (
     return "#1B4E9B";
   };
 
-  // The route icon is the SF Symbol "bus.fill", tinted per-route the same
-  // way inu-portal-web's own `BusIcon` does — `Image`'s `systemName` resolves
-  // natively on iOS; expo-widgets-glance maps this one specific symbol to a
-  // bundled Android vector drawable (see GlanceTreeRenderer.kt's
-  // `SfSymbolDrawables`) since there's no SF Symbol catalog on Android to
-  // draw from generally.
+  // The route icon is inu-portal-web's fontello glyph `icon-bus` — literally
+  // the same glyph the web app renders — tinted per-route the way its
+  // `BusIcon` does. See `plugins/withWidgetAssets.js` for where it was lifted
+  // from.
+  //
+  // `assetName`, not `systemName`: an SF Symbol name is iOS-only vocabulary
+  // with nothing on Android to resolve it against. One `assetName` resolves
+  // on both — `plugins/withWidgetAssets.js` generates the iOS imageset and
+  // the Android vector drawable from that one tracked SVG, and both are
+  // monochrome templates, so `color` below stays the only place the palette
+  // is written down.
   const row = (arrival: BusArrival, key: number) => (
     <HStack
       key={key}
@@ -117,14 +157,16 @@ const BusArrivalWidget = (
         modifiers={[frame({ maxWidth: Infinity, alignment: "leading" })]}
       >
         <Image
-          systemName="bus.fill"
-          size={16}
+          assetName="BusIcon"
           color={busColor(arrival.route)}
-          // The drawable this maps to on Android (ic_widget_bus.xml) is a
-          // fixed 24dp asset — an explicit frame keeps it the same visual
-          // size as iOS's `size`-driven SF Symbol rendering instead of
-          // showing up oversized there.
-          modifiers={[frame({ width: 16, height: 16 })]}
+          // The source artwork is a 1000-unit em (fontello), rendered at a
+          // 24 natural size on both platforms, so the frame is what brings it
+          // down to the 16 this row wants. `resizable()` is
+          // what makes the frame actually resize it rather than crop it —
+          // and it is also why there is no `size` prop here: `size` becomes a
+          // `font` modifier (see @expo/ui's `transformNativeProps`), which
+          // sizes an SF Symbol but does nothing at all to an asset image.
+          modifiers={[resizable(), frame({ width: 16, height: 16 })]}
         />
         <Text
           modifiers={[
@@ -135,16 +177,25 @@ const BusArrivalWidget = (
           {arrival.route}
         </Text>
       </HStack>
+      {/* `dateStyle="timer"` is a self-updating SwiftUI text: on iOS WidgetKit
+          reruns it on its own clock, so this counts down second by second
+          with no timeline reload and no network. expo-widgets-glance renders
+          the same node as a RemoteViews Chronometer, which the launcher ticks
+          for itself — so it is live on both platforms now.
+
+          The countdown being live does not make the *estimate* live: it runs
+          toward an instant derived from whenever the transit API was last
+          read, which is what the footer's "기준" time states. */}
       <Text
+        date={new Date(arrival.arrivesAt)}
+        dateStyle="timer"
         modifiers={[
           font({ size: 12, weight: arrival.soon ? "medium" : "regular" }),
           foregroundStyle(
             arrival.soon ? colors.textBrand : colors.textTertiary,
           ),
         ]}
-      >
-        {arrival.eta}
-      </Text>
+      />
     </HStack>
   );
 
@@ -188,6 +239,22 @@ const BusArrivalWidget = (
           >
             {props.arrivals.map((arrival, index) => row(arrival, index))}
           </VStack>
+          {/* How old the estimates are. Not decoration and not an apology:
+              on Android the times above are frozen at the last widget update
+              (Glance cannot tick), and even on iOS, where they do count down,
+              the countdown is only as good as the reading it started from —
+              the bus may already have been rerouted. Stating the age is the
+              only way the number isn't a quiet lie. */}
+          <Spacer />
+          <Text
+            modifiers={[
+              font({ size: 10 }),
+              foregroundStyle(colors.textTertiary),
+              frame({ maxWidth: Infinity, alignment: "leading" }),
+            ]}
+          >
+            {props.arrivals[0].observedLabel}
+          </Text>
         </>
       );
       break;
@@ -196,7 +263,13 @@ const BusArrivalWidget = (
         <VStack
           alignment="leading"
           spacing={4}
-          modifiers={[frame({ maxHeight: Infinity })]}
+          modifiers={[
+            frame({
+              maxWidth: Infinity,
+              maxHeight: Infinity,
+              alignment: "topLeading",
+            }),
+          ]}
         >
           <Text
             modifiers={[
@@ -226,7 +299,13 @@ const BusArrivalWidget = (
       modifiers={[
         padding({ top: 20, bottom: 16, leading: 16, trailing: 16 }),
         containerBackground(colors.cardBg, "widget"),
-        frame({ maxHeight: Infinity }),
+        // See NextClassWidget.tsx's identical modifier for why both axes
+        // and `topLeading` are needed here.
+        frame({
+          maxWidth: Infinity,
+          maxHeight: Infinity,
+          alignment: "topLeading",
+        }),
         // Tapping anywhere on the widget opens the app.
         widgetURL("intipmobileapp://"),
       ]}

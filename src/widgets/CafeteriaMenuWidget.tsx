@@ -1,4 +1,4 @@
-import { HStack, Text, VStack } from '@expo/ui/swift-ui';
+import { HStack, Spacer, Text, VStack } from '@expo/ui/swift-ui';
 import {
   background,
   containerBackground,
@@ -108,25 +108,36 @@ const CafeteriaMenuWidget = (props: CafeteriaMenuWidgetProps, environment: Widge
               {props.mealLabel}
             </Text>
           </HStack>
-          {props.items.map((item, index) => (
-            <Text
-              key={index}
-              modifiers={[font({ size: 13 }), foregroundStyle(colors.textSecondary), frame({ maxWidth: Infinity, alignment: 'leading' })]}
-            >
-              {`· ${item}`}
-            </Text>
-          ))}
-          {/* Figma pins the footer to the card's bottom edge with a
-              flex-grow spacer above it. A `<Spacer />` here (Glance's
-              `defaultWeight()`) is the natural translation, but confirmed
-              against a real render it doesn't: the footer line went
-              missing entirely — not mispositioned, just never drawn,
-              unlike the symmetric-Spacer centering pattern
-              NextClassWidget.tsx's `dayOff` state uses successfully. Rather
-              than chase why one Spacer placement works and this one
-              doesn't, the footer just follows the menu items in normal
-              flow instead of being bottom-pinned — a minor layout
-              deviation from Figma, not a missing feature. */}
+          {/* The map MUST stay wrapped in its own container rather than
+              sitting inline among these siblings. expo-widgets serializes
+              the element tree to JSON and walks it in
+              `ios/Widgets/DynamicView.swift`'s `updateChildren`, which reads
+              children as `compactMap { $0 as? [String: Any] }` — it never
+              flattens. A `.map()` next to sibling elements arrives as a
+              nested array, fails that cast, and is dropped *silently*: the
+              three menu lines simply never rendered on device while the
+              header and footer around them did. As its own container's only
+              child the array is the children value itself, which does cast,
+              which is why the same pattern works in TodayClassesWidget and
+              BusArrivalWidget. Spacing 6 here reproduces what the root
+              VStack's own spacing was giving these lines before.
+              (This is also what broke the `<Spacer />` below when it was
+              first tried — see git history; the layout it was inserted into
+              was already missing its menu lines.) */}
+          <VStack alignment="leading" spacing={6} modifiers={[frame({ maxWidth: Infinity })]}>
+            {props.items.map((item, index) => (
+              <Text
+                key={index}
+                modifiers={[font({ size: 13 }), foregroundStyle(colors.textSecondary), frame({ maxWidth: Infinity, alignment: 'leading' })]}
+              >
+                {`· ${item}`}
+              </Text>
+            ))}
+          </VStack>
+          {/* Figma pins the footer to the card's bottom edge (node 5297:16707
+              has a flex-grow filler frame above it); the widget's real height
+              isn't the frame's 170, so a Spacer is the translation. */}
+          <Spacer />
           <Text modifiers={[font({ size: 11 }), foregroundStyle(colors.textTertiary), frame({ maxWidth: Infinity, alignment: 'leading' })]}>
             {props.footer}
           </Text>
@@ -154,7 +165,9 @@ const CafeteriaMenuWidget = (props: CafeteriaMenuWidgetProps, environment: Widge
       modifiers={[
         padding({ all: 14 }),
         containerBackground(colors.cardBg, 'widget'),
-        frame({ maxHeight: Infinity }),
+        // See NextClassWidget.tsx's identical modifier for why both axes
+        // and `topLeading` are needed here.
+        frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' }),
         // Tapping anywhere on the widget opens the app.
         widgetURL('intipmobileapp://'),
       ]}

@@ -8,6 +8,8 @@ import {
   font,
   foregroundStyle,
   frame,
+  multilineTextAlignment,
+  offset,
   padding,
   widgetURL,
 } from '@expo/ui/swift-ui/modifiers';
@@ -15,7 +17,7 @@ import { createWidget, type WidgetEnvironment } from 'expo-widgets';
 import { registerGlanceWidget } from 'expo-widgets-glance';
 
 /** One class block: when it happens (minutes since the grid's first hour), how long, and the pastel color Figma assigns it. */
-type ClassBlock = {
+export type ClassBlock = {
   startMinutes: number;
   durationMinutes: number;
   className: string;
@@ -114,20 +116,44 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
         blockText: '#333D4B',
       };
 
-  // Grid scale: 12 hours (08:00–20:00) at 40pt/hr — tall enough that a
-  // typical 50–75min class block comfortably fits its two lines of text
-  // (name + room) without cramming (24pt/hr, tried first, left blocks
-  // visibly squeezed and room text clipped in short ones). The tradeoff is
-  // fewer hours visible before the widget's own fixed height clips the
-  // grid — like Figma's own frame (its background grid is taller than its
-  // visible card and gets clipped, per its own `overflow-clip` class),
-  // classes past the grid's range simply get cut off rather than shown.
-  // Not a bug: a home screen widget has no scrolling, so *something* has to
-  // give for a day with enough classes, and taller, readable blocks matter
-  // more here than showing the entire day at once.
+  // Grid scale.
+  //
+  // The hour height is *derived* from the widget's real height, not picked
+  // by eye. Everything from `START_HOUR` through `END_HOUR - 1` has to be on
+  // screen — a widget cannot scroll, so an hour that doesn't fit is an hour
+  // the user can never see, and an 18:30 class silently missing is worse
+  // than every block being a little shorter. Dividing the real height also
+  // means no dead space under the grid.
+  //
+  // `environment.height` is Android-only for now: expo-widgets-glance
+  // reports the size the *launcher* gave this instance, which is the only
+  // way to know it there — an Android home screen hands out whole grid cells
+  // whose dp size depends on the device and the user's chosen grid, so
+  // "systemLarge" is a family, not a measurement. Measured on a 420dpi
+  // phone: a 4-cell-tall slot is ~414dp while the widget's own declared
+  // `minHeight` is 300dp.
+  //
+  // iOS has no equivalent — `expo-widgets`' `getWidgetEnvironment` doesn't
+  // report a size — so it falls back to the budget below, measured by hand
+  // from `systemLarge` on a 393pt-wide iPhone (338x354, out of which 354
+  // minus this widget's own chrome leaves ~295). The 364x382 the Figma frame
+  // was drawn against is the 428pt-wide class, i.e. the roomy case, so
+  // sizing to the tight one is the safe direction. Worth replacing with a
+  // real measurement if expo-widgets ever exposes one.
   const START_HOUR = 8;
   const END_HOUR = 20;
-  const HOUR_HEIGHT = 40;
+  /** Root padding (20 + 16), the VStack's spacing, and the weekday header. */
+  const CHROME_HEIGHT = 20 + 16 + 8 + 15;
+  const IOS_GRID_HEIGHT_BUDGET = 295;
+  const environmentHeight = (environment as { height?: number }).height;
+  const gridHeightBudget =
+    typeof environmentHeight === 'number' && environmentHeight > 0
+      ? environmentHeight - CHROME_HEIGHT
+      : IOS_GRID_HEIGHT_BUDGET;
+  // Floored so the rows always fit inside the budget rather than overflowing
+  // it by a fraction, and clamped so a very short widget degrades into
+  // something still legible instead of hairline rows.
+  const HOUR_HEIGHT = Math.max(18, Math.floor(gridHeightBudget / (END_HOUR - START_HOUR)));
   const TIME_AXIS_WIDTH = 20;
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i);
   const totalGridHeight = hours.length * HOUR_HEIGHT;
@@ -148,8 +174,19 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
   const hourGrid = () => (
     <VStack spacing={0} modifiers={[frame({ maxWidth: Infinity })]}>
       {hours.map((hour) => (
-        <VStack key={hour} spacing={0} modifiers={[frame({ maxWidth: Infinity, height: HOUR_HEIGHT })]}>
-          <Rectangle modifiers={[frame({ maxWidth: Infinity, height: 1 }), background(colors.gridLine)]} />
+        <VStack
+          key={hour}
+          spacing={0}
+          modifiers={[frame({ maxWidth: Infinity, height: HOUR_HEIGHT, alignment: 'top' })]}
+        >
+          {/* `foregroundStyle`, not `background` — a bare SwiftUI
+              `Rectangle()` (which is all @expo/ui's RectangleView is) fills
+              itself with the *foreground* style, defaulting to black, and a
+              `background` paints uselessly behind something already opaque.
+              That is why these lines rendered black on iOS. Android gets the
+              same result: expo-widgets-glance routes `foregroundStyle` to a
+              shape node's fill (see its `shapeFill`). */}
+          <Rectangle modifiers={[frame({ maxWidth: Infinity, height: 1 }), foregroundStyle(colors.gridLine)]} />
         </VStack>
       ))}
     </VStack>
@@ -161,7 +198,10 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
   // final one. Same `Rectangle`-not-`Divider` reasoning as `hourGrid` above,
   // just the other axis.
   const verticalLine = (key: string) => (
-    <Rectangle key={key} modifiers={[frame({ width: 1, height: totalGridHeight }), background(colors.gridLine)]} />
+    <Rectangle
+      key={key}
+      modifiers={[frame({ width: 1, height: totalGridHeight }), foregroundStyle(colors.gridLine)]}
+    />
   );
 
   // A day's classes, laid out as alternating gap-`Spacer`s and blocks
@@ -170,6 +210,19 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
   // class starting before `START_HOUR` or a gap would go negative; both are
   // clamped to 0 rather than thrown, since a bad sample/fetch shouldn't
   // crash the whole grid over one row.
+  //
+  // Deliberately does NOT wrap its own `hourGrid()` in a per-day `ZStack`
+  // the way an earlier version of this file did — that meant 5 `ZStack`s
+  // (one per weekday) each drawing their own full 12-row background, ~60
+  // `Rectangle`s total for one grid. On-device that combination (multiple
+  // `ZStack`s side by side in the outer `HStack`, each `frame(maxWidth:
+  // Infinity)`) rendered as an empty widget — no weekday columns, no grid,
+  // nothing but the time axis — while the exact same structure with only
+  // 1–2 day columns rendered fine. Whatever the ceiling is exactly, the fix
+  // isn't chasing it: draw the hour grid ONCE behind every day column (see
+  // the single `ZStack` in the `'normal'` case below) instead of once per
+  // column, which is both far lighter and the more obviously correct
+  // structure regardless — one grid, not five overlapping copies of it.
   const dayColumn = (blocks: ClassBlock[], dayIndex: number) => {
     const sorted = [...blocks].sort((a, b) => a.startMinutes - b.startMinutes);
     let cursorMinutes = 0;
@@ -193,10 +246,33 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
             cornerRadius(4),
           ]}
         >
-          <Text modifiers={[font({ size: 11, weight: 'bold' }), foregroundStyle(colors.blockText)]}>
+          {/* `multilineTextAlignment('leading')` on top of the VStack's own
+              `alignment="leading"` — the VStack alignment only places each
+              Text's block within the column; once a name wraps to 2–3
+              lines, SwiftUI centers those wrapped lines against each other
+              by default, which read as centered text even with the block
+              itself pinned left. `frame({maxWidth: Infinity, alignment:
+              'leading'})` additionally stops each Text from just hugging
+              its own (narrower, wrapped) intrinsic width — without it the
+              multiline alignment has no extra width to align *within*. */}
+          <Text
+            modifiers={[
+              font({ size: 11, weight: 'bold' }),
+              foregroundStyle(colors.blockText),
+              multilineTextAlignment('leading'),
+              frame({ maxWidth: Infinity, alignment: 'leading' }),
+            ]}
+          >
             {item.className}
           </Text>
-          <Text modifiers={[font({ size: 10, weight: 'medium' }), foregroundStyle(colors.blockText)]}>
+          <Text
+            modifiers={[
+              font({ size: 10, weight: 'medium' }),
+              foregroundStyle(colors.blockText),
+              multilineTextAlignment('leading'),
+              frame({ maxWidth: Infinity, alignment: 'leading' }),
+            ]}
+          >
             {item.room}
           </Text>
         </VStack>
@@ -204,12 +280,9 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
       cursorMinutes = startMinutes + item.durationMinutes;
     }
     return (
-      <ZStack key={dayIndex} alignment="top" modifiers={[frame({ maxWidth: Infinity, height: totalGridHeight })]}>
-        {hourGrid()}
-        <VStack spacing={0} modifiers={[frame({ maxWidth: Infinity })]}>
-          {children}
-        </VStack>
-      </ZStack>
+      <VStack key={dayIndex} spacing={0} modifiers={[frame({ maxWidth: Infinity })]}>
+        {children}
+      </VStack>
     );
   };
 
@@ -220,26 +293,68 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
         <>
           <HStack spacing={0} alignment="center" modifiers={[frame({ maxWidth: Infinity })]}>
             {/* Invisible spacer matching the time-axis column's width below,
-                so the weekday headers line up with their grid columns. */}
-            <Rectangle modifiers={[frame({ width: TIME_AXIS_WIDTH, height: 1 })]} />
-            {WEEKDAY_LABELS.map((label, index) => (
-              <Text
-                key={label}
-                modifiers={[
-                  font({ size: 12, weight: 'medium' }),
-                  foregroundStyle(index === props.todayIndex ? colors.textBrand : colors.textTertiary),
-                  frame({ maxWidth: Infinity, alignment: 'center' }),
-                ]}
-              >
-                {label}
-              </Text>
-            ))}
+                so the weekday headers line up with their grid columns.
+                Height 0, not 1: with no `foregroundStyle` a `Rectangle` fills
+                itself black on iOS (see `hourGrid`), so a 1pt one drew a
+                visible black dash here. A zero-height rect still reserves its
+                width in the row while painting nothing on either platform.
+                A `Spacer` is not an option — expo-widgets-glance renders any
+                `SpacerView` inside a Row as `defaultWeight()`, ignoring the
+                fixed width this needs. */}
+            <Rectangle modifiers={[frame({ width: TIME_AXIS_WIDTH, height: 0 })]} />
+            {/* Wrapped, not inline next to the spacer above: a `.map()`
+                sitting among siblings serializes to a nested array, which
+                `ios/Widgets/DynamicView.swift`'s `updateChildren` drops
+                silently (it casts each child with `as? [String: Any]` and
+                never flattens) — the whole weekday header would render as
+                just the invisible spacer. See the longer note in
+                CafeteriaMenuWidget.tsx, where this bug was actually caught.
+                As this HStack's only child the array casts fine, and the
+                fill-width frame keeps the five labels dividing the row's
+                remaining width evenly the way they did as direct children. */}
+            <HStack spacing={0} alignment="center" modifiers={[frame({ maxWidth: Infinity })]}>
+              {WEEKDAY_LABELS.map((label, index) => (
+                <Text
+                  key={label}
+                  modifiers={[
+                    font({ size: 12, weight: 'medium' }),
+                    foregroundStyle(index === props.todayIndex ? colors.textBrand : colors.textTertiary),
+                    frame({ maxWidth: Infinity, alignment: 'center' }),
+                  ]}
+                >
+                  {label}
+                </Text>
+              ))}
+            </HStack>
           </HStack>
           <HStack spacing={0} alignment="top" modifiers={[frame({ maxWidth: Infinity })]}>
             <VStack spacing={0} modifiers={[frame({ width: TIME_AXIS_WIDTH })]}>
               {hours.map((hour) => (
-                <VStack key={hour} spacing={0} modifiers={[frame({ height: HOUR_HEIGHT })]}>
-                  <Text modifiers={[font({ size: 9 }), foregroundStyle(colors.textTertiary)]}>{hour}</Text>
+                <VStack
+                  key={hour}
+                  spacing={0}
+                  modifiers={[frame({ height: HOUR_HEIGHT, alignment: 'top' })]}
+                >
+                  {/* `alignment: 'top'` pins the label to the row's top edge —
+                      matching the grid line (`hourGrid`) and every class
+                      block's `minutesToHeight`-based Spacer, both of which
+                      measure from that same top edge, not the row's
+                      vertical center. Without this, an on-the-hour class
+                      visibly starts *above* the hour it's labeled with (the
+                      label was floating at its row's midpoint — the
+                      half-hour mark — while the block itself landed exactly
+                      on the hour). The `offset` nudges the glyph itself back
+                      up by roughly half a line so it still reads as
+                      centered *on* the line rather than hanging below it. */}
+                  <Text
+                    modifiers={[
+                      font({ size: 9 }),
+                      foregroundStyle(colors.textTertiary),
+                      offset({ y: -5 }),
+                    ]}
+                  >
+                    {hour}
+                  </Text>
                 </VStack>
               ))}
             </VStack>
@@ -247,18 +362,25 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
                 the last — matching inu-portal-web's grid exactly (see
                 `verticalLine`'s doc comment). */}
             {verticalLine('v-axis')}
-            {props.classesByDay.flatMap((blocks, dayIndex) =>
-              dayIndex < props.classesByDay.length - 1
-                ? [dayColumn(blocks, dayIndex), verticalLine(`v-${dayIndex}`)]
-                : [dayColumn(blocks, dayIndex)]
-            )}
+            {/* One shared hour grid behind every day column, not one per
+                column — see `dayColumn`'s doc comment for why. */}
+            <ZStack alignment="top" modifiers={[frame({ maxWidth: Infinity, height: totalGridHeight })]}>
+              {hourGrid()}
+              <HStack spacing={0} alignment="top" modifiers={[frame({ maxWidth: Infinity })]}>
+                {props.classesByDay.flatMap((blocks, dayIndex) =>
+                  dayIndex < props.classesByDay.length - 1
+                    ? [dayColumn(blocks, dayIndex), verticalLine(`v-${dayIndex}`)]
+                    : [dayColumn(blocks, dayIndex)]
+                )}
+              </HStack>
+            </ZStack>
           </HStack>
         </>
       );
       break;
     case 'dayOff':
       content = (
-        <VStack alignment="leading" spacing={4} modifiers={[frame({ maxHeight: Infinity })]}>
+        <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' })]}>
           <Text modifiers={[font({ size: 20, weight: 'semibold' }), foregroundStyle(colors.textPrimary)]}>
             오늘은 공강이에요
           </Text>
@@ -270,7 +392,7 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
       break;
     case 'noTimetable':
       content = (
-        <VStack alignment="leading" spacing={4} modifiers={[frame({ maxHeight: Infinity })]}>
+        <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' })]}>
           <Text modifiers={[font({ size: 20, weight: 'semibold' }), foregroundStyle(colors.textPrimary)]}>
             시간표를 만들어 보세요
           </Text>
@@ -286,7 +408,9 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
       modifiers={[
         padding({ top: 20, bottom: 16, leading: 16, trailing: 16 }),
         containerBackground(colors.cardBg, 'widget'),
-        frame({ maxHeight: Infinity }),
+        // See NextClassWidget.tsx's identical modifier for why both axes
+        // and `topLeading` are needed here.
+        frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' }),
         // Tapping anywhere on the widget opens the app.
         widgetURL('intipmobileapp://'),
       ]}

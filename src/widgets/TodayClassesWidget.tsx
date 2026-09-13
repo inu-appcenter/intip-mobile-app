@@ -102,35 +102,40 @@ const TodayClassesWidget = (props: TodayClassesWidgetProps, environment: WidgetE
     </Text>
   );
 
-  // Android/Glance note — a real, confirmed platform constraint, not an
-  // implementation gap: there's no way on this renderer for the accent bar
-  // to *fill* the row's actual height and only that. Two approaches were
-  // tried and both failed the same way for the same underlying reason —
-  // Glance's AppWidget/RemoteViews translation doesn't do free-form,
-  // deferred measurement (unlike real Compose UI); it picks from a fixed
-  // set of pre-built layout templates, and asking any descendant to
-  // `fillMaxHeight()` reliably makes that request bubble up and inflate
-  // *every* ancestor container along with it, all the way to the row's own
-  // slot in the outer schedule list:
-  //   1. Bar as a plain HStack sibling with `frame({maxHeight: Infinity})`
-  //      — the row itself ballooned to swallow all the vertical space in
-  //      its parent VStack, hiding the two rows after it.
-  //   2. Bar and content both inside a ZStack/Box instead (Box normally
-  //      sizes itself to its largest child and lets others independently
-  //      fill to match — the standard FrameLayout pattern) — same result,
-  //      confirmed on a real render: RemoteViews doesn't get that
-  //      indirection either.
-  // ROW_HEIGHT_DP below is the fallback: a fixed height, measured off an
-  // actual render of this row (padding 4/4 + a 16sp semibold line ≈ 31dp),
-  // not a computed one. It'll drift if the row's font size/padding ever
-  // changes — there's no live alternative to keep it honest short of a
-  // native measurement pass this renderer doesn't have.
-  const ROW_HEIGHT_DP = 31;
+  // Row geometry, taken straight off the Figma frame (Widgets/오늘 수업/정상,
+  // node 5322:21486) rather than measured off a render: each "Class
+  // Information" row is 30 tall — a 22-tall content box plus 4/4 vertical
+  // padding — and the content box starts 8 in from the row's own left edge.
+  //
+  // Both numbers are pinned explicitly below instead of being left to
+  // intrinsic text measurement, for one Android/Glance reason: the accent
+  // bar can't be asked to fill the row's height there. That's a real,
+  // confirmed constraint, not an implementation gap — Glance's
+  // AppWidget/RemoteViews translation doesn't do free-form deferred
+  // measurement (unlike real Compose UI); it picks from a fixed set of
+  // pre-built layout templates, so `fillMaxHeight()` on any descendant
+  // bubbles up and inflates *every* ancestor container with it. Two ways
+  // were tried and failed identically: the bar as a sibling with
+  // `frame({maxHeight: Infinity})` (the row swallowed the whole parent
+  // VStack, hiding the rows after it), and bar + content inside a
+  // ZStack/Box (RemoteViews doesn't get that indirection either).
+  //
+  // So the bar needs a literal height, and the only way that height stays
+  // honest is if the content next to it has one too — hence CONTENT_HEIGHT
+  // on the inner row. Earlier this was a single measured-off-a-render
+  // constant (31) with the content left to size itself, which drifted: on
+  // iOS the real row came out ~28 and the bar visibly overhung the tint
+  // band above and below.
+  const CONTENT_HEIGHT = 22;
+  const ROW_HEIGHT = CONTENT_HEIGHT + 4 + 4;
+  const CONTENT_INSET = 8;
+  /** The accent bar is inside the row's 8 inset, not in front of it. */
+  const BAR_WIDTH = 2;
 
   const row = (item: ScheduleRow, key: number) => (
     // Two nesting tiers: the OUTER row is the row's true edge — unpadded,
     // so the accent bar sits flush against it (border-box), while the INNER
-    // row owns the 8/4 padding around the actual content (content-box).
+    // row owns the padding around the actual content (content-box).
     <HStack
       key={key}
       spacing={0}
@@ -143,12 +148,34 @@ const TodayClassesWidget = (props: TodayClassesWidgetProps, environment: WidgetE
       ]}
     >
       {item.highlighted && (
-        <Rectangle modifiers={[frame({ width: 2, height: ROW_HEIGHT_DP }), background(colors.textBrand)]} />
+        // `foregroundStyle`, NOT `background`: `Rectangle` renders as a bare
+        // SwiftUI `Rectangle()` (see @expo/ui's RectangleView.swift), which
+        // fills itself with the current *foreground* style — black by
+        // default. A `background` paints behind a shape that is already
+        // opaque black, so the bar rendered black on device no matter what
+        // color was passed. Glance draws the same node from its fill color,
+        // so this reads correctly on both.
+        <Rectangle
+          modifiers={[frame({ width: BAR_WIDTH, height: ROW_HEIGHT }), foregroundStyle(colors.textBrand)]}
+        />
       )}
       <HStack
         spacing={4}
         alignment="center"
-        modifiers={[frame({ maxWidth: Infinity }), padding({ horizontal: 8, vertical: 4 })]}
+        modifiers={[
+          frame({ maxWidth: Infinity, height: CONTENT_HEIGHT }),
+          // The bar overlays the inset in Figma — every row's content starts
+          // the same 8 in from the row edge whether or not it's highlighted.
+          // The bar is a layout sibling here (see the ZStack note above), so
+          // its width comes out of the leading inset instead of pushing the
+          // content across, which is what made the highlighted row sit 2 to
+          // the right of the others on device.
+          padding({
+            leading: CONTENT_INSET - (item.highlighted ? BAR_WIDTH : 0),
+            trailing: CONTENT_INSET,
+            vertical: 4,
+          }),
+        ]}
       >
         {/* Glance/Android note: this inner row needs its own width for the
             same reason the outer one does — the nested time/name row below
@@ -160,7 +187,10 @@ const TodayClassesWidget = (props: TodayClassesWidgetProps, environment: WidgetE
             modifiers={[
               font({ size: 12, weight: 'medium' }),
               foregroundStyle(item.highlighted ? colors.textBrand : colors.textTertiary),
-              frame({ width: 76 }),
+              // Figma's Time box is a fixed 76 with the label left-aligned
+              // in it; `frame`'s default `.center` squeezed the gap before
+              // the class name shut ("09:00~10:15자료구조" on device).
+              frame({ width: 76, alignment: 'leading' }),
             ]}
           >
             {item.timeRange}
@@ -244,7 +274,9 @@ const TodayClassesWidget = (props: TodayClassesWidgetProps, environment: WidgetE
       modifiers={[
         padding({ top: 20, bottom: 16, leading: 16, trailing: 16 }),
         containerBackground(colors.cardBg, 'widget'),
-        frame({ maxHeight: Infinity }),
+        // See NextClassWidget.tsx's identical modifier for why both axes
+        // and `topLeading` are needed here.
+        frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' }),
         // Tapping anywhere on the widget opens the app.
         widgetURL('intipmobileapp://'),
       ]}
