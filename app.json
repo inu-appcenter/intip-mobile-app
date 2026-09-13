@@ -124,6 +124,7 @@
         }
       ],
       "expo-secure-store",
+      "./plugins/withWidgetAssets",
       [
         "expo-widgets",
         {
