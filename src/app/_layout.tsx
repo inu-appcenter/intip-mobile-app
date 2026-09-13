@@ -15,13 +15,7 @@ import {
 } from "../push/messaging";
 import { backgroundColorFor } from "../theme";
 import { WebViewProvider } from "../webview/WebViewContext";
-import {
-  refreshBusArrivalWidget,
-  refreshCafeteriaMenuWidget,
-  refreshNextClassWidget,
-  refreshTimetableWidget,
-  refreshTodayClassesWidget,
-} from "../widgets/refresh";
+import { refreshAllWidgets } from "../widgets/refresh";
 
 // Background FCM/notifee handlers must be registered before React renders so
 // they survive a background/quit launch.
@@ -47,19 +41,23 @@ export default function RootLayout() {
     void requestNotificationPermission();
     // Check for OTA updates (non-blocking; shows a prompt if one is available).
     void checkForUpdate();
-    // Seed every designed widget with its sample snapshot so each has
-    // *something* to render as soon as it's added to a home screen. Real
-    // data isn't wired up for any of them yet (see refresh.ts) — this is
-    // only enough to confirm each widget builds and renders end to end.
+    // Fetch each widget's data and push it. Fire-and-forget on purpose: the
+    // widgets already have whatever they were last given, so nothing here
+    // blocks the first render, and every failure inside is handled per-widget
+    // (see refresh.ts).
+    //
+    // App launch is only one of the moments this should run — a session
+    // arriving from the web login is the other, and neither covers a device
+    // that has been idle all morning. iOS partly answers that on its own: the
+    // schedule and cafeteria widgets are handed future-dated timeline entries
+    // here and walk through the rest of the day without the app. Android's
+    // answer is the refresh hook in expo-widgets-glance.
+    //
     // NOTE (iOS): the expo-widgets plugin is on in app.json, but the App
-    // Group / provisioning profile wiring iOS widgets need for shared
-    // storage hasn't been set up — this seeding call is expected to no-op
-    // on a real iOS build until that's done.
-    refreshNextClassWidget();
-    refreshTodayClassesWidget();
-    refreshBusArrivalWidget();
-    refreshCafeteriaMenuWidget();
-    refreshTimetableWidget();
+    // Group / provisioning profile wiring iOS widgets need for shared storage
+    // hasn't been set up — these calls are expected to no-op on a real iOS
+    // build until that's done.
+    void refreshAllWidgets();
   }, []);
 
   return (

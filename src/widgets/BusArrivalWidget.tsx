@@ -16,11 +16,12 @@ type BusArrival = {
   route: string;
   /**
    * The estimate as of `observedLabel`, already formatted ("4분 19초",
-   * "곧 도착"). Android renders this; iOS only falls back to it.
+   * "곧 도착").
    *
-   * On Android this number does not tick down — Glance has no self-updating
-   * text, so it is only as fresh as the last refresh, which is why the
-   * "기준" line under it is not optional.
+   * Currently rendered by neither platform: both draw the live countdown from
+   * `arrivesAt` instead (see below). It stays in the snapshot as the
+   * pre-formatted fallback for a surface that cannot tick — a notification,
+   * say — and because `formatEta` is where "곧 도착" is decided.
    */
   eta: string;
   /** The design's one emphasized case ("곧 도착") gets the brand color instead of tertiary. */
@@ -38,7 +39,12 @@ type BusArrival = {
    * a `Date` would arrive as a string (same reason `TestWidget` does this).
    */
   arrivesAt: number;
-  /** How old the reading is ("2분 전 기준"), for the honesty line below. */
+  /**
+   * When the reading was taken, as a wall clock time ("18:31 기준"), for the
+   * honesty line below. Absolute, not relative — a snapshot that says "방금
+   * 기준" keeps saying it for as long as the snapshot lives. See
+   * `data/busArrival.ts`.
+   */
   observedLabel: string;
 };
 
@@ -58,9 +64,9 @@ export const DEFAULT_PROPS: BusArrivalWidgetProps = {
   status: "normal",
   exitLabel: "2번 출구",
   arrivals: [
-    { route: "6-1", eta: "곧 도착", soon: true, arrivesAt: Date.now() + 30_000, observedLabel: "방금 기준" },
-    { route: "8", eta: "4분 19초", arrivesAt: Date.now() + 259_000, observedLabel: "방금 기준" },
-    { route: "순환41", eta: "16분 41초", arrivesAt: Date.now() + 1_001_000, observedLabel: "방금 기준" },
+    { route: "6-1", eta: "곧 도착", soon: true, arrivesAt: Date.now() + 30_000, observedLabel: "12:34 기준" },
+    { route: "8", eta: "4분 19초", arrivesAt: Date.now() + 259_000, observedLabel: "12:34 기준" },
+    { route: "순환41", eta: "16분 41초", arrivesAt: Date.now() + 1_001_000, observedLabel: "12:34 기준" },
   ],
 };
 

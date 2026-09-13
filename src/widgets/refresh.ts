@@ -1,124 +1,198 @@
-import { Platform } from "react-native";
+/**
+ * Fetches the home screen widgets' data and pushes it to them.
+ *
+ * Widgets render from a snapshot, not from the network — see
+ * `data/apiClient.ts` for why the fetching lives in the app process — so this
+ * is the seam between the two. Everything here is safe to call at any time and
+ * never throws: a refresh that fails leaves whatever the widget already had on
+ * screen, which is always better than an error state the user can't act on.
+ *
+ * ## Why iOS gets timelines and Android gets snapshots
+ *
+ * The two platforms give a widget its future in opposite ways.
+ *
+ * WidgetKit takes a *timeline*: a list of future-dated entries it walks
+ * through on its own clock, with no app process and no network. Almost
+ * everything these widgets show is knowable in advance — a day's classes don't
+ * move, meal windows are fixed — so iOS is handed the whole day at once and
+ * needs one fetch per day rather than repeated polling. `WidgetTimelineEntry`
+ * is what makes that possible, and it is the difference between a widget that
+ * is correct at 3pm and one that is still showing 9am.
+ *
+ * Glance has no equivalent: a widget shows what the store last held, and the
+ * only way to change it is to write again. So Android gets the current
+ * snapshot, and the rest of its day is covered by the refresh hook in
+ * expo-widgets-glance, which re-runs this data path when the launcher asks the
+ * widget to update. Those are genuinely different mechanisms, and pretending
+ * otherwise here would just move the difference somewhere harder to see.
+ */
+import { Platform } from 'react-native';
 
-import { updateGlanceSnapshot } from "expo-widgets-glance";
+import { updateGlanceSnapshot } from 'expo-widgets-glance';
 
-import BusArrivalWidget, {
-  DEFAULT_PROPS as BUS_ARRIVAL_DEFAULT_PROPS,
-} from "./BusArrivalWidget";
-import CafeteriaMenuWidget, {
-  DEFAULT_PROPS as CAFETERIA_MENU_DEFAULT_PROPS,
-} from "./CafeteriaMenuWidget";
-import NextClassWidget, { DEFAULT_PROPS as NEXT_CLASS_DEFAULT_PROPS } from "./NextClassWidget";
-import TestWidget from "./TestWidget";
-import TimetableWidget, { DEFAULT_PROPS as TIMETABLE_DEFAULT_PROPS } from "./TimetableWidget";
-import TodayClassesWidget, {
-  DEFAULT_PROPS as TODAY_CLASSES_DEFAULT_PROPS,
-} from "./TodayClassesWidget";
+import BusArrivalWidget from './BusArrivalWidget';
+import CafeteriaMenuWidget from './CafeteriaMenuWidget';
+import NextClassWidget from './NextClassWidget';
+import TestWidget from './TestWidget';
+import TimetableWidget from './TimetableWidget';
+import TodayClassesWidget from './TodayClassesWidget';
+import {
+  DEFAULT_CAFETERIA,
+  fetchCafeteriaMenu,
+  mealBoundariesOf,
+  toCafeteriaMenuProps,
+} from './data/cafeteria';
+import { fetchBusArrivals, fetchDefaultStop, toBusArrivalProps } from './data/busArrival';
+import { hasSession } from './data/apiClient';
+import {
+  classBoundariesOf,
+  fetchClassMeetings,
+  toNextClassProps,
+  toTimetableProps,
+  toTodayClassesProps,
+  type ClassMeeting,
+} from './data/timetable';
 
 /**
- * Pushes a snapshot into the home screen widget.
+ * A widget that exists on both platforms, reduced to the two calls that differ.
  *
- * A widget renders whatever the last timeline entry held; with no entry it sits
- * on the placeholder the system draws at install time. `updateSnapshot` writes a
- * single entry dated now, which is all the countdown needs — the timer text
- * ticks on the WidgetKit side from there.
- *
- * expo-widgets is iOS-only. The Android build resolves to a no-op stub rather
- * than throwing, so the guard is about not doing pointless work, not safety.
- * (TestWidget itself has no Android counterpart — it's an iOS-only test bed,
- * not one of the two designed widgets — so there's no `updateGlanceSnapshot`
- * call to add here.)
+ * `updateTimeline` is iOS-only (`expo-widgets`' `Widget`); `updateGlanceSnapshot`
+ * is the Android counterpart and takes a single set of props.
  */
-export function refreshTestWidget() {
-  if (Platform.OS !== "ios") {
+type Pushable<P extends Record<string, unknown>> = {
+  name: string;
+  ios: { updateTimeline: (entries: { date: Date; props: P }[]) => void };
+};
+
+/**
+ * Pushes one widget's data.
+ *
+ * `at(now)` is called once per boundary rather than being passed a prebuilt
+ * list, so the caller describes *how* to render a moment and this decides
+ * which moments matter. On Android only the first is used — see the module
+ * doc.
+ *
+ * A boundary already in the past would make WidgetKit show a stale entry as
+ * "current", so the list always starts at `now` and only ever moves forward.
+ */
+function push<P extends Record<string, unknown>>(
+  widget: Pushable<P>,
+  boundaries: Date[],
+  at: (moment: Date) => P,
+  now: Date,
+): void {
+  if (Platform.OS === 'ios') {
+    const moments = [now, ...boundaries.filter((b) => b.getTime() > now.getTime())];
+    widget.ios.updateTimeline(moments.map((date) => ({ date, props: at(date) })));
+  } else if (Platform.OS === 'android') {
+    updateGlanceSnapshot(widget.name, at(now));
+  }
+}
+
+/**
+ * Refreshes the three timetable-backed widgets from one fetch.
+ *
+ * All three read the same primary timetable, so fetching once and transforming
+ * three ways is both cheaper and the only way they can't disagree with each
+ * other about what the next class is.
+ *
+ * Being logged out is a state worth showing — the widgets have their own
+ * `loggedOut` for it, and a shared device shouldn't keep a previous account's
+ * classes on screen. A failed *request* is not: `getJson` returns null for a
+ * timeout, a 401 and a missing session alike (see `data/apiClient.ts`), so the
+ * session is checked separately rather than inferred from an empty result.
+ * Without that split, one flaky request or one expired token replaces a
+ * perfectly good timetable with "로그인이 필요해요" — observed happening on a
+ * device that was, in fact, logged in.
+ */
+export async function refreshScheduleWidgets(now: Date = new Date()): Promise<void> {
+  if (!(await hasSession())) {
+    push(NEXT_CLASS, [], () => ({ status: 'loggedOut' as const }), now);
+    push(TODAY_CLASSES, [], () => ({ status: 'noTimetable' as const, dateLabel: '' }), now);
+    push(TIMETABLE, [], () => ({ status: 'noTimetable' as const }), now);
     return;
   }
 
+  const meetings = await fetchClassMeetings();
+  if (meetings === null) return; // Request failure: keep the last good snapshot.
+
+  const boundaries = classBoundariesOf(meetings, now);
+  push(NEXT_CLASS, boundaries, (at) => toNextClassProps(meetings, at), now);
+  push(TODAY_CLASSES, boundaries, (at) => toTodayClassesProps(meetings, at), now);
+  // The week grid itself doesn't change during the day — only which column is
+  // "today" does — so it gets no boundaries.
+  push(TIMETABLE, [], (at) => toTimetableProps(meetings, at), now);
+}
+
+/** Refreshes the 인입런 widget. See `data/busArrival.ts` on why this is not live. */
+export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<void> {
+  const stop = await fetchDefaultStop();
+  if (!stop) {
+    push(BUS_ARRIVAL, [], () => ({ status: 'noData' as const }), now);
+    return;
+  }
+
+  const arrivals = await fetchBusArrivals(stop.bstopId);
+  if (arrivals === null) return; // Network failure: keep the last good snapshot.
+
+  // No boundaries: the countdown is rendered from `arrivesAt` by the widget
+  // itself (a self-updating timer on iOS), so there is no future moment whose
+  // *props* differ — only the clock moves.
+  push(BUS_ARRIVAL, [], () => toBusArrivalProps(arrivals, stop.stopName, now), now);
+}
+
+/** Refreshes the 학식 메뉴 widget, including today's remaining meal switches. */
+export async function refreshCafeteriaMenuWidget(now: Date = new Date()): Promise<void> {
+  const menu = await fetchCafeteriaMenu(DEFAULT_CAFETERIA, now);
+  if (menu === null) return; // Network failure: keep the last good snapshot.
+
+  push(
+    CAFETERIA_MENU,
+    mealBoundariesOf(now),
+    (at) => toCafeteriaMenuProps(menu, DEFAULT_CAFETERIA, at),
+    now,
+  );
+}
+
+/**
+ * Refreshes every widget.
+ *
+ * Run on app foreground and after a login syncs a session. Failures are
+ * per-widget and independent — `allSettled`, not `all`, so a bus API outage
+ * doesn't also cost the user their timetable.
+ */
+export async function refreshAllWidgets(now: Date = new Date()): Promise<void> {
+  await Promise.allSettled([
+    refreshScheduleWidgets(now),
+    refreshBusArrivalWidget(now),
+    refreshCafeteriaMenuWidget(now),
+  ]);
+}
+
+/**
+ * Pushes a snapshot into the test countdown widget.
+ *
+ * iOS-only: `TestWidget` is a test bed with no Android counterpart, not one of
+ * the designed widgets, so there is no `updateGlanceSnapshot` call to pair here.
+ */
+export function refreshTestWidget(): void {
+  if (Platform.OS !== 'ios') return;
+
   const now = Date.now();
   TestWidget.updateSnapshot({
-    label: "테스트 카운트다운",
+    label: '테스트 카운트다운',
     targetAt: now + 60 * 60 * 1000,
     updatedAt: now,
   });
 }
 
-/**
- * Pushes a snapshot into the "다음 수업" home screen widget (both platforms —
- * `updateSnapshot` for iOS, `updateGlanceSnapshot` for Android, see
- * `expo-widgets-glance`'s README).
- *
- * Real timetable data isn't wired up yet, so this always pushes the same
- * `DEFAULT_PROPS` ("수업 전") snapshot — enough to confirm the widget builds
- * and renders, not a working feature. Replace the argument with whatever the
- * timetable fetch resolves to (see `NextClassWidgetProps` for the other
- * states it should be able to render) once that lands.
- */
-export function refreshNextClassWidget() {
-  if (Platform.OS === "ios") {
-    NextClassWidget.updateSnapshot(NEXT_CLASS_DEFAULT_PROPS);
-  } else if (Platform.OS === "android") {
-    updateGlanceSnapshot("NextClassWidget", NEXT_CLASS_DEFAULT_PROPS);
-  }
-}
+// Declared after the functions purely so the exported API reads first; these
+// exist to give `push` one object per widget instead of branching on name.
+const NEXT_CLASS = { name: 'NextClassWidget', ios: NextClassWidget };
+const TODAY_CLASSES = { name: 'TodayClassesWidget', ios: TodayClassesWidget };
+const TIMETABLE = { name: 'TimetableWidget', ios: TimetableWidget };
+const BUS_ARRIVAL = { name: 'BusArrivalWidget', ios: BusArrivalWidget };
+const CAFETERIA_MENU = { name: 'CafeteriaMenuWidget', ios: CafeteriaMenuWidget };
 
-/**
- * Pushes a snapshot into the "오늘 수업" (today's classes) home screen widget
- * (both platforms — see `refreshNextClassWidget` above).
- *
- * Same caveat as `refreshNextClassWidget`: no real timetable fetch yet, so
- * this always pushes the sample "정상" snapshot from `DEFAULT_PROPS`.
- */
-export function refreshTodayClassesWidget() {
-  if (Platform.OS === "ios") {
-    TodayClassesWidget.updateSnapshot(TODAY_CLASSES_DEFAULT_PROPS);
-  } else if (Platform.OS === "android") {
-    updateGlanceSnapshot("TodayClassesWidget", TODAY_CLASSES_DEFAULT_PROPS);
-  }
-}
-
-/**
- * Pushes a snapshot into the "인입런" (bus arrival) home screen widget (both
- * platforms — see `refreshNextClassWidget` above).
- *
- * Same caveat as the others: no real bus-arrival fetch wired up yet, so
- * this always pushes the sample snapshot from `DEFAULT_PROPS`.
- */
-export function refreshBusArrivalWidget() {
-  if (Platform.OS === "ios") {
-    BusArrivalWidget.updateSnapshot(BUS_ARRIVAL_DEFAULT_PROPS);
-  } else if (Platform.OS === "android") {
-    updateGlanceSnapshot("BusArrivalWidget", BUS_ARRIVAL_DEFAULT_PROPS);
-  }
-}
-
-/**
- * Pushes a snapshot into the "학식 메뉴" (cafeteria menu) home screen widget
- * (both platforms — see `refreshNextClassWidget` above).
- *
- * Same caveat as the others: no real cafeteria-menu fetch wired up yet, so
- * this always pushes the sample snapshot from `DEFAULT_PROPS`.
- */
-export function refreshCafeteriaMenuWidget() {
-  if (Platform.OS === "ios") {
-    CafeteriaMenuWidget.updateSnapshot(CAFETERIA_MENU_DEFAULT_PROPS);
-  } else if (Platform.OS === "android") {
-    updateGlanceSnapshot("CafeteriaMenuWidget", CAFETERIA_MENU_DEFAULT_PROPS);
-  }
-}
-
-/**
- * Pushes a snapshot into the "시간표" (timetable) home screen widget (both
- * platforms — see `refreshNextClassWidget` above).
- *
- * Same caveat as the others: no real timetable fetch wired up yet, so this
- * always pushes the sample snapshot from `DEFAULT_PROPS`. See
- * `TimetableWidget.tsx`'s module doc comment for why this widget is a
- * simplified single-day list rather than the Figma frame's full week grid.
- */
-export function refreshTimetableWidget() {
-  if (Platform.OS === "ios") {
-    TimetableWidget.updateSnapshot(TIMETABLE_DEFAULT_PROPS);
-  } else if (Platform.OS === "android") {
-    updateGlanceSnapshot("TimetableWidget", TIMETABLE_DEFAULT_PROPS);
-  }
-}
+/** Re-exported for callers that only want the shape, e.g. tests. */
+export type { ClassMeeting };
