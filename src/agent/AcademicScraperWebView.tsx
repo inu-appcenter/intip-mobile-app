@@ -7,6 +7,21 @@ const PORTAL_LOGIN_URL = 'https://portal.inu.ac.kr:444/enview/user/login.face';
 const ERP_SSO_URL = 'http://erp.inu.ac.kr:8881/com/SsoCtr/initPageWork.do?loginGbn=sso';
 const SCRAPE_TIMEOUT_MS = 35000;
 const MIN_SCRAPER_VIEW_SIZE = 1;
+const SESSION_CAPTURE = `
+  (function() {
+    window.__erpMetadata = {};
+    var send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function(body) {
+      if (typeof body === 'string' && body.indexOf('WMONID=') >= 0) {
+        body.split('Dataset:')[0].split(String.fromCharCode(30)).forEach(function(part) {
+          var i = part.indexOf('=');
+          if (i > 0) window.__erpMetadata[part.slice(0,i)] = part.slice(i+1);
+        });
+      }
+      return send.apply(this, arguments);
+    };
+  })(); true;
+`;
 
 type ScrapeResolver = {
   resolve: (data: string) => void;
@@ -127,7 +142,12 @@ export const AcademicScraperWebView: React.FC = () => {
       const msg = JSON.parse(raw);
       console.log('[AcademicScraper] Received message type:', msg?.type);
 
-      if (msg.type === 'ALERT') {
+      if (msg.type === 'PORTAL_READY') {
+        if (stepRef.current !== 'LOGIN' || !credsRef.current) return;
+        if (typeof msg.studentId === 'string' && msg.studentId) credsRef.current = {...credsRef.current, studentId: msg.studentId};
+        stepRef.current = 'ERP_REDIRECT';
+        setTargetUrl(ERP_SSO_URL);
+      } else if (msg.type === 'ALERT') {
         const text = String(msg.message || '');
         console.warn('[AcademicScraper] Web alert detected:', text);
         if (text.includes('비밀번호') || text.includes('아이디') || text.includes('오류') || text.includes('틀렸습니다') || text.includes('휴면')) {
@@ -198,17 +218,12 @@ export const AcademicScraperWebView: React.FC = () => {
     // 1단계 -> 2단계: 포털 로그인 후 메인 또는 enpass 리다이렉트 완료 감지
     if (stepRef.current === 'LOGIN') {
       if (
-        url.includes('/enpass/login') ||
-        url.includes('enpassLoginProcess.face') ||
         url.includes('/enview/portal/') ||
         url.includes('/main/main.face') ||
         url.includes('portal.face')
       ) {
         console.log('[AcademicScraper] Portal login succeeded. Navigating to ERP SSO...');
-        stepRef.current = 'ERP_REDIRECT';
-        setTimeout(() => {
-          setTargetUrl(ERP_SSO_URL);
-        }, 500);
+        if (!loading) webViewRef.current?.injectJavaScript(`window.ReactNativeWebView.postMessage(JSON.stringify({type:'PORTAL_READY', studentId: window.temp_user_id || ''})); true;`);
       }
     }
 
@@ -221,7 +236,7 @@ export const AcademicScraperWebView: React.FC = () => {
       try {
         const currentUrl = new URL(url);
         isHttpsErpDocument = currentUrl.protocol === 'https:'
-          && currentUrl.hostname === 'erp.inu.ac.kr';
+          && currentUrl.hostname === 'erp.inu.ac.kr' && currentUrl.pathname.startsWith('/nx/');
       } catch {
         // Keep waiting for a valid ERP navigation.
       }
@@ -235,7 +250,8 @@ export const AcademicScraperWebView: React.FC = () => {
           const queryScript = `
             (async function() {
               try {
-                var wmonid = '';
+                var metadata = window.__erpMetadata || {};
+                var wmonid = metadata.WMONID || '';
                 try {
                   var m = document.cookie.match(/WMONID=([^;]+)/);
                   if (m) wmonid = m[1];
@@ -244,7 +260,9 @@ export const AcademicScraperWebView: React.FC = () => {
                   // request still accepts its default WMONID fallback below.
                 }
                 if (!wmonid && window.WMONID) wmonid = window.WMONID;
-                if (!wmonid) wmonid = 'wmon_mobile';
+                if (!wmonid && window.wmonid) wmonid = window.wmonid;
+                try { if (!wmonid) wmonid = sessionStorage.getItem('WMONID') || localStorage.getItem('WMONID') || ''; } catch (_) {}
+                if (!wmonid) throw new Error('ERP 세션 정보를 확인하지 못했습니다.');
 
                 var RS = String.fromCharCode(30);
                 var US = String.fromCharCode(31);
@@ -260,7 +278,7 @@ export const AcademicScraperWebView: React.FC = () => {
                     },
                     body: 'SSV:utf-8' + RS + 'WMONID=' + wmonid + RS + '_ba_exist=true' + RS + 'login_domain=inu.ac.kr' + RS + 'menuId=M002043' + RS
                   });
-                } catch(e) {}
+                } catch(e) { throw new Error('ERP 메뉴 권한 확인 실패'); }
 
                 // 학적 기본 정보 조회
                 var body = 'SSV:utf-8' + RS +
@@ -282,7 +300,33 @@ export const AcademicScraperWebView: React.FC = () => {
                 });
 
                 var text = await res.text();
-                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ACADEMIC_RESULT', data: text }));
+                if (!res.ok) throw new Error('ERP 학적 조회 HTTP 오류');
+                var base = 'SSV:utf-8' + RS + 'WMONID=' + wmonid + RS + '_ba_exist=' + (metadata._ba_exist || 'true') + RS + 'login_domain=' + (metadata.login_domain || 'inu.ac.kr') + RS + 'requestTimeStr=' + Date.now() + RS;
+                ['_clck', '_clsk'].forEach(function(key) { if (metadata[key]) base += key + '=' + metadata[key] + RS; });
+                async function codeRequest(path, body) {
+                  var response = await fetch(path + '?menuId=M002043&pgmId=P001878', {
+                    method: 'POST', credentials: 'include',
+                    headers: {'Content-Type': 'text/plain; charset=UTF-8', 'REQFOUNDATAION': 'nexacro'}, body: body
+                  });
+                  if (!response.ok) throw new Error('ERP 코드 조회 실패');
+                  return response.text();
+                }
+                var commonCodes = '', departments = {};
+                try {
+                  commonCodes = await codeRequest('/com/CodeCtr/findCodeComboList.do', base +
+                    'rpstCd=A0013|CA001|UB026|UB006|UB007|UB008|UB001|UB002|UB003|UB004|UB010' + RS +
+                    'useYn=1|1|1|1|1|1|1|1|1|1|1' + RS + 'textMode=N|N|N|N|N|N|N|N|N|N|N' + RS +
+                    'dataSet=DS_GEN_GBN|DS_NAT_GBN|DS_HY_SEQ_GBN|DS_CORS_GBN|DS_SCHREG_ST_GBN|DS_SCHREG_MOD_GBN|DS_ENTR_GBN|DS_ENTR_CLSF_GBN|DS_CAPA_IO_GBN|DS_SKIL_STD_GBN|DS_MIL_FINISH_GBN' + RS);
+                } catch (_) {}
+                try {
+                  var xml = new DOMParser().parseFromString(await codeRequest('/uni/sreg/BaimCtr/findDeptCdList1.do', base), 'text/xml');
+                  Array.from(xml.getElementsByTagName('Row')).forEach(function(row) {
+                    var code = row.querySelector('Col[id="deptCd"]');
+                    var name = row.querySelector('Col[id="deptNm"]');
+                    if (code && name) departments[code.textContent.trim()] = name.textContent.trim();
+                  });
+                } catch (_) {}
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ACADEMIC_RESULT', data: JSON.stringify({ssv: text, commonCodes: commonCodes, departments: departments}) }));
               } catch(err) {
                 window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: err.message }));
               }
@@ -292,7 +336,7 @@ export const AcademicScraperWebView: React.FC = () => {
 
           setTimeout(() => {
             webViewRef.current?.injectJavaScript(queryScript);
-          }, 1500);
+          }, 4000);
         }
       }
     }
@@ -302,6 +346,7 @@ export const AcademicScraperWebView: React.FC = () => {
     <View style={styles.hiddenContainer} pointerEvents="none">
       <WebView
         ref={webViewRef}
+        injectedJavaScriptBeforeContentLoaded={SESSION_CAPTURE}
         source={{ uri: targetUrl }}
         style={styles.hiddenWebView}
         javaScriptEnabled={true}

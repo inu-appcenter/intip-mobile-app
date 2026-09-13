@@ -20,7 +20,7 @@ describe('Academic SSV Parser', () => {
     expect(result.studentId).toBe('202101234');
     expect(result.koreanName).toBe('홍길동');
     expect(result.departmentName).toBe('컴퓨터공학부');
-    expect(result.enrollmentStatus).toBe('재학');
+    expect(result.enrollmentStatus).toBe('확인 불가');
     expect(result.acquiredCredits).toBe('98');
     expect(result.gradeAverage).toBe('3.85');
     expect(result.completedSemesterCount).toBe('5학기');
@@ -30,5 +30,13 @@ describe('Academic SSV Parser', () => {
   it('ErrorCode가 0이 아니거나 세션 오류인 경우 예외를 발생시켜야 한다', () => {
     const errorSsv = 'ErrorCode:int=-1' + RECORD_SEPARATOR + 'ErrorMsg:String=Session expired';
     expect(() => parseAcademicBasicInfo(errorSsv)).toThrow('인천대 학사 시스템(ERP) 응답 오류');
+  });
+  it('ERP 코드표의 실제 명칭을 사용하고 코드값은 상세 화면에 노출하지 않는다', () => {
+    const ssv = ['ErrorCode:int=0','Dataset:DS_SREG101', '_RowType_\u001fstuno\u001fkorNm\u001fhgCd\u001fschregStGbn', 'N\u001f202012345\u001f테스트\u001f0000077\u001f70'].join(RECORD_SEPARATOR);
+    const commonCodes = ['ErrorCode:int=0','Dataset:DS_SCHREG_ST_GBN','_RowType_\u001fcode\u001fkorCdNm','N\u001f70\u001f수료'].join(RECORD_SEPARATOR);
+    const result = parseAcademicBasicInfo(JSON.stringify({ssv, commonCodes, departments: {'0000077':'테스트학과'}}));
+    expect(result.enrollmentStatus).toBe('수료');
+    expect(result.departmentName).toBe('테스트학과');
+    expect(JSON.stringify(result.displayFields)).not.toContain('0000077');
   });
 });
