@@ -15,6 +15,10 @@ import {
 } from '../cafeteria';
 import {
   arrivalBoundariesOf,
+  arrivalsForStop,
+  busStopsOf,
+  distanceMeters,
+  nearestStop,
   etaSecondsOf,
   formatEta,
   formatObservedAt,
@@ -270,6 +274,69 @@ describe('bus arrival', () => {
 
   it('has a dedicated state for nothing to show', () => {
     expect(toBusArrivalProps([], '2번 출구', TUESDAY(12)).status).toBe('noData');
+  });
+});
+
+describe('nearest bus stop', () => {
+  // Real coordinates from /api/buses/routes.
+  const ROUTES = [
+    {
+      routeId: '165000012',
+      startBstopId: '164000395',
+      startBstopAlias: '2번출구',
+      stops: [{ bstopId: '164000395', latitude: 37.38534766063011, longitude: 126.6388477378916 }],
+    },
+    {
+      routeId: '165000020',
+      startBstopId: '164000395',
+      startBstopAlias: '2번출구',
+      stops: [{ bstopId: '164000395', latitude: 37.38534766063011, longitude: 126.6388477378916 }],
+    },
+    {
+      routeId: '165000012',
+      startBstopId: '164000385',
+      startBstopAlias: '정문(길 건너)',
+      stops: [{ bstopId: '164000385', latitude: 37.3783228251565, longitude: 126.63467645770007 }],
+    },
+    { routeId: '1', startBstopId: '999', stops: [{ bstopId: '999', latitude: 200000, longitude: 400000 }] },
+  ];
+  const ALIASES = [{ bstopId: '164000385', stopAlias: '정문' }];
+
+  it('builds one stop per starting stop, with its routes and the alias label', () => {
+    const stops = busStopsOf(ROUTES, ALIASES);
+    expect(stops.map((s) => [s.bstopId, s.label, s.routeIds])).toEqual([
+      ['164000395', '2번출구', ['165000012', '165000020']],
+      // Alias preferred over the route's own name; TM coordinates dropped.
+      ['164000385', '정문', ['165000012']],
+    ]);
+  });
+
+  it('picks the stop closest to the user, or the first when there is no position', () => {
+    const stops = busStopsOf(ROUTES, ALIASES);
+    // 인천대 정문 앞.
+    expect(nearestStop(stops, { latitude: 37.3775, longitude: 126.635 })?.bstopId).toBe('164000385');
+    expect(nearestStop(stops, null)?.bstopId).toBe('164000395');
+    expect(nearestStop([], null)).toBeNull();
+  });
+
+  it('measures distance in meters', () => {
+    const meters = distanceMeters(
+      { latitude: 37.38534766063011, longitude: 126.6388477378916 },
+      { latitude: 37.3783228251565, longitude: 126.63467645770007 },
+    );
+    expect(meters).toBeGreaterThan(800);
+    expect(meters).toBeLessThan(900);
+  });
+
+  it("keeps only arrivals for the stop's own routes", () => {
+    const [station] = busStopsOf(ROUTES, ALIASES);
+    const items = [
+      { routeId: '165000012', routeNo: '8' },
+      { routeId: '161000027', routeNo: '4401' },
+      { routeNo: 'no id' },
+    ];
+    expect(arrivalsForStop(items, station).map((i) => i.routeNo)).toEqual(['8']);
+    expect(arrivalsForStop(items, { ...station, routeIds: [] })).toHaveLength(3);
   });
 });
 

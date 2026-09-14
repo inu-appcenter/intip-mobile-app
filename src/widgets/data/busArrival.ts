@@ -31,6 +31,7 @@ import { getJson } from './apiClient';
 // --- API shape (subset of inu-portal-web's `busArrival.ts`) ----------------
 
 type BusArrivalApiItem = {
+  routeId?: string;
   routeNo?: string;
   arrivalEstimateTime?: string | number;
   estimatedArrivalSeconds?: number;
@@ -140,7 +141,7 @@ export function arrivalBoundariesOf(items: BusArrivalApiItem[], now: Date): Date
  */
 export function toBusArrivalProps(
   items: BusArrivalApiItem[],
-  exitLabel: string,
+  stopLabel: string,
   now: Date,
 ): BusArrivalWidgetProps {
   const arrivals = items
@@ -170,30 +171,135 @@ export function toBusArrivalProps(
     .slice(0, 3);
 
   if (arrivals.length === 0) return { status: 'noData' };
-  return { status: 'normal', exitLabel, arrivals };
+  return { status: 'normal', stopLabel, arrivals };
 }
 
-type StopAlias = { bstopId?: string | number; stopName?: string };
+// --- Which stop -----------------------------------------------------------
+
+/** Subset of `/api/buses/routes` — see inu-portal-web's `useDynamicBusRoutes`. */
+type BusRouteApiItem = {
+  routeId?: string;
+  startBstopId?: string;
+  startBstopName?: string;
+  startBstopAlias?: string;
+  stops?: { bstopId?: string; latitude?: number; longitude?: number }[];
+};
+
+type StopAlias = { bstopId?: string; stopAlias?: string; bstopName?: string };
+
+/** A stop the portal lists buses for, with where it is. */
+export type BusStop = {
+  bstopId: string;
+  /** Short display name ("2번출구", "정문(길 건너)") — the widget's header label. */
+  label: string;
+  latitude: number;
+  longitude: number;
+  /** Routes the portal shows at this stop; arrivals for any other route are noise. */
+  routeIds: string[];
+};
+
+/** The portal's own sanity range for WGS84 in Korea (`normalizeCoordinate`). */
+function isKoreanWgs84(latitude?: number, longitude?: number): boolean {
+  return (
+    typeof latitude === 'number' &&
+    typeof longitude === 'number' &&
+    latitude >= 33 &&
+    latitude <= 39 &&
+    longitude >= 124 &&
+    longitude <= 132
+  );
+}
 
 /**
- * The stop the widget shows arrivals for.
+ * The portal's stops, derived from its routes.
  *
- * The portal lets a user pick among stops on the home screen; the widget has
- * no such affordance and no access to that choice, so it takes the first stop
- * the backend lists. That is a real simplification, not a finished feature —
- * when a per-user preference exists, this is the one place to read it from.
- *
- * Returns null when the list is unavailable or has no usable entry, which the
- * caller renders as the widget's `noData` state rather than guessing an id.
+ * Mirrors the web's home bus card: a stop is a route's *starting* stop, and its
+ * buses are the routes starting there. Stop aliases carry the nicer name but no
+ * coordinates, so the position comes from the route's own stop list. Both the
+ * go-school and go-home routes count — "nearest" is about where the user is,
+ * not what time it is.
  */
-export async function fetchDefaultStop(): Promise<{ bstopId: string; stopName: string } | null> {
-  const aliases = await getJson<StopAlias[]>('/api/buses/stop-aliases');
-  const first = (aliases ?? []).find((a) => a.bstopId !== undefined && a.bstopId !== null);
-  if (!first) return null;
-  return {
-    bstopId: String(first.bstopId),
-    stopName: first.stopName?.trim() || '정류장',
-  };
+export function busStopsOf(routes: BusRouteApiItem[], aliases: StopAlias[]): BusStop[] {
+  const stops = new Map<string, BusStop>();
+  for (const route of routes) {
+    const bstopId = route.startBstopId?.trim();
+    if (!bstopId) continue;
+
+    const existing = stops.get(bstopId);
+    if (existing) {
+      if (route.routeId && !existing.routeIds.includes(route.routeId)) {
+        existing.routeIds.push(route.routeId);
+      }
+      continue;
+    }
+
+    const start = route.stops?.find((s) => s.bstopId === bstopId) ?? route.stops?.[0];
+    if (!start || !isKoreanWgs84(start.latitude, start.longitude)) continue;
+
+    const alias = aliases.find((a) => a.bstopId === bstopId);
+    stops.set(bstopId, {
+      bstopId,
+      label:
+        alias?.stopAlias?.trim() ||
+        route.startBstopAlias?.trim() ||
+        route.startBstopName?.trim() ||
+        '정류장',
+      latitude: start.latitude!,
+      longitude: start.longitude!,
+      routeIds: route.routeId ? [route.routeId] : [],
+    });
+  }
+  return [...stops.values()];
+}
+
+/** Great-circle distance in meters. */
+export function distanceMeters(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+): number {
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = rad(b.latitude - a.latitude);
+  const dLng = rad(b.longitude - a.longitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.latitude)) * Math.cos(rad(b.latitude)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * The stop closest to `position`, or the portal's first stop when there is no
+ * position to go by (location off, never granted) — a default that is at least
+ * the stop most riders start from.
+ */
+export function nearestStop(
+  stops: BusStop[],
+  position: { latitude: number; longitude: number } | null,
+): BusStop | null {
+  if (stops.length === 0) return null;
+  if (!position) return stops[0];
+  return stops.reduce((best, stop) =>
+    distanceMeters(position, stop) < distanceMeters(position, best) ? stop : best,
+  );
+}
+
+/** Keeps only the arrivals for routes shown at the stop. An empty list means "don't filter". */
+export function arrivalsForStop(items: BusArrivalApiItem[], stop: BusStop): BusArrivalApiItem[] {
+  if (stop.routeIds.length === 0) return items;
+  return items.filter((item) => item.routeId !== undefined && stop.routeIds.includes(item.routeId));
+}
+
+/**
+ * Every stop the portal lists buses for, or null when the routes couldn't be
+ * read. Aliases only improve the labels, so their failure isn't fatal.
+ */
+export async function fetchBusStops(): Promise<BusStop[] | null> {
+  const [goSchool, goHome, aliases] = await Promise.all([
+    getJson<BusRouteApiItem[]>('/api/buses/routes', { query: { category: 'go-school' } }),
+    getJson<BusRouteApiItem[]>('/api/buses/routes', { query: { category: 'go-home' } }),
+    getJson<StopAlias[]>('/api/buses/stop-aliases'),
+  ]);
+  if (goSchool === null && goHome === null) return null;
+  return busStopsOf([...(goSchool ?? []), ...(goHome ?? [])], aliases ?? []);
 }
 
 /** Arrivals for one stop, or null if the request failed. */

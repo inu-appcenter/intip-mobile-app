@@ -4,6 +4,7 @@ import {
   font,
   foregroundStyle,
   frame,
+  lineLimit,
   multilineTextAlignment,
   padding,
   resizable,
@@ -59,13 +60,18 @@ type BusArrival = {
  * a fallback for whenever the upstream arrival API has nothing to show.
  */
 export type BusArrivalWidgetProps =
-  | { status: "normal"; exitLabel: string; arrivals: BusArrival[] }
+  | {
+      status: "normal";
+      /** The stop nearest the user, as the portal names it ("2번출구") — see `data/busArrival.ts`. */
+      stopLabel: string;
+      arrivals: BusArrival[];
+    }
   | { status: "noData" };
 
 /** Sample snapshot, matching the Figma frame's exact sample content. */
 export const DEFAULT_PROPS: BusArrivalWidgetProps = {
   status: "normal",
-  exitLabel: "2번 출구",
+  stopLabel: "2번출구",
   arrivals: [
     { route: "6-1", eta: "곧 도착", soon: true, arrivesAt: Date.now() + 30_000, observedLabel: "12:34 기준" },
     { route: "8", eta: "4분 19초", arrivesAt: Date.now() + 259_000, observedLabel: "12:34 기준" },
@@ -270,11 +276,14 @@ const BusArrivalWidget = (
             <Spacer />
             <Text
               modifiers={[
+                // Stop names vary in length ("인천대입구역.롯데몰"); one line,
+                // truncated, keeps the header from pushing the rows down.
+                lineLimit(1),
                 font({ size: 14, weight: "semibold" }),
                 foregroundStyle(colors.textSecondary),
               ]}
             >
-              {props.exitLabel}
+              {props.stopLabel}
             </Text>
           </HStack>
           <VStack

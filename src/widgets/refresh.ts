@@ -45,12 +45,15 @@ import {
 } from './data/cafeteria';
 import {
   arrivalBoundariesOf,
+  arrivalsForStop,
   fetchBusArrivals,
-  fetchDefaultStop,
+  fetchBusStops,
+  nearestStop,
   toBusArrivalProps,
   withObservedAt,
 } from './data/busArrival';
 import { hasSession } from './data/apiClient';
+import { getWidgetPosition } from './data/location';
 import {
   classBoundariesOf,
   fetchClassMeetings,
@@ -133,7 +136,12 @@ export async function refreshScheduleWidgets(now: Date = new Date()): Promise<vo
 
 /** Refreshes the 인입런 widget. See `data/busArrival.ts` on why this is not live. */
 export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<void> {
-  const stop = await fetchDefaultStop();
+  const [stops, position] = await Promise.all([fetchBusStops(), getWidgetPosition()]);
+  if (stops === null) return; // Network failure: keep the last good snapshot.
+
+  // Re-picked on every refresh, so the widget follows the user from the
+  // station to campus without them doing anything.
+  const stop = nearestStop(stops, position);
   if (!stop) {
     push(BUS_ARRIVAL, [], () => ({ status: 'noData' as const }), now);
     return;
@@ -145,7 +153,7 @@ export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<v
   // Pinned to this fetch before any future entry is built: an item without an
   // upstream `observedAt` would otherwise be re-anchored to each entry's own
   // time, and its bus would never arrive.
-  const arrivals = withObservedAt(fetched, now);
+  const arrivals = withObservedAt(arrivalsForStop(fetched, stop), now);
 
   // One entry per moment the list itself changes — a bus turning "곧 도착",
   // and a bus arriving and dropping off so the next one moves up. A single
@@ -156,7 +164,7 @@ export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<v
   push(
     BUS_ARRIVAL,
     arrivalBoundariesOf(arrivals, now),
-    (at) => toBusArrivalProps(arrivals, stop.stopName, at),
+    (at) => toBusArrivalProps(arrivals, stop.label, at),
     now,
   );
 }
