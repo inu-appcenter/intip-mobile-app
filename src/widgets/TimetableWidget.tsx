@@ -143,7 +143,14 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
   // sizing to the tight one is the safe direction. Worth replacing with a
   // real measurement if expo-widgets ever exposes one.
   const START_HOUR = 8;
+  // Fixed, not derived from the data: the grid always shows 08:00-20:00
+  // (labels 8 through 19), whatever the timetable holds. Stretching it to fit
+  // the latest class was tried and dropped — a single 22:00 meeting squeezed
+  // every hour row to ~19pt, too short for a class name plus its room.
+  // Classes that start at 20:00 or later are not drawn; ones running past it
+  // are cut at the bottom edge (see `dayColumn`).
   const END_HOUR = 20;
+  const gridMinutes = (END_HOUR - START_HOUR) * 60;
   /** Root padding (20 + 16), the VStack's spacing, and the weekday header. */
   const CHROME_HEIGHT = 20 + 16 + 8 + 15;
   const IOS_GRID_HEIGHT_BUDGET = 295;
@@ -232,6 +239,11 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
     for (let i = 0; i < sorted.length; i++) {
       const item = sorted[i];
       const startMinutes = Math.max(0, item.startMinutes);
+      // Past END_HOUR there is no row to draw on. Clamp rather than let a
+      // column grow past the grid: an overflowing column is centred in the
+      // grid's fixed-height frame, which shifts every block in it upward.
+      if (startMinutes >= gridMinutes) continue;
+      const durationMinutes = Math.min(item.durationMinutes, gridMinutes - startMinutes);
       const gap = Math.max(0, startMinutes - cursorMinutes);
       if (gap > 0) {
         children.push(<Spacer key={`gap-${i}`} modifiers={[frame({ height: minutesToHeight(gap) })]} />);
@@ -241,9 +253,15 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
           key={`block-${i}`}
           alignment="leading"
           spacing={1}
+          // `padding` before `frame`, so the frame's height *is* the block's
+          // outer height. The other way round, SwiftUI wraps the padding
+          // outside the frame and each block came out 4pt taller than its
+          // duration — pushing every later class in the column a little
+          // further down, cumulatively. expo-widgets-glance follows the same
+          // rule (only padding *after* a fixed frame is added to it).
           modifiers={[
-            frame({ maxWidth: Infinity, height: minutesToHeight(item.durationMinutes) }),
             padding({ horizontal: 4, vertical: 2 }),
+            frame({ maxWidth: Infinity, height: minutesToHeight(durationMinutes), alignment: 'topLeading' }),
             background(item.color),
             cornerRadius(4),
           ]}
@@ -279,7 +297,7 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
           </Text>
         </VStack>
       );
-      cursorMinutes = startMinutes + item.durationMinutes;
+      cursorMinutes = startMinutes + durationMinutes;
     }
     return (
       <VStack key={dayIndex} spacing={0} modifiers={[frame({ maxWidth: Infinity })]}>
@@ -345,14 +363,16 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
                       visibly starts *above* the hour it's labeled with (the
                       label was floating at its row's midpoint — the
                       half-hour mark — while the block itself landed exactly
-                      on the hour). The `offset` nudges the glyph itself back
-                      up by roughly half a line so it still reads as
-                      centered *on* the line rather than hanging below it. */}
+                      on the hour). The `offset` lifts the label so its centre sits *on* the
+                      line. -2.5, not the ~-5 the text metrics suggest: measured on
+                      zoomed simulator screenshots, `offset` here moves about twice
+                      its value (0 hung labels ~5pt below their lines, -5 put them
+                      ~5pt above). Android ignores `offset` — Glance has none. */}
                   <Text
                     modifiers={[
                       font({ size: 9 }),
                       foregroundStyle(colors.textTertiary),
-                      offset({ y: -5 }),
+                      offset({ y: -2.5 }),
                     ]}
                   >
                     {hour}
@@ -366,7 +386,11 @@ const TimetableWidget = (props: TimetableWidgetProps, environment: WidgetEnviron
             {verticalLine('v-axis')}
             {/* One shared hour grid behind every day column, not one per
                 column — see `dayColumn`'s doc comment for why. */}
-            <ZStack alignment="top" modifiers={[frame({ maxWidth: Infinity, height: totalGridHeight })]}>
+            {/* `alignment: 'top'` on the frame, not just the ZStack: the
+                ZStack's own alignment only lines its children up with each
+                other. The frame decides where the ZStack sits when it doesn't
+                exactly match the fixed height, and its default is centre. */}
+            <ZStack alignment="top" modifiers={[frame({ maxWidth: Infinity, height: totalGridHeight, alignment: 'top' })]}>
               {hourGrid()}
               <HStack spacing={0} alignment="top" modifiers={[frame({ maxWidth: Infinity })]}>
                 {props.classesByDay.flatMap((blocks, dayIndex) =>
