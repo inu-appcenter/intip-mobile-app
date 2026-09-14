@@ -89,11 +89,54 @@ export function etaSecondsOf(item: BusArrivalApiItem): number | null {
 }
 
 /**
- * Turns an arrivals response into the widget's snapshot.
+ * Pins every item's observation time, filling a missing `observedAt` with the
+ * moment of the fetch.
  *
- * `now` is both the clock and the fallback observation time: the upstream
- * `observedAt` is preferred when present, since the estimate is relative to
- * when the transit API read it, not to when we happened to ask.
+ * Must run once, before props are built for any future moment: otherwise an
+ * item without an upstream `observedAt` is re-anchored to whatever `now` each
+ * timeline entry is built for, its arrival slides forward with it, and the bus
+ * never arrives.
+ */
+export function withObservedAt(items: BusArrivalApiItem[], fetchedAt: Date): BusArrivalApiItem[] {
+  return items.map((item) =>
+    typeof item.observedAt === 'number' ? item : { ...item, observedAt: fetchedAt.getTime() },
+  );
+}
+
+/** The instant a usable item's bus is expected, or null for a row that can't be shown. */
+function arrivesAtOf(item: BusArrivalApiItem, now: Date): number | null {
+  const etaSeconds = etaSecondsOf(item);
+  if (etaSeconds === null || !item.routeNo?.trim()) return null;
+  const observedAt = typeof item.observedAt === 'number' ? item.observedAt : now.getTime();
+  return observedAt + etaSeconds * 1000;
+}
+
+/**
+ * The future moments at which the widget's list itself changes: each bus
+ * turning "곧 도착" ({@link ARRIVING_SOON_SECONDS} before it arrives) and each
+ * bus arriving and dropping off. Handed to WidgetKit as timeline entries, so
+ * the list stays truthful between fetches without any network.
+ */
+export function arrivalBoundariesOf(items: BusArrivalApiItem[], now: Date): Date[] {
+  const instants = new Set<number>();
+  for (const item of items) {
+    const arrivesAt = arrivesAtOf(item, now);
+    if (arrivesAt === null) continue;
+    for (const at of [arrivesAt - ARRIVING_SOON_SECONDS * 1000, arrivesAt]) {
+      if (at > now.getTime()) instants.add(at);
+    }
+  }
+  return [...instants].sort((a, b) => a - b).map((at) => new Date(at));
+}
+
+/**
+ * Turns an arrivals response into the widget's snapshot *as of `now`*.
+ *
+ * `now` is the moment being rendered, which for a timeline entry is in the
+ * future: buses that have arrived by then are dropped, and "곧 도착" and the
+ * formatted estimate are worked out against it. Estimates stay anchored to the
+ * upstream `observedAt` (preferred over `now`, since the estimate is relative
+ * to when the transit API read it) — see {@link withObservedAt}.
  */
 export function toBusArrivalProps(
   items: BusArrivalApiItem[],
@@ -102,19 +145,22 @@ export function toBusArrivalProps(
 ): BusArrivalWidgetProps {
   const arrivals = items
     .map((item) => {
-      const etaSeconds = etaSecondsOf(item);
+      const arrivesAt = arrivesAtOf(item, now);
       const route = item.routeNo?.trim();
-      if (etaSeconds === null || !route) return null;
+      if (arrivesAt === null || !route) return null;
+
+      const remainingSeconds = Math.round((arrivesAt - now.getTime()) / 1000);
+      // Arrived by `now`: not a row any more. Leaving it in is what showed a
+      // timer counting back up from zero the morning after.
+      if (remainingSeconds <= 0) return null;
 
       const observedAt = typeof item.observedAt === 'number' ? item.observedAt : now.getTime();
       return {
         route,
-        eta: formatEta(etaSeconds),
-        soon: etaSeconds <= ARRIVING_SOON_SECONDS,
+        eta: formatEta(remainingSeconds),
+        soon: remainingSeconds <= ARRIVING_SOON_SECONDS,
         // Absolute instant, not a duration — see this module's doc comment.
-        // Anchored to `observedAt` so a snapshot that took a while to reach
-        // the widget still counts down to the right moment.
-        arrivesAt: observedAt + etaSeconds * 1000,
+        arrivesAt,
         observedLabel: formatObservedAt(observedAt),
       };
     })

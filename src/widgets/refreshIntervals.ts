@@ -37,3 +37,14 @@ export const CAFETERIA_REFRESH_MS = 6 * HOUR;
  * `data/busArrival.ts`.
  */
 export const BUS_REFRESH_MS = 10 * MINUTE;
+
+/**
+ * How often the bus widget is refreshed while the app is open and in the
+ * foreground — the same 30 seconds inu-portal-web's `useBusArrival` polls at.
+ *
+ * Unlike every value above, this one is a real schedule: the app is running,
+ * so it can simply fetch on a timer. It is also cheap on iOS, where timeline
+ * reloads requested by a foreground app don't count against WidgetKit's daily
+ * budget. It stops the moment the app leaves the foreground.
+ */
+export const BUS_FOREGROUND_POLL_MS = 30 * 1000;

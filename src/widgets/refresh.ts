@@ -26,7 +26,7 @@
  * widget to update. Those are genuinely different mechanisms, and pretending
  * otherwise here would just move the difference somewhere harder to see.
  */
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import { updateGlanceSnapshot } from 'expo-widgets-glance';
 
@@ -36,13 +36,20 @@ import NextClassWidget from './NextClassWidget';
 import TestWidget from './TestWidget';
 import TimetableWidget from './TimetableWidget';
 import TodayClassesWidget from './TodayClassesWidget';
+import { BUS_FOREGROUND_POLL_MS } from './refreshIntervals';
 import {
   DEFAULT_CAFETERIA,
   fetchCafeteriaMenu,
   mealBoundariesOf,
   toCafeteriaMenuProps,
 } from './data/cafeteria';
-import { fetchBusArrivals, fetchDefaultStop, toBusArrivalProps } from './data/busArrival';
+import {
+  arrivalBoundariesOf,
+  fetchBusArrivals,
+  fetchDefaultStop,
+  toBusArrivalProps,
+  withObservedAt,
+} from './data/busArrival';
 import { hasSession } from './data/apiClient';
 import {
   classBoundariesOf,
@@ -132,13 +139,64 @@ export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<v
     return;
   }
 
-  const arrivals = await fetchBusArrivals(stop.bstopId);
-  if (arrivals === null) return; // Network failure: keep the last good snapshot.
+  const fetched = await fetchBusArrivals(stop.bstopId);
+  if (fetched === null) return; // Network failure: keep the last good snapshot.
 
-  // No boundaries: the countdown is rendered from `arrivesAt` by the widget
-  // itself (a self-updating timer on iOS), so there is no future moment whose
-  // *props* differ — only the clock moves.
-  push(BUS_ARRIVAL, [], () => toBusArrivalProps(arrivals, stop.stopName, now), now);
+  // Pinned to this fetch before any future entry is built: an item without an
+  // upstream `observedAt` would otherwise be re-anchored to each entry's own
+  // time, and its bus would never arrive.
+  const arrivals = withObservedAt(fetched, now);
+
+  // One entry per moment the list itself changes — a bus turning "곧 도착",
+  // and a bus arriving and dropping off so the next one moves up. A single
+  // entry left WidgetKit holding the fetch-time list forever: passed buses
+  // stayed on screen with their timers counting back *up* ("12:21:26" the
+  // next morning), and nothing new appeared until the app was opened again.
+  // The countdown between those moments still ticks on its own.
+  push(
+    BUS_ARRIVAL,
+    arrivalBoundariesOf(arrivals, now),
+    (at) => toBusArrivalProps(arrivals, stop.stopName, at),
+    now,
+  );
+}
+
+/**
+ * Keeps the bus widget fresh for as long as the app is in the foreground:
+ * refreshes on every return to it, then every {@link BUS_FOREGROUND_POLL_MS}
+ * until it leaves. Returns the cleanup.
+ *
+ * This is the only refresh path that can be anything like live — once the app
+ * is backgrounded, iOS gives a widget no way to fetch on its own (see the
+ * module doc). Timeline entries (above) keep it honest in between.
+ */
+export function watchBusArrivalWhileActive(): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const start = () => {
+    if (timer) return;
+    timer = setInterval(() => void refreshBusArrivalWidget(), BUS_FOREGROUND_POLL_MS);
+  };
+  const stop = () => {
+    if (!timer) return;
+    clearInterval(timer);
+    timer = null;
+  };
+
+  if (AppState.currentState === 'active') start();
+  const subscription = AppState.addEventListener('change', (state) => {
+    if (state === 'active') {
+      void refreshBusArrivalWidget();
+      start();
+    } else {
+      stop();
+    }
+  });
+
+  return () => {
+    stop();
+    subscription.remove();
+  };
 }
 
 /** Refreshes the 학식 메뉴 widget, including today's remaining meal switches. */

@@ -13,7 +13,14 @@ import {
   mealBoundariesOf,
   toCafeteriaMenuProps,
 } from '../cafeteria';
-import { etaSecondsOf, formatEta, formatObservedAt, toBusArrivalProps } from '../busArrival';
+import {
+  arrivalBoundariesOf,
+  etaSecondsOf,
+  formatEta,
+  formatObservedAt,
+  toBusArrivalProps,
+  withObservedAt,
+} from '../busArrival';
 import {
   colorFor,
   currentSemesterOf,
@@ -427,5 +434,50 @@ describe('formatRoom', () => {
       ],
     });
     expect(meetings[0].room).toBe('7-505');
+  });
+});
+
+describe('bus arrivals over time', () => {
+  const FETCHED = TUESDAY(9, 0);
+  const at = (seconds: number) => new Date(FETCHED.getTime() + seconds * 1000);
+  const ITEMS = withObservedAt(
+    [
+      { routeNo: '8', estimatedArrivalSeconds: 120 },
+      { routeNo: '16', estimatedArrivalSeconds: 600 },
+      { routeNo: '순환41', estimatedArrivalSeconds: 900 },
+      { routeNo: '58', estimatedArrivalSeconds: 1500 },
+    ],
+    FETCHED,
+  );
+
+  it('drops a bus once it has arrived and moves the next one up', () => {
+    const props = toBusArrivalProps(ITEMS, '정류장', at(130));
+    if (props.status !== 'normal') throw new Error('expected normal');
+    // 8 has arrived; the fourth bus now has room.
+    expect(props.arrivals.map((a) => a.route)).toEqual(['16', '순환41', '58']);
+  });
+
+  it('works the estimate out against the rendered moment, not the fetch', () => {
+    const props = toBusArrivalProps(ITEMS, '정류장', at(90));
+    if (props.status !== 'normal') throw new Error('expected normal');
+    expect(props.arrivals[0]).toMatchObject({ route: '8', eta: '곧 도착', soon: true });
+    // Still stamped with when the data was actually read.
+    expect(props.arrivals[0].observedLabel).toBe('09:00 기준');
+  });
+
+  it('reports no data once every known bus has arrived', () => {
+    expect(toBusArrivalProps(ITEMS, '정류장', at(2000)).status).toBe('noData');
+  });
+
+  it('pins a missing observedAt to the fetch so future entries do not drift', () => {
+    const later = toBusArrivalProps(ITEMS, '정류장', at(300));
+    if (later.status !== 'normal') throw new Error('expected normal');
+    expect(later.arrivals[0].arrivesAt).toBe(FETCHED.getTime() + 600_000);
+  });
+
+  it('lists each "곧 도착" flip and each arrival, future only, in order', () => {
+    const boundaries = arrivalBoundariesOf(ITEMS, at(100)).map((d) => (d.getTime() - FETCHED.getTime()) / 1000);
+    // 8's soon-flip (60s) is already past at 100s; its arrival (120s) is not.
+    expect(boundaries).toEqual([120, 540, 600, 840, 900, 1440, 1500]);
   });
 });
