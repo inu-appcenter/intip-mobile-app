@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 
 import { Spacer, Text, VStack } from '@expo/ui/swift-ui';
 import {
-  border,
   containerBackground,
   font,
   foregroundStyle,
@@ -87,7 +86,6 @@ const NextClassWidget = (props: NextClassWidgetProps, environment: WidgetEnviron
     ? {
         cardBg: '#1C1C1E',
         brandCardBg: '#13223A',
-        brandBorder: '#28405F',
         textPrimary: '#FFFFFF',
         textTertiary: '#98989F',
         textBrand: '#4C8DFF',
@@ -95,7 +93,6 @@ const NextClassWidget = (props: NextClassWidgetProps, environment: WidgetEnviron
     : {
         cardBg: '#FFFFFF',
         brandCardBg: '#EFF6FF',
-        brandBorder: '#D3E5FF',
         textPrimary: '#191F28',
         textTertiary: '#8B95A1',
         textBrand: '#0061FF',
@@ -164,7 +161,6 @@ const NextClassWidget = (props: NextClassWidgetProps, environment: WidgetEnviron
 
   let content: ReactNode;
   let background = colors.cardBg;
-  let borderColor: string | null = null;
 
   switch (props.status) {
     case 'upcoming':
@@ -178,7 +174,6 @@ const NextClassWidget = (props: NextClassWidgetProps, environment: WidgetEnviron
       break;
     case 'ongoing':
       background = colors.brandCardBg;
-      borderColor = colors.brandBorder;
       content = (
         <>
           <Text
@@ -247,7 +242,14 @@ const NextClassWidget = (props: NextClassWidgetProps, environment: WidgetEnviron
       modifiers={[
         padding({ top: 20, bottom: 16, leading: 16, trailing: 16 }),
         containerBackground(background, 'widget'),
-        ...(borderColor ? [border({ color: borderColor, width: 1 })] : []),
+        // No `border` for the "수업 중" card, though Figma draws one
+        // (border/brand-subtle). SwiftUI's `border` is a plain rectangle
+        // stroke around whatever it is applied to: before the full-size
+        // `frame` below it outlined only the padded content, drawing its
+        // right and bottom edges as stray lines inside the card; after the
+        // frame it would be clipped away at the widget's rounded corners.
+        // There is no rounded stroke in the widget-safe modifier set, and
+        // the brand background tint already marks the state.
         // `maxWidth`/`maxHeight: Infinity` + `topLeading` — the frame has to
         // claim BOTH axes of the widget. Without `maxHeight` the card's
         // (usually shorter) content is centered vertically; without
