@@ -4,6 +4,7 @@ import {
   font,
   foregroundStyle,
   frame,
+  multilineTextAlignment,
   padding,
   resizable,
   widgetURL,
@@ -198,6 +199,11 @@ const BusArrivalWidget = (
         date={new Date(arrival.arrivesAt)}
         dateStyle="timer"
         modifiers={[
+          // A timer-style Text is flexible-width in SwiftUI — it claims the
+          // room left in the row and draws its digits at the *leading* edge
+          // of that room, so without this the countdown sat right next to
+          // the route number instead of against the right edge.
+          multilineTextAlignment("trailing"),
           font({ size: 12, weight: arrival.soon ? "medium" : "regular" }),
           foregroundStyle(
             arrival.soon ? colors.textBrand : colors.textTertiary,
@@ -243,7 +249,9 @@ const BusArrivalWidget = (
           <VStack
             spacing={8}
             alignment="leading"
-            modifiers={[frame({ maxWidth: Infinity })]}
+            // The 16 between header and rows lives here rather than in the
+            // root stack's `spacing` — see the root VStack for why.
+            modifiers={[padding({ top: 16 }), frame({ maxWidth: Infinity })]}
           >
             {props.arrivals.map((arrival, index) => row(arrival, index))}
           </VStack>
@@ -253,7 +261,7 @@ const BusArrivalWidget = (
               the countdown is only as good as the reading it started from —
               the bus may already have been rerouted. Stating the age is the
               only way the number isn't a quiet lie. */}
-          <Spacer />
+          <Spacer minLength={0} />
           <Text
             modifiers={[
               font({ size: 10 }),
@@ -303,7 +311,15 @@ const BusArrivalWidget = (
   return (
     <VStack
       alignment="leading"
-      spacing={16}
+      // Zero, not 16. Stack spacing is inserted between *every* pair of
+      // children, and the `normal` layout has four of them — header, rows,
+      // Spacer, footer — so 16 here cost 48pt of a 170pt small widget. Adding
+      // the "기준" footer took the content to ~192pt; SwiftUI centres an
+      // overflowing stack and clips both ends equally, which on screen looked
+      // exactly like the widget's top and bottom padding had vanished. The
+      // one gap the design actually has (header → rows) is padding on the
+      // rows instead.
+      spacing={0}
       modifiers={[
         padding({ top: 20, bottom: 16, leading: 16, trailing: 16 }),
         containerBackground(colors.cardBg, "widget"),
