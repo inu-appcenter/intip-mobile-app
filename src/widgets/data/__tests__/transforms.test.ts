@@ -17,6 +17,7 @@ import { etaSecondsOf, formatEta, formatObservedAt, toBusArrivalProps } from '..
 import {
   colorFor,
   currentSemesterOf,
+  formatRoom,
   dayIndexOf,
   pickPrimaryTimetable,
   formatHhMm,
@@ -395,5 +396,36 @@ describe('pickPrimaryTimetable', () => {
 
   it('returns null when there is nothing to pick', () => {
     expect(pickPrimaryTimetable([], SECOND)).toBeNull();
+  });
+});
+
+describe('formatRoom', () => {
+  it('shortens the portal room name to building-room', () => {
+    expect(formatRoom('제7호관 정보기술대학-505 강의실(중)-2')).toBe('7-505');
+    expect(formatRoom('제28호관 도시과학대학-203')).toBe('28-203');
+  });
+
+  it('leaves anything else alone', () => {
+    expect(formatRoom('07-504')).toBe('07-504');
+    expect(formatRoom('선인장')).toBe('선인장');
+    expect(formatRoom('')).toBe('');
+  });
+
+  it('is applied to meetings as they are flattened', () => {
+    const meetings = toClassMeetings({
+      id: 1,
+      items: [
+        {
+          type: 'COURSE',
+          course: {
+            courseOfferingId: 9,
+            title: '자연어처리',
+            meetings: [{ location: '제7호관 정보기술대학-505 강의실(중)-2', day: 'MONDAY', startTime: '09:00', endTime: '10:15' }],
+          },
+          customSchedule: null,
+        },
+      ],
+    });
+    expect(meetings[0].room).toBe('7-505');
   });
 });

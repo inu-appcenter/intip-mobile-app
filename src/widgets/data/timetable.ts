@@ -199,7 +199,7 @@ export function toClassMeetings(detail: TimeTableDetail): ClassMeeting[] {
         startMinutes,
         endMinutes,
         title,
-        room: meeting.location?.trim() ?? '',
+        room: formatRoom(meeting.location?.trim() ?? ''),
         colorKey,
       });
     }
@@ -209,6 +209,18 @@ export function toClassMeetings(detail: TimeTableDetail): ClassMeeting[] {
     a.dayIndex !== b.dayIndex ? a.dayIndex - b.dayIndex : a.startMinutes - b.startMinutes,
   );
 }
+
+/**
+ * Shortens the portal's full room name to the building-room form students use:
+ * "제7호관 정보기술대학-505 강의실(중)-2" → "7-505".
+ *
+ * Anything not in that shape (an already-short "07-504", a custom schedule's
+ * free-text place, an empty string for an online class) comes back unchanged.
+ */
+export const formatRoom = (room: string) => {
+  const match = room.match(/^제(.+?)호관\s+.*?-([^\s]+)/);
+  return match ? `${match[1]}-${match[2]}` : room;
+};
 
 /** Monday = 0 … Sunday = 6, matching {@link ClassMeeting.dayIndex}. */
 export function dayIndexOf(now: Date): number {
