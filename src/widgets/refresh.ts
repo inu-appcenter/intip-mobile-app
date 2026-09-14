@@ -162,15 +162,27 @@ export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<v
 }
 
 /**
- * Keeps the bus widget fresh for as long as the app is in the foreground:
- * refreshes on every return to it, then every {@link BUS_FOREGROUND_POLL_MS}
- * until it leaves. Returns the cleanup.
+ * Ties widget refreshes to the app's lifecycle. Returns the cleanup.
  *
- * This is the only refresh path that can be anything like live — once the app
- * is backgrounded, iOS gives a widget no way to fetch on its own (see the
- * module doc). Timeline entries (above) keep it honest in between.
+ * - **Leaving (→ background): every widget is refreshed.** This is the moment
+ *   the home screen — and the widgets on it — comes into view, and the moment
+ *   anything the user just changed in the app (a timetable edited in the
+ *   WebView, say) should show up there. iOS keeps the JS running for a few
+ *   seconds after backgrounding, which is ample for these few GETs on a normal
+ *   connection; on a very slow one the refresh may be cut off, and the widget
+ *   keeps what it had.
+ * - **In the foreground: the bus widget is polled** every
+ *   {@link BUS_FOREGROUND_POLL_MS}, and refreshed straight away on return. It
+ *   is the only widget whose data goes stale in minutes, and the foreground is
+ *   the only time iOS lets anything like live refresh happen — once the app is
+ *   gone a widget cannot fetch on its own (see the module doc). Timeline
+ *   entries keep it honest in between.
+ *
+ * Only `background` triggers the leave refresh, not `inactive`: iOS passes
+ * through `inactive` for the app switcher and Control Center too, which are
+ * not the user leaving.
  */
-export function watchBusArrivalWhileActive(): () => void {
+export function watchAppLifecycleForWidgets(): () => void {
   let timer: ReturnType<typeof setInterval> | null = null;
 
   const start = () => {
@@ -188,9 +200,10 @@ export function watchBusArrivalWhileActive(): () => void {
     if (state === 'active') {
       void refreshBusArrivalWidget();
       start();
-    } else {
-      stop();
+      return;
     }
+    stop();
+    if (state === 'background') void refreshAllWidgets();
   });
 
   return () => {

@@ -15,7 +15,7 @@ import {
 } from "../push/messaging";
 import { backgroundColorFor } from "../theme";
 import { WebViewProvider } from "../webview/WebViewContext";
-import { refreshAllWidgets, watchBusArrivalWhileActive } from "../widgets/refresh";
+import { refreshAllWidgets, watchAppLifecycleForWidgets } from "../widgets/refresh";
 
 // Background FCM/notifee handlers must be registered before React renders so
 // they survive a background/quit launch.
@@ -60,9 +60,10 @@ export default function RootLayout() {
     void refreshAllWidgets();
   }, []);
 
-  // The bus widget is the one whose data goes stale in minutes, so it alone
-  // is also polled while the app is open (see `watchBusArrivalWhileActive`).
-  useEffect(() => watchBusArrivalWhileActive(), []);
+  // Refresh every widget when the app goes to the background — the moment
+  // the home screen comes into view — and poll the bus widget while the app
+  // is open. See `watchAppLifecycleForWidgets`.
+  useEffect(() => watchAppLifecycleForWidgets(), []);
 
   return (
     // GestureHandlerRootView wraps the tree so gesture-handler based components
