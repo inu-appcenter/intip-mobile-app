@@ -54,11 +54,11 @@ import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTyp
 import { nativeAlert } from "../../modules/intip-native-dialog";
 import { useSystemGestureBand } from "../../modules/intip-system-gestures";
 import { createNativeChannel } from "../../packages/intip-bridge/src/adapters/native";
-import { PROTOCOL_VERSION } from "../../packages/intip-bridge/src/messages";
+import { PROTOCOL_VERSION, type TokenInfoPayload } from "../../packages/intip-bridge/src/messages";
 import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
 import { saveDownload } from "../native/downloads";
 import { ensureLocationPermission } from "../native/permissions";
-import { clearTokenInfo, saveTokenInfo } from "../native/secureTokenStore";
+import { clearTokenInfo, readTokenInfo, saveTokenInfo } from "../native/secureTokenStore";
 import { shareContent } from "../native/share";
 import { flushPendingFcmToken } from "../push/fcmTokenSync";
 import {
@@ -71,6 +71,8 @@ import {
 import { resolveGradeShareIntent } from "../share/gradeShareIntent";
 import { backgroundColorFor, INDICATOR_COLOR } from "../theme";
 import { resolveBackAction } from "../webview/backPolicy";
+import { parseTokenProbe, resolveWebToken, TOKEN_PROBE_SCRIPT } from "../webview/tokenProbe";
+import { refreshScheduleWidgets } from "../widgets/refresh";
 import {
   APP_UA_SUFFIX,
   isMainTabPath,
@@ -213,6 +215,22 @@ export default function WebViewContainer({ url, mode }: Props) {
   // `GEO_REQUEST_MARKER`), not eagerly on login. At most once per app
   // session (see `locationPermissionPrimed` above). Camera needs no
   // equivalent: both WebView engines request it from the OS on demand.
+  // Reconcile the native token with the web's, then refresh the schedule
+  // widgets if anything changed — they are the ones that need a session. See
+  // `webview/tokenProbe.ts` for why this exists at all (a web session restored
+  // from localStorage never sends `syncTokenInfo`) and for the keep/adopt/clear
+  // rules.
+  const adoptWebToken = useCallback(async (webToken: TokenInfoPayload | null) => {
+    const action = resolveWebToken(webToken, await readTokenInfo());
+    if (action === "keep") return;
+    if (action === "adopt" && webToken) {
+      await saveTokenInfo(webToken);
+    } else {
+      await clearTokenInfo();
+    }
+    void refreshScheduleWidgets();
+  }, []);
+
   const primeLocationPermission = useCallback(() => {
     if (locationPermissionPrimed) return;
     locationPermissionPrimed = true;
@@ -237,9 +255,14 @@ export default function WebViewContainer({ url, mode }: Props) {
         primeLocationPermission();
         return;
       }
+      const probe = parseTokenProbe(raw);
+      if (probe) {
+        void adoptWebToken(probe.token);
+        return;
+      }
       bridge.onMessage(event);
     },
-    [bridge, url, primeLocationPermission],
+    [bridge, url, primeLocationPermission, adoptWebToken],
   );
   const router = useRouter();
   // Read-only access to the live navigation state (push-tap dedupe below).
@@ -680,6 +703,10 @@ export default function WebViewContainer({ url, mode }: Props) {
     const offs = [
       channel.on("bridgeReady", () => {
         webBridgeReadyRef.current = true;
+        // Ask the web for its stored token — see `adoptWebToken`. Root only:
+        // every WebView shares the same storage, so one probe per launch is
+        // enough, and pushed sub-pages would only repeat it.
+        if (isRoot) webViewRef.current?.injectJavaScript(TOKEN_PROBE_SCRIPT);
         flushPendingNotificationOpened();
         // Resolve any queued notification deep-link now the SPA is ready.
         if (isRoot && pendingNavRef.current) {
@@ -719,9 +746,13 @@ export default function WebViewContainer({ url, mode }: Props) {
       // registration) without a live WebView. An empty accessToken is the
       // web's logout signal — clear the native copy too.
       channel.on("syncTokenInfo", (tokenInfo) => {
+        // Refresh the schedule widgets once the native copy is written, so a
+        // login shows the timetable — and a logout removes it — right away
+        // rather than on the next trip to the background.
         void (tokenInfo.accessToken
           ? saveTokenInfo(tokenInfo)
-          : clearTokenInfo());
+          : clearTokenInfo()
+        ).then(() => refreshScheduleWidgets());
       }),
       // Multi-WebView state sync fallback/second path (see WebViewContext's
       // `relayBroadcastSync` doc comment): relay to every other mounted WebView.
