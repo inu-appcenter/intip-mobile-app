@@ -58,6 +58,10 @@ const IOS_WIDGET_TARGET = 'ExpoWidgetsTarget';
  */
 const WIDGET_ASSETS = [
   { assetName: 'BusIcon', source: 'assets/widgets/busIcon.svg', androidSizeDp: 24 },
+  // Material Icons `refresh` (Apache License 2.0), on its native 24-unit
+  // viewBox. The web app's fontello set has no refresh glyph to lift, so this
+  // is the one icon here not shared with inu-portal-web.
+  { assetName: 'RefreshIcon', source: 'assets/widgets/refreshIcon.svg', androidSizeDp: 24 },
 ];
 
 /**
@@ -289,3 +293,5 @@ module.exports = function withWidgetAssets(config) {
 // Exported for the unit test in __tests__; not part of the plugin contract.
 module.exports.toResourceName = toResourceName;
 module.exports.parseMonochromeSvg = parseMonochromeSvg;
+module.exports.vectorDrawableXml = vectorDrawableXml;
+module.exports.imagesetContentsJson = imagesetContentsJson;

@@ -1,4 +1,4 @@
-import { HStack, Image, Spacer, Text, VStack } from "@expo/ui/swift-ui";
+import { Button, HStack, Image, Spacer, Text, VStack } from "@expo/ui/swift-ui";
 import {
   containerBackground,
   font,
@@ -213,6 +213,37 @@ const BusArrivalWidget = (
     </HStack>
   );
 
+  // Refresh. Different on each platform because the platforms differ in what
+  // a widget tap can do, not by preference:
+  //
+  // - Android: a real in-place refresh. A `Button` with this reserved target
+  //   makes expo-widgets-glance start the app's own refresh task headlessly
+  //   (its HandlePressAction.REFRESH_TARGET) — no app launch.
+  // - iOS: just the icon. A WidgetKit button runs in the widget extension,
+  //   which has no network and can't reach the app, so it could not fetch;
+  //   worse, it would steal the tap from `widgetURL`. This is a small widget,
+  //   so the whole widget is one tap target that opens the app — and the app
+  //   refreshes the bus widget as it comes to the foreground.
+  //
+  // The target string is spelled out because a widget layout can't import
+  // anything; it must match GLANCE_REFRESH_TARGET in expo-widgets-glance.
+  const isAndroid = (environment as { platform?: string }).platform === "android";
+  const refreshIcon = (
+    <Image
+      assetName="RefreshIcon"
+      color={colors.textTertiary}
+      modifiers={[resizable(), frame({ width: 12, height: 12 })]}
+    />
+  );
+  const refreshControl = isAndroid ? (
+    // Padding widens the touch area around a 12dp icon without moving it.
+    <Button target="__expo_widgets_glance_refresh" modifiers={[padding({ all: 6 })]}>
+      {refreshIcon}
+    </Button>
+  ) : (
+    refreshIcon
+  );
+
   let content;
   switch (props.status) {
     case "normal":
@@ -262,15 +293,13 @@ const BusArrivalWidget = (
               the bus may already have been rerouted. Stating the age is the
               only way the number isn't a quiet lie. */}
           <Spacer minLength={0} />
-          <Text
-            modifiers={[
-              font({ size: 10 }),
-              foregroundStyle(colors.textTertiary),
-              frame({ maxWidth: Infinity, alignment: "leading" }),
-            ]}
-          >
-            {props.arrivals[0].observedLabel}
-          </Text>
+          <HStack alignment="center" modifiers={[frame({ maxWidth: Infinity })]}>
+            <Text modifiers={[font({ size: 10 }), foregroundStyle(colors.textTertiary)]}>
+              {props.arrivals[0].observedLabel}
+            </Text>
+            <Spacer />
+            {refreshControl}
+          </HStack>
         </>
       );
       break;
@@ -303,6 +332,14 @@ const BusArrivalWidget = (
           >
             도착 정보 없음
           </Text>
+          {/* The state a refresh matters most in: every bus the widget knew
+              about has arrived, and nothing new comes in until something
+              fetches. */}
+          <Spacer />
+          <HStack modifiers={[frame({ maxWidth: Infinity })]}>
+            <Spacer />
+            {refreshControl}
+          </HStack>
         </VStack>
       );
       break;
