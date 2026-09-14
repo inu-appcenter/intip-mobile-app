@@ -96,21 +96,32 @@ npx expo run:ios       # 또는: npx expo run:android
 
 ## 3. 환경변수
 
-백엔드 API 오리진만 환경변수로 주입합니다 (`src/config/env.ts`).
+셸이 웹뷰 없이 직접 부르는 API(위젯 데이터, FCM 토큰 등록, 토큰 리프레시)의
+오리진은 **환경변수로 따로 정하지 않고, 웹뷰가 띄우는 포털 호스트에서 결정합니다**
+(`src/config/env.ts`의 `PORTAL_API_BY_WEB_HOST`).
 
-| 파일 | 값 | 사용 시점 |
+| 웹뷰 `ROOT_URL` | API | 사용 시점 |
 | --- | --- | --- |
-| `.env` | `EXPO_PUBLIC_API_BASE_URL=https://portal-dev.inuappcenter.kr` | 로컬/개발 빌드 |
-| `.env.production` | `EXPO_PUBLIC_API_BASE_URL=https://portal.inuappcenter.kr` | 릴리스 번들 |
+| `https://intip.inuappcenter.kr` (기본값) | `https://portal.inuappcenter.kr` | 로컬 빌드 기본, 릴리스 |
+| `https://intip-test.pages.dev` | `https://portal-dev.inuappcenter.kr` | CI dev 빌드, 로컬에서 dev 백엔드를 쓸 때 |
 
-값이 없으면 개발 호스트로 폴백하고 경고를 남깁니다. 이 API 오리진은 셸이
-웹뷰 없이 직접 호출하는 경로(FCM 토큰 등록, 토큰 리프레시)에서만 쓰입니다.
+이유: 셸은 웹뷰 로그인에서 넘어온 토큰으로 인증하는데, 토큰은 발급한 백엔드에서만
+유효합니다. 두 값을 따로 고르면(예: `.env`는 dev API, `ROOT_URL`은 운영 웹) 인증이
+필요한 호출이 전부 401이 됩니다. 실제로 그렇게 위젯 시간표가 한 번도 안 들어왔습니다.
 
-포털 URL 자체(`ROOT_URL`, `PORTAL_HOST`, 딥링크 허용 호스트)는 환경변수가 아니라
-`src/webview/constants.ts`에 상수로 있습니다. `app.json`의
-`ios.associatedDomains` / `android.intentFilters`, 그리고 웹 저장소가 서빙하는
-도메인 연결 파일과 **함께** 맞춰야 하는 값이라, 한 곳에 모아두고 문서화하는 쪽을
-택했습니다.
+로컬에서 dev 백엔드를 쓰려면 `.env.local`에 웹뷰 주소를 지정합니다(CI와 같은 방식):
+
+```bash
+EXPO_PUBLIC_ROOT_URL=https://intip-test.pages.dev
+```
+
+`EXPO_PUBLIC_API_BASE_URL`은 표에 없는 호스트(로컬 웹 개발 서버 등)에서만 쓰이고,
+알려진 호스트와 어긋나게 설정돼 있으면 무시하고 경고를 남깁니다.
+
+포털 URL 자체(`ROOT_URL`, `PORTAL_HOST`, 딥링크 허용 호스트)는
+`src/webview/constants.ts`에 있습니다. `app.json`의 `ios.associatedDomains` /
+`android.intentFilters`, 그리고 웹 저장소가 서빙하는 도메인 연결 파일과 **함께**
+맞춰야 하는 값입니다.
 
 ---
 
