@@ -3,7 +3,7 @@ import { ClientActionInstruction } from './agentActionExecutor';
 const LMS_SERVER_URL = 'https://lms.inu.ac.kr/webservice/rest/server.php';
 
 /**
- * LMS(사이버캠퍼스) AI 에이전트 도구 빌더
+ * 이러닝(LMS) AI 에이전트 도구 빌더
  */
 export const LmsAgentTools = {
   /**
