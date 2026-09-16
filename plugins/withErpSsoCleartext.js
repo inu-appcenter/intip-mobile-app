@@ -12,6 +12,9 @@ const NETWORK_SECURITY_CONFIG = `<?xml version="1.0" encoding="utf-8"?>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">portal.inu.ac.kr</domain>
         <domain includeSubdomains="true">erp.inu.ac.kr</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
     </domain-config>
 </network-security-config>
 `;

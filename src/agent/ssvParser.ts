@@ -185,7 +185,7 @@ export function parseAcademicBasicInfo(responseBody: string): AcademicBasicInfo 
     completedSemesterCount: row['mrksCptnTmCnt'] ? `${row['mrksCptnTmCnt']}학기` : '',
     acquiredCredits: row['acqHp'] || '0',
     gradeAverage: row['mrksAvg'] || '0.0',
-    advisorProfessorName: row['profNm'],
+    advisorProfessorName: firstValue(row, ['profNm', 'profName', 'profKorNm', 'advProfNm', 'advisorNm', 'tutProfNm']) || '',
     rawFields: Object.fromEntries(Object.entries(row).filter(([key]) => !['_RowType_', '_Column_', 'phtFile1', 'phtFile2'].includes(key))),
     ...enrichAcademicRow(row, commonCodes, departments),
   };
@@ -225,6 +225,10 @@ function enrichAcademicRow(row: Record<string, string>, codes: string, departmen
   }
   for (const [column,label] of [['engNm','영문명'],['entrDt','입학일'],['flSchregModDt','학적 변동일'],['birthDt','생년월일'],['cptnTmNm','이수 학기명'],['handpNo','휴대전화']]) {
     if (row[column]) displayFields[label] = column.endsWith('Dt') ? formatNexacroDate(row[column]) || '' : row[column].trim();
+  }
+  const advisor = firstValue(row, ['profNm', 'profName', 'profKorNm', 'advProfNm', 'advisorNm', 'tutProfNm']);
+  if (advisor) {
+    displayFields['지도교수'] = `${advisor} 교수님`;
   }
   if (row.rrn) displayFields['주민등록번호(마스킹)'] = '******-*******';
   for (const [column,label] of [['readmiYn','재입학 여부'],['earlyGrdtYn','조기졸업 여부'],['grdtExpcYn','졸업예정 여부'],['bcrmstConnYn','학석사 연계 여부']]) {

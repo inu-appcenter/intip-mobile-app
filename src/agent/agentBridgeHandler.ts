@@ -1,3 +1,5 @@
+import { Linking } from 'react-native';
+import { router } from 'expo-router';
 import { PortalSecureStore } from './secureStore';
 import { fetchAcademicInfoLocally } from './academicWorker';
 import { LibraryAuthService } from './libraryAuthService';
@@ -338,6 +340,38 @@ export async function handleAgentBridgeMessage(
           success: false,
           errorMessage: err?.message,
         });
+      }
+      return true;
+    }
+
+    case 'openUrl':
+    case 'OPEN_URL':
+    case 'NAVIGATE': {
+      const targetUrl = payload?.url || parsed?.url || payload?.path || parsed?.path;
+      if (typeof targetUrl === 'string' && targetUrl.trim()) {
+        const cleanUrl = targetUrl.trim();
+        console.log('[agentBridgeHandler] Handling navigation/openUrl:', cleanUrl);
+        try {
+          if (cleanUrl.startsWith('tel:') || cleanUrl.startsWith('mailto:')) {
+            await Linking.openURL(cleanUrl);
+          } else if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
+            await Linking.openURL(cleanUrl);
+          } else {
+            router.push(cleanUrl as any);
+          }
+          sendWrappedResponse({
+            type: `${type}Result`,
+            success: true,
+            data: { url: cleanUrl },
+          });
+        } catch (err: any) {
+          console.warn('[agentBridgeHandler] Failed to open URL:', cleanUrl, err);
+          sendWrappedResponse({
+            type: `${type}Result`,
+            success: false,
+            errorMessage: err?.message || '링크 이동 실패',
+          });
+        }
       }
       return true;
     }

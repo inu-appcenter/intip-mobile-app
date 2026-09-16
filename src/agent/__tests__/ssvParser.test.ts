@@ -11,8 +11,8 @@ describe('Academic SSV Parser', () => {
       'ErrorCode:int=0',
       'ErrorMsg:String=SUCCESS',
       'Dataset:DS_SREG101',
-      `_Column_${UNIT_SEPARATOR}stuno:string${UNIT_SEPARATOR}korNm:string${UNIT_SEPARATOR}hgNm:string${UNIT_SEPARATOR}schregStGbn:string${UNIT_SEPARATOR}acqHp:string${UNIT_SEPARATOR}mrksAvg:string${UNIT_SEPARATOR}mrksCptnTmCnt:string${UNIT_SEPARATOR}colgNm:string`,
-      `N${UNIT_SEPARATOR}202101234${UNIT_SEPARATOR}홍길동${UNIT_SEPARATOR}컴퓨터공학부${UNIT_SEPARATOR}10${UNIT_SEPARATOR}98${UNIT_SEPARATOR}3.85${UNIT_SEPARATOR}5${UNIT_SEPARATOR}정보기술대학`,
+      `_Column_${UNIT_SEPARATOR}stuno:string${UNIT_SEPARATOR}korNm:string${UNIT_SEPARATOR}hgNm:string${UNIT_SEPARATOR}schregStGbn:string${UNIT_SEPARATOR}acqHp:string${UNIT_SEPARATOR}mrksAvg:string${UNIT_SEPARATOR}mrksCptnTmCnt:string${UNIT_SEPARATOR}colgNm:string${UNIT_SEPARATOR}profNm:string`,
+      `N${UNIT_SEPARATOR}202101234${UNIT_SEPARATOR}홍길동${UNIT_SEPARATOR}컴퓨터공학부${UNIT_SEPARATOR}10${UNIT_SEPARATOR}98${UNIT_SEPARATOR}3.85${UNIT_SEPARATOR}5${UNIT_SEPARATOR}정보기술대학${UNIT_SEPARATOR}김교수`,
     ].join(RECORD_SEPARATOR);
 
     const result = parseAcademicBasicInfo(mockSsv);
@@ -25,6 +25,8 @@ describe('Academic SSV Parser', () => {
     expect(result.gradeAverage).toBe('3.85');
     expect(result.completedSemesterCount).toBe('5학기');
     expect(result.collegeName).toBe('정보기술대학');
+    expect(result.advisorProfessorName).toBe('김교수');
+    expect(result.displayFields?.['지도교수']).toBe('김교수 교수님');
   });
 
   it('ErrorCode가 0이 아니거나 세션 오류인 경우 예외를 발생시켜야 한다', () => {
