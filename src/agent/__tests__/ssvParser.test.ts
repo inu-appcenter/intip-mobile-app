@@ -20,7 +20,7 @@ describe('Academic SSV Parser', () => {
     expect(result.studentId).toBe('202101234');
     expect(result.koreanName).toBe('홍길동');
     expect(result.departmentName).toBe('컴퓨터공학부');
-    expect(result.enrollmentStatus).toBe('확인 불가');
+    expect(result.enrollmentStatus).toBe('재학');
     expect(result.acquiredCredits).toBe('98');
     expect(result.gradeAverage).toBe('3.85');
     expect(result.completedSemesterCount).toBe('5학기');
