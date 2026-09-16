@@ -235,8 +235,8 @@ export const AcademicScraperWebView: React.FC = () => {
       let isHttpsErpDocument = false;
       try {
         const currentUrl = new URL(url);
-        isHttpsErpDocument = currentUrl.protocol === 'https:'
-          && currentUrl.hostname === 'erp.inu.ac.kr' && currentUrl.pathname.startsWith('/nx/');
+        isHttpsErpDocument = currentUrl.hostname === 'erp.inu.ac.kr'
+          && (currentUrl.port === '8443' || currentUrl.pathname.includes('/com/SsoCtr/') || currentUrl.pathname.startsWith('/nx/'));
       } catch {
         // Keep waiting for a valid ERP navigation.
       }
@@ -262,7 +262,7 @@ export const AcademicScraperWebView: React.FC = () => {
                 if (!wmonid && window.WMONID) wmonid = window.WMONID;
                 if (!wmonid && window.wmonid) wmonid = window.wmonid;
                 try { if (!wmonid) wmonid = sessionStorage.getItem('WMONID') || localStorage.getItem('WMONID') || ''; } catch (_) {}
-                if (!wmonid) throw new Error('ERP 세션 정보를 확인하지 못했습니다.');
+                if (!wmonid) wmonid = 'wmon_mobile';
 
                 var RS = String.fromCharCode(30);
                 var US = String.fromCharCode(31);
@@ -278,7 +278,7 @@ export const AcademicScraperWebView: React.FC = () => {
                     },
                     body: 'SSV:utf-8' + RS + 'WMONID=' + wmonid + RS + '_ba_exist=true' + RS + 'login_domain=inu.ac.kr' + RS + 'menuId=M002043' + RS
                   });
-                } catch(e) { throw new Error('ERP 메뉴 권한 확인 실패'); }
+                } catch(e) {}
 
                 // 학적 기본 정보 조회
                 var body = 'SSV:utf-8' + RS +
@@ -336,7 +336,7 @@ export const AcademicScraperWebView: React.FC = () => {
 
           setTimeout(() => {
             webViewRef.current?.injectJavaScript(queryScript);
-          }, 4000);
+          }, 1500);
         }
       }
     }
