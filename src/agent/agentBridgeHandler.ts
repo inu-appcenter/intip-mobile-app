@@ -113,7 +113,7 @@ export async function handleAgentBridgeMessage(
         sendWrappedResponse({
           type: 'fetchAcademicInfoResult',
           success: result.success,
-          data: result.data,
+          data: result.rawSsv ? { rawSsv: result.rawSsv } : undefined,
           errorCode: result.errorCode,
           errorMessage: result.errorMessage,
         });

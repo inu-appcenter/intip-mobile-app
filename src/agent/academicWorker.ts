@@ -1,16 +1,16 @@
 import { PortalSecureStore } from './secureStore';
-import { AcademicBasicInfo, parseAcademicBasicInfo } from './ssvParser';
 import { AcademicScraperManager } from './AcademicScraperWebView';
 
 export interface AcademicWorkerResult {
   success: boolean;
-  data?: AcademicBasicInfo;
+  rawSsv?: string;
   errorCode?: 'NO_CREDENTIALS' | 'LOGIN_FAILED' | 'ERP_ERROR' | 'NETWORK_ERROR';
   errorMessage?: string;
 }
 
 /**
- * 포털 SSO 로그인 및 ERP 학적 정보 조회를 단말기(모바일)의 숨김 웹뷰에서 수행하는 워커
+ * 포털 SSO 로그인 및 ERP 학적 정보 조회를 단말기(모바일)의 숨김 웹뷰에서 수행하는 초경량 워커.
+ * 앱 내부에 비즈니스 로직이나 파서를 두지 않고, 원본 텍스트(SSV)만 웹/서버 파이프라인으로 안전하게 전달합니다.
  */
 export async function fetchAcademicInfoLocally(): Promise<AcademicWorkerResult> {
   const creds = await PortalSecureStore.getCredentials();
@@ -28,10 +28,9 @@ export async function fetchAcademicInfoLocally(): Promise<AcademicWorkerResult> 
     const rawSsv = await AcademicScraperManager.executeScrape(creds);
     console.log('[academicWorker] Raw SSV received, length:', rawSsv.length);
 
-    const academicInfo = parseAcademicBasicInfo(rawSsv);
     return {
       success: true,
-      data: academicInfo,
+      rawSsv,
     };
   } catch (error: any) {
     console.warn('[academicWorker] fetchAcademicInfoLocally error:', error);
