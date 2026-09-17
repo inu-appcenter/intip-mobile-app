@@ -26,10 +26,12 @@ const SESSION_CAPTURE = `
 type ScrapeResolver = {
   resolve: (data: string) => void;
   reject: (err: Error) => void;
-  creds: PortalCredentials;
 };
 
-let activeScrape: ScrapeResolver | null = null;
+let activeScrapePromise: Promise<string> | null = null;
+let activeResolvers: ScrapeResolver[] = [];
+let activeCreds: PortalCredentials | null = null;
+let activeTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let triggerComponentScrape: ((creds: PortalCredentials) => void) | null = null;
 let resolveScraperMount: (() => void) | null = null;
 
@@ -52,40 +54,53 @@ function waitForScraperMount(timeoutMs = 15000): Promise<void> {
 
 export const AcademicScraperManager = {
   executeScrape(creds: PortalCredentials): Promise<string> {
-    if (activeScrape) {
-      activeScrape.reject(new Error('다른 학적 조회 작업이 진행 중입니다.'));
-      activeScrape = null;
+    // 동일한 학번에 대해 이미 스크래핑이 진행 중이면 기존 Promise를 재사용하여 동시 요청 충돌 방지
+    if (activeScrapePromise && activeCreds?.studentId === creds.studentId) {
+      console.log('[AcademicScraper] Reusing in-flight scrape promise for student:', creds.studentId);
+      return activeScrapePromise;
     }
 
-    return new Promise((resolve, reject) => {
-      activeScrape = { resolve, reject, creds };
+    // 다른 학번이 요청된 경우 이전 작업 종료
+    if (activeResolvers.length > 0) {
+      activeResolvers.forEach((r) => r.reject(new Error('새로운 학적 조회 요청으로 이전 작업이 취소되었습니다.')));
+      activeResolvers = [];
+      if (activeTimeoutTimer) {
+        clearTimeout(activeTimeoutTimer);
+        activeTimeoutTimer = null;
+      }
+    }
 
-      // The root WebView can receive a chat request before this hidden WebView
-      // has committed its first effect. Queue the scrape briefly instead of
-      // incorrectly treating a linked account as unavailable.
+    activeCreds = creds;
+    activeScrapePromise = new Promise<string>((resolve, reject) => {
+      activeResolvers.push({ resolve, reject });
+
       waitForScraperMount()
         .then(() => {
-          if (activeScrape?.creds !== creds) return;
+          if (activeCreds?.studentId !== creds.studentId) return;
           triggerComponentScrape?.(creds);
 
-          // The actual ERP timeout starts only after the hidden WebView is
-          // available. Otherwise a slow React root mount steals time from an
-          // otherwise valid portal SSO request.
-          setTimeout(() => {
-            if (activeScrape?.creds === creds) {
-              activeScrape.reject(new Error('학적 정보 조회 시간 초과 (35초)'));
-              activeScrape = null;
+          if (activeTimeoutTimer) clearTimeout(activeTimeoutTimer);
+          activeTimeoutTimer = setTimeout(() => {
+            if (activeCreds?.studentId === creds.studentId && activeResolvers.length > 0) {
+              const err = new Error('학적 정보 조회 시간 초과 (35초)');
+              activeResolvers.forEach((r) => r.reject(err));
+              activeResolvers = [];
+              activeScrapePromise = null;
+              activeCreds = null;
             }
           }, SCRAPE_TIMEOUT_MS);
         })
         .catch((error: Error) => {
-          if (activeScrape?.creds === creds) {
-            activeScrape.reject(error);
-            activeScrape = null;
+          if (activeCreds?.studentId === creds.studentId) {
+            activeResolvers.forEach((r) => r.reject(error));
+            activeResolvers = [];
+            activeScrapePromise = null;
+            activeCreds = null;
           }
         });
-
     });
+
+    return activeScrapePromise;
   },
 };
 
@@ -96,20 +111,32 @@ export const AcademicScraperWebView: React.FC = () => {
   const stepRef = useRef<'IDLE' | 'LOGIN' | 'ERP_REDIRECT' | 'ERP_QUERY'>('IDLE');
 
   const finishScrapeSuccess = useCallback((result: string) => {
-    if (activeScrape) {
-      activeScrape.resolve(result);
-      activeScrape = null;
+    if (activeTimeoutTimer) {
+      clearTimeout(activeTimeoutTimer);
+      activeTimeoutTimer = null;
     }
+    const resolvers = [...activeResolvers];
+    activeResolvers = [];
+    activeScrapePromise = null;
+    activeCreds = null;
+    resolvers.forEach((r) => r.resolve(result));
+
     stepRef.current = 'IDLE';
     credsRef.current = null;
     setTargetUrl('about:blank');
   }, []);
 
   const finishScrapeError = useCallback((err: Error) => {
-    if (activeScrape) {
-      activeScrape.reject(err);
-      activeScrape = null;
+    if (activeTimeoutTimer) {
+      clearTimeout(activeTimeoutTimer);
+      activeTimeoutTimer = null;
     }
+    const resolvers = [...activeResolvers];
+    activeResolvers = [];
+    activeScrapePromise = null;
+    activeCreds = null;
+    resolvers.forEach((r) => r.reject(err));
+
     stepRef.current = 'IDLE';
     credsRef.current = null;
     setTargetUrl('about:blank');
@@ -129,9 +156,15 @@ export const AcademicScraperWebView: React.FC = () => {
 
     return () => {
       triggerComponentScrape = null;
-      if (activeScrape) {
-        activeScrape.reject(new Error('스크레이퍼 언마운트됨'));
-        activeScrape = null;
+      if (activeTimeoutTimer) {
+        clearTimeout(activeTimeoutTimer);
+        activeTimeoutTimer = null;
+      }
+      if (activeResolvers.length > 0) {
+        activeResolvers.forEach((r) => r.reject(new Error('스크레이퍼 언마운트됨')));
+        activeResolvers = [];
+        activeScrapePromise = null;
+        activeCreds = null;
       }
     };
   }, []);
