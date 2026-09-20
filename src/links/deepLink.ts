@@ -24,6 +24,27 @@ function isDeepLinkHost(host: string): boolean {
   return (DEEP_LINK_HOSTS as readonly string[]).includes(host);
 }
 
+/**
+ * The portal path a home screen widget's link points at, or `null` when `url`
+ * isn't a widget link.
+ *
+ * Widgets open `intipmobileapp://widget/<portal path>` — `widget/timetable`,
+ * `widget/home/menu?category=학생식당`. A custom scheme rather than an https
+ * portal link on purpose: a widget tap has to land in *this* app, and an https
+ * link on Android goes wherever App Link verification says, which in a dev
+ * build (or before verification completes) is the browser or a chooser.
+ *
+ * Matched as a string rather than parsed with `URL`, because the router may
+ * hand this hook either the whole URL or just its path (`/widget/timetable`),
+ * and a bare path doesn't parse.
+ */
+function widgetPortalPath(url: string): string | null {
+  const match = /^(?:intipmobileapp:\/\/|\/)?widget(?=[/?#]|$)(.*)$/.exec(url);
+  if (!match) return null;
+  const rest = match[1];
+  return rest.startsWith('/') ? rest : `/${rest}`;
+}
+
 /** True for the static pages a deep link must hand back to a browser. */
 function isExcludedPath(pathname: string): boolean {
   if ((DEEP_LINK_EXCLUDED_PATHS as readonly string[]).includes(pathname)) return true;
@@ -34,8 +55,9 @@ function isExcludedPath(pathname: string): boolean {
 
 /**
  * Convert an incoming deep-link URL into a nav intent, or `null` when the URL
- * is none of our business (custom scheme, dev-client URL, some other host) —
- * `null` means "leave this to the router untouched".
+ * is none of our business (dev-client URL, some other host, any custom-scheme
+ * link that isn't a widget's) — `null` means "leave this to the router
+ * untouched".
  *
  * Origin normalization: only the *path* survives. Whichever of the two portal
  * hosts the link came in on, the intent is rebuilt against the app's own
@@ -45,6 +67,9 @@ function isExcludedPath(pathname: string): boolean {
  * opened on the *other* host would come up logged out.
  */
 export function resolveDeepLink(url: string): NavIntent | null {
+  const widgetPath = widgetPortalPath(url);
+  if (widgetPath !== null) return intentForPortalPath(widgetPath);
+
   let parsed: URL;
   try {
     parsed = new URL(url);

@@ -59,6 +59,29 @@ describe('resolveDeepLink', () => {
     expect(resolveDeepLink(url)).toEqual({ kind: 'external', url });
   });
 
+  it('opens a widget link on its portal path, main tab or sub-page', () => {
+    expect(resolveDeepLink('intipmobileapp://widget/timetable')).toEqual({ kind: 'spa', path: '/timetable' });
+    expect(resolveDeepLink('intipmobileapp://widget/bus')).toEqual({ kind: 'spa', path: '/bus' });
+
+    const category = encodeURIComponent('학생식당');
+    expect(resolveDeepLink(`intipmobileapp://widget/home/menu?category=${category}`)).toEqual({
+      kind: 'push',
+      path: `/home/menu?category=${category}`,
+      url: `${ROOT_URL}/home/menu?category=${category}`,
+    });
+  });
+
+  it('accepts a widget link handed over as a bare path', () => {
+    // The router may pass the hook just the path of a custom-scheme URL.
+    expect(resolveDeepLink('/widget/timetable')).toEqual({ kind: 'spa', path: '/timetable' });
+    expect(resolveDeepLink('intipmobileapp://widget')).toEqual({ kind: 'spa', path: '/' });
+  });
+
+  it('does not mistake a look-alike for a widget link', () => {
+    expect(resolveDeepLink('intipmobileapp://widgets/timetable')).toBeNull();
+    expect(resolveDeepLink('/widgetfoo')).toBeNull();
+  });
+
   it('ignores other hosts, other schemes and non-URLs', () => {
     expect(resolveDeepLink('https://inu.ac.kr/notice/1')).toBeNull();
     expect(resolveDeepLink('https://evil.example.com/home')).toBeNull();

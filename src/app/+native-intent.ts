@@ -17,7 +17,7 @@
 import { resolveDeepLink } from '../links/deepLink';
 import { deliver } from '../push/pendingIntent';
 
-export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
+export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string {
   // Expo Router's own warning: never throw in here — a crash on this path
   // takes down app launch. `path` is not guaranteed to be a URL or even a
   // path, so every step is defensive and falls back to "not our link".
@@ -29,11 +29,22 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
   }
   if (!intent) return path;
 
-  try {
-    deliver(intent);
-  } catch {
-    // A queueing failure must not block launch; the app still opens at root,
-    // just without the deep-link destination.
-  }
+  // A running app delivers on the next tick, after the router has acted on the
+  // `/` returned below. Delivered immediately, the live subscriber pushed the
+  // sub-page first and the router's navigation to `/` then popped it again —
+  // a link to a non-main-tab page (a widget's `/home/menu`, or any https link
+  // to one) just landed on home. Main-tab links looked fine only because they
+  // go to root anyway. On a cold start nothing is subscribed yet: `deliver`
+  // queues the intent for the WebView to drain once it mounts, so no wait.
+  const send = () => {
+    try {
+      deliver(intent);
+    } catch {
+      // A queueing failure must not block launch; the app still opens at root,
+      // just without the deep-link destination.
+    }
+  };
+  if (initial) send();
+  else setTimeout(send, 0);
   return '/';
 }
