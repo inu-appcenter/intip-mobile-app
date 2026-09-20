@@ -261,7 +261,9 @@ const NextClassWidget = (props: NextClassWidgetProps, environment: WidgetEnviron
         // must fill the widget and anchor top-leading.
         frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' }),
         // Tapping anywhere on the widget opens the app.
-        widgetURL('intipmobileapp://'),
+        // Opens the portal's timetable tab — see `widgetPortalPath` in
+        // src/links/deepLink.ts for how `widget/...` links are routed.
+        widgetURL('intipmobileapp://widget/timetable'),
       ]}
     >
       {centered && <Spacer />}

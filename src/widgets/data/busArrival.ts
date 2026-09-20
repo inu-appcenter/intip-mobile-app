@@ -41,15 +41,15 @@ type BusArrivalApiItem = {
 };
 
 /**
- * Under this many seconds the design says "곧 도착" instead of a countdown —
+ * Under this many seconds the design says "잠시후" instead of a countdown —
  * a number that small has more error than signal, and it is what the rider
  * actually needs to know.
  */
 export const ARRIVING_SOON_SECONDS = 60;
 
-/** Seconds → `"4분 19초"`, or `"곧 도착"` when it is close enough. */
+/** Seconds → `"4분 19초"`, or `"잠시후"` when it is close enough. */
 export function formatEta(seconds: number): string {
-  if (seconds <= ARRIVING_SOON_SECONDS) return '곧 도착';
+  if (seconds <= ARRIVING_SOON_SECONDS) return '잠시후';
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   if (minutes >= 60) return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분`;
@@ -128,6 +128,48 @@ export function arrivalBoundariesOf(items: BusArrivalApiItem[], now: Date): Date
     }
   }
   return [...instants].sort((a, b) => a - b).map((at) => new Date(at));
+}
+
+/** How often a bus's last stretch is re-checked once it has turned "잠시후". */
+export const ARRIVAL_POLL_SECONDS = 20;
+
+/**
+ * How long past its estimated arrival a bus keeps being re-checked. Estimates
+ * lag the bus itself, so "arrived" by the clock isn't "gone" by the API; the
+ * last check is what confirms the row can go and fills it with the next bus.
+ */
+export const ARRIVAL_GRACE_SECONDS = 30;
+
+/**
+ * The moments, epoch ms, at which the widget should fetch again: every
+ * {@link ARRIVAL_POLL_SECONDS} through each on-screen bus's last stretch, from
+ * when it turns "잠시후" until {@link ARRIVAL_GRACE_SECONDS} after it's due.
+ *
+ * One fetch at the "잠시후" flip wasn't enough. That reading usually still has
+ * the bus a few seconds out, so nothing after it asked again, and the row sat
+ * on "잠시후" until something else happened to refresh the widget. Polling the
+ * window instead finds out when the bus has actually gone.
+ *
+ * "On screen" is the three earliest buses still to come when the window
+ * opens, the same cut {@link toBusArrivalProps} makes — a bus further down the
+ * list isn't worth a runtime boot every 20 seconds. Only moments still ahead
+ * of `now` are returned. Android only: a WidgetKit entry can't fetch.
+ */
+export function arrivalRefreshMomentsOf(items: BusArrivalApiItem[], now: Date): Set<number> {
+  const arrivals = items
+    .map((item) => arrivesAtOf(item, now))
+    .filter((at): at is number => at !== null);
+  const moments = new Set<number>();
+  for (const arrivesAt of arrivals) {
+    const soonAt = arrivesAt - ARRIVING_SOON_SECONDS * 1000;
+    const windowOpensAt = Math.max(soonAt, now.getTime());
+    const ahead = arrivals.filter((other) => other > windowOpensAt && other < arrivesAt).length;
+    if (ahead >= 3) continue;
+    for (let at = soonAt; at <= arrivesAt + ARRIVAL_GRACE_SECONDS * 1000; at += ARRIVAL_POLL_SECONDS * 1000) {
+      if (at > now.getTime()) moments.add(at);
+    }
+  }
+  return moments;
 }
 
 /**

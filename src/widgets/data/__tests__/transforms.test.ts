@@ -11,11 +11,14 @@ import { describe, it, expect } from '@jest/globals';
 import {
   currentMealWindow,
   mealBoundariesOf,
+  menuColumnsOf,
   toCafeteriaMenuProps,
+  toCafeteriaSnapshot,
 } from '../cafeteria';
 import {
   arrivalBoundariesOf,
   arrivalsForStop,
+  arrivalRefreshMomentsOf,
   busStopsOf,
   distanceMeters,
   nearestStop,
@@ -223,7 +226,7 @@ describe('bus arrival', () => {
   it('formats an ETA, collapsing anything imminent', () => {
     expect(formatEta(259)).toBe('4분 19초');
     expect(formatEta(240)).toBe('4분');
-    expect(formatEta(30)).toBe('곧 도착');
+    expect(formatEta(30)).toBe('잠시후');
     expect(formatEta(3700)).toBe('1시간 1분');
   });
 
@@ -341,30 +344,111 @@ describe('nearest bus stop', () => {
 });
 
 describe('cafeteria', () => {
+  const LUNCH_ONLY = ['-', '돈까스카레', '-'];
+  const SATURDAY = (h: number, m = 0) => new Date(2026, 8, 5, h, m, 0, 0);
+  const STUDENT = { name: '학생식당' };
+
   it('picks the meal being served, else the next one', () => {
+    expect(currentMealWindow(TUESDAY(8, 30))?.meal).toBe('breakfast');
     expect(currentMealWindow(TUESDAY(12))?.meal).toBe('lunch');
-    expect(currentMealWindow(TUESDAY(9))?.meal).toBe('lunch');
+    expect(currentMealWindow(TUESDAY(10))?.meal).toBe('lunch');
     expect(currentMealWindow(TUESDAY(15))?.meal).toBe('dinner');
     expect(currentMealWindow(TUESDAY(21))).toBeNull();
   });
 
-  it('marks whether the window is open right now', () => {
-    expect(toCafeteriaMenuProps(['돈까스카레'], '제1학생식당', TUESDAY(12))).toMatchObject({
+  it('shows the menu only while the window is open', () => {
+    expect(toCafeteriaSnapshot(LUNCH_ONLY, STUDENT, TUESDAY(12))).toMatchObject({
       status: 'normal',
       mealLabel: '점심',
       footer: '11:30–14:00 운영 중 · 더보기',
     });
-    expect(toCafeteriaMenuProps(['돈까스카레'], '제1학생식당', TUESDAY(9))).toMatchObject({
-      footer: '11:30–14:00 운영 예정 · 더보기',
+  });
+
+  it('counts down to the next meal once the cafeteria is closed', () => {
+    const slots = ['-', '[1코너(백반)]\n돈까스카레', '[1코너(백반)]\n제육볶음\n된장찌개'];
+    // Before the first meal of the day nothing has closed yet.
+    expect(toCafeteriaSnapshot(slots, STUDENT, TUESDAY(10))).toEqual({
+      status: 'closed',
+      cafeteriaName: '학생식당',
+      badge: '운영 전',
+      nextLabel: '다음 점심 11:30부터',
+      preview: '돈까스카레',
+    });
+    expect(toCafeteriaSnapshot(slots, STUDENT, TUESDAY(15))).toMatchObject({
+      badge: '운영 종료',
+      nextLabel: '다음 저녁 17:30부터',
+      preview: '제육볶음 · 된장찌개',
+    });
+    // Past the last meal there is nothing left today to count down to.
+    expect(toCafeteriaSnapshot(slots, STUDENT, TUESDAY(21))).toMatchObject({
+      status: 'closed',
+      nextLabel: '오늘 운영이 끝났어요',
+      preview: '',
     });
   });
 
-  it('drops blank menu entries and falls back when nothing is left', () => {
-    expect(toCafeteriaMenuProps(['  ', ''], '제1학생식당', TUESDAY(12))).toEqual({
-      status: 'noMenu',
-      cafeteriaName: '제1학생식당',
+  it('skips meals the cafeteria does not serve', () => {
+    // At breakfast time with no breakfast, lunch is next.
+    expect(toCafeteriaSnapshot(LUNCH_ONLY, STUDENT, TUESDAY(8, 30))).toMatchObject({
+      status: 'closed',
+      nextLabel: '다음 점심 11:30부터',
     });
-    expect(toCafeteriaMenuProps(null, '제1학생식당', TUESDAY(12)).status).toBe('noMenu');
+    // After lunch with no dinner, the day is over.
+    expect(toCafeteriaSnapshot(LUNCH_ONLY, STUDENT, TUESDAY(15))).toMatchObject({
+      status: 'closed',
+      nextLabel: '오늘 운영이 끝났어요',
+    });
+  });
+
+  it('skips a meal that has none of the option\'s corners', () => {
+    const slots = ['-', '[1코너(백반)]\n제육볶음', '-'];
+    const option = { name: '학생식당', corners: ['4코너', '5코너'] };
+    expect(toCafeteriaSnapshot(slots, option, TUESDAY(12)).status).toBe('notOperating');
+  });
+
+  it('reports a day with nothing posted as not operating', () => {
+    expect(toCafeteriaSnapshot(['  ', '-', ''], STUDENT, TUESDAY(12))).toEqual({
+      status: 'notOperating',
+      cafeteriaName: '학생식당',
+      message: '오늘은 운영하지 않아요',
+    });
+    // Exactly what `/api/cafeterias` returns for a name it doesn't know, or a
+    // day with nothing served. `.trim()` on these used to throw.
+    expect(toCafeteriaSnapshot([null, null, null], STUDENT, SATURDAY(12))).toMatchObject({
+      status: 'notOperating',
+      message: '주말에는 운영하지 않아요',
+    });
+    // A failed request is not a closed cafeteria.
+    expect(toCafeteriaSnapshot(null, STUDENT, TUESDAY(12))).toEqual({
+      status: 'notOperating',
+      cafeteriaName: '학생식당',
+      message: '메뉴를 불러오지 못했어요',
+    });
+  });
+
+  it('builds a snapshot for every option, keyed by configuration id', () => {
+    const props = toCafeteriaMenuProps({ 학생식당: LUNCH_ONLY }, TUESDAY(12));
+    expect(Object.keys(props.cafeterias)).toEqual([
+      'student12',
+      'student45',
+      'staff2',
+      'dorm1',
+      'education',
+      'bldg27',
+      'dorm2',
+    ]);
+    expect(props.cafeterias.student45).toMatchObject({ status: 'normal', cafeteriaName: '학생식당' });
+    expect(props.cafeterias.dorm1).toMatchObject({ status: 'notOperating', cafeteriaName: '제1기숙사식당' });
+  });
+
+  it('never puts null in the props', () => {
+    // iOS keeps props in UserDefaults, which rejects null outright: one
+    // untitled column's `title: null` made every push of this widget throw.
+    const props = toCafeteriaMenuProps(
+      { 학생식당: ['-', '설렁탕 반반왕만두찜 매콤어묵볶음 양파초절임 쌀밥 배추김치', '-'] },
+      TUESDAY(12),
+    );
+    expect(JSON.stringify(props)).not.toContain('null');
   });
 
   it('reports only the boundaries still ahead, in order', () => {
@@ -374,21 +458,47 @@ describe('cafeteria', () => {
   });
 });
 
-describe('toCafeteriaMenuProps with the API\'s null slots', () => {
-  const LUNCHTIME = new Date(2026, 8, 14, 12, 0);
+describe('menuColumnsOf', () => {
+  const CORNERS =
+    '[1코너(백반)]\n고사리제육볶음\n미역국\n쑥갓두부무침\n표고버섯볶음\n6,500원 (구성원 5,500원)\n1246kcal\n\n' +
+    '[2코너(일품)]\n짬뽕\n콘소메맛 지파이튀김\n7,500원 (구성원 6,500원)\n1615kcal\n\n' +
+    '[국밥]\n수육국밥 / 순대국밥\n7,500(구성원 6,500원)\n1153kcal 1210kcal\n\n' +
+    '[4코너(일품)]\n새우튀김덮밥\n902kcal\n\n' +
+    '[5코너(고급일품)]\n뚝) 치즈불닭\n8,500원 (구성원 7,500원)\n1551kcal';
 
-  it('treats a slot array of nulls as no menu instead of throwing', () => {
-    // Exactly what `/api/cafeterias` returns on a day with nothing served:
-    // {"data":[null,null,null]}. This used to throw on `.trim()`, and
-    // `Promise.allSettled` swallowed it, so the widget kept the last meal.
-    const props = toCafeteriaMenuProps([null, null, null], '제1학생식당', LUNCHTIME);
-    expect(props.status).toBe('noMenu');
+  it('breaks a one-line menu into dishes under the meal, cut to two lines and …', () => {
+    // Production's shape, and what rendered as one long line on device.
+    expect(
+      menuColumnsOf('설렁탕 반반왕만두찜 매콤어묵볶음 양파초절임 쌀밥 배추김치 6,500원 (구성원 5,500원) 1250kcal', undefined, '석식'),
+    ).toEqual([{ title: '석식', items: ['설렁탕', '반반왕만두찜', '…'] }]);
   });
 
-  it('keeps the real items when only some slots are null', () => {
-    const props = toCafeteriaMenuProps([null, '돈까스카레', null, '순두부찌개'], '제1학생식당', LUNCHTIME);
-    if (props.status !== 'normal') throw new Error('expected normal');
-    expect(props.items).toEqual(['돈까스카레', '순두부찌개']);
+  it('keeps a short menu whole, dropping price and calorie lines', () => {
+    expect(menuColumnsOf('설렁탕\n반반왕만두찜\n6,500원 (구성원 5,500원)\n1250kcal', undefined, '석식')).toEqual([
+      { title: '석식', items: ['설렁탕', '반반왕만두찜'] },
+    ]);
+    expect(menuColumnsOf('설렁탕\n반반왕만두찜\n쌀밥', undefined, '석식')).toEqual([
+      { title: '석식', items: ['설렁탕', '반반왕만두찜', '쌀밥'] },
+    ]);
+  });
+
+  it('gives the option\'s two corners a column each, without 국밥', () => {
+    expect(menuColumnsOf(CORNERS, ['1코너', '2코너'])).toEqual([
+      { title: '1코너(백반)', items: ['고사리제육볶음', '미역국', '…'] },
+      { title: '2코너(일품)', items: ['짬뽕', '콘소메맛 지파이튀김'] },
+    ]);
+    expect(menuColumnsOf(CORNERS, ['4코너', '5코너'])).toEqual([
+      { title: '4코너(일품)', items: ['새우튀김덮밥'] },
+      { title: '5코너(고급일품)', items: ['뚝) 치즈불닭'] },
+    ]);
+  });
+
+  it('shows a pick-one menu as its choices next to the shared dishes', () => {
+    const text = '[선택1] 육개장\n[선택2] 차슈덮밥(pork), 우동국물\n\n[공통]\n백순대볶음(pork)\n야채계란전\n8,000원(구성원 7,000원)\n1,103/1,310kcal';
+    expect(menuColumnsOf(text)).toEqual([
+      { title: '선택', items: ['육개장', '차슈덮밥(pork), 우동국물'] },
+      { title: '공통', items: ['백순대볶음(pork)', '야채계란전'] },
+    ]);
   });
 });
 
@@ -527,7 +637,7 @@ describe('bus arrivals over time', () => {
   it('works the estimate out against the rendered moment, not the fetch', () => {
     const props = toBusArrivalProps(ITEMS, '정류장', at(90));
     if (props.status !== 'normal') throw new Error('expected normal');
-    expect(props.arrivals[0]).toMatchObject({ route: '8', eta: '곧 도착', soon: true });
+    expect(props.arrivals[0]).toMatchObject({ route: '8', eta: '잠시후', soon: true });
     // Still stamped with when the data was actually read.
     expect(props.arrivals[0].observedLabel).toBe('09:00 기준');
   });
@@ -542,9 +652,34 @@ describe('bus arrivals over time', () => {
     expect(later.arrivals[0].arrivesAt).toBe(FETCHED.getTime() + 600_000);
   });
 
-  it('lists each "곧 도착" flip and each arrival, future only, in order', () => {
+  it('lists each "잠시후" flip and each arrival, future only, in order', () => {
     const boundaries = arrivalBoundariesOf(ITEMS, at(100)).map((d) => (d.getTime() - FETCHED.getTime()) / 1000);
     // 8's soon-flip (60s) is already past at 100s; its arrival (120s) is not.
     expect(boundaries).toEqual([120, 540, 600, 840, 900, 1440, 1500]);
+  });
+
+  it('polls each on-screen bus from "잠시후" until just past its due time', () => {
+    const seconds = (moments: Set<number>) =>
+      [...moments].map((ms) => (ms - FETCHED.getTime()) / 1000).sort((a, b) => a - b);
+    // Every 20s from 60s before arrival through 30s after it.
+    expect(seconds(arrivalRefreshMomentsOf(ITEMS, at(0)))).toEqual([
+      60, 80, 100, 120, 140, // 8, due at 120
+      540, 560, 580, 600, 620, // 16, due at 600
+      840, 860, 880, 900, 920, // 순환41, due at 900
+      1440, 1460, 1480, 1500, 1520, // 58, due at 1500
+    ]);
+    // Already inside 8's window: only its remaining checks are left.
+    expect(seconds(arrivalRefreshMomentsOf(ITEMS, at(100))).slice(0, 3)).toEqual([120, 140, 540]);
+  });
+
+  it('does not poll for a bus below the three rows on screen', () => {
+    const bunched = withObservedAt(
+      [100, 110, 120, 130].map((estimatedArrivalSeconds, index) => ({ routeNo: `${index}`, estimatedArrivalSeconds })),
+      FETCHED,
+    );
+    const moments = [...arrivalRefreshMomentsOf(bunched, at(0))].map((ms) => (ms - FETCHED.getTime()) / 1000);
+    // The fourth bus (due 130) opens its window at 70s behind three buses still
+    // to come, so its last check at 150s never appears.
+    expect(moments.sort((a, b) => a - b)).toEqual([40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140]);
   });
 });

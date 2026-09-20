@@ -184,15 +184,18 @@ const TodayClassesWidget = (props: TodayClassesWidgetProps, environment: WidgetE
             asking to fill remaining width inside a wrap_content parent is
             undefined on RemoteViews (SwiftUI resolves it fine). See git
             history for the isolation steps that pinned this down. */}
-        <HStack spacing={0} alignment="center" modifiers={[frame({ maxWidth: Infinity })]}>
+        <HStack spacing={8} alignment="center" modifiers={[frame({ maxWidth: Infinity })]}>
           <Text
             modifiers={[
               font({ size: 12, weight: 'medium' }),
               foregroundStyle(item.highlighted ? colors.textBrand : colors.textTertiary),
-              // Figma's Time box is a fixed 76 with the label left-aligned
-              // in it; `frame`'s default `.center` squeezed the gap before
-              // the class name shut ("09:00~10:15자료구조" on device).
-              frame({ width: 76, alignment: 'leading' }),
+              // A fixed box, left-aligned, so every class name starts at the
+              // same x; `frame`'s default `.center` squeezed the gap shut
+              // ("09:00~10:15자료구조" on device). Figma's 76 fit
+              // "20:00~21:00" exactly and truncated wider digits
+              // ("22:00~23:…"), so the box has a little slack, and the 8 gap
+              // lives in the HStack's spacing rather than inside it.
+              frame({ width: 82, alignment: 'leading' }),
             ]}
           >
             {item.timeRange}
@@ -280,7 +283,9 @@ const TodayClassesWidget = (props: TodayClassesWidgetProps, environment: WidgetE
         // and `topLeading` are needed here.
         frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' }),
         // Tapping anywhere on the widget opens the app.
-        widgetURL('intipmobileapp://'),
+        // Opens the portal's timetable tab — see `widgetPortalPath` in
+        // src/links/deepLink.ts for how `widget/...` links are routed.
+        widgetURL('intipmobileapp://widget/timetable'),
       ]}
     >
       {content}

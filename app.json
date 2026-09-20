@@ -177,12 +177,53 @@
             {
               "name": "CafeteriaMenuWidget",
               "displayName": "학식 메뉴",
-              "description": "오늘의 학생식당 메뉴를 보여줍니다.",
+              "description": "선택한 식당의 오늘 메뉴를 보여줍니다.",
               "ios": {
                 "contentMarginsDisabled": true,
                 "supportedFamilies": [
                   "systemMedium"
-                ]
+                ],
+                "configuration": {
+                  "title": "학식 메뉴",
+                  "description": "위젯에 보여줄 식당을 고르세요.",
+                  "parameters": {
+                    "cafeteria": {
+                      "title": "식당",
+                      "type": "enum",
+                      "default": "student12",
+                      "values": [
+                        {
+                          "name": "학생식당 1·2코너",
+                          "value": "student12"
+                        },
+                        {
+                          "name": "학생식당 4·5코너",
+                          "value": "student45"
+                        },
+                        {
+                          "name": "2호관(교직원)식당",
+                          "value": "staff2"
+                        },
+                        {
+                          "name": "제1기숙사식당",
+                          "value": "dorm1"
+                        },
+                        {
+                          "name": "사범대식당",
+                          "value": "education"
+                        },
+                        {
+                          "name": "27호관식당",
+                          "value": "bldg27"
+                        },
+                        {
+                          "name": "2기숙사 식당",
+                          "value": "dorm2"
+                        }
+                      ]
+                    }
+                  }
+                }
               }
             },
             {
@@ -242,7 +283,48 @@
             {
               "name": "CafeteriaMenuWidget",
               "displayName": "학식 메뉴",
-              "description": "오늘의 학생식당 메뉴를 보여줍니다.",
+              "description": "선택한 식당의 오늘 메뉴를 보여줍니다.",
+              "configuration": {
+                "title": "학식 메뉴",
+                "description": "위젯에 보여줄 식당을 고르세요.",
+                "parameters": {
+                  "cafeteria": {
+                    "title": "식당",
+                    "type": "enum",
+                    "default": "student12",
+                    "values": [
+                      {
+                        "name": "학생식당 1·2코너",
+                        "value": "student12"
+                      },
+                      {
+                        "name": "학생식당 4·5코너",
+                        "value": "student45"
+                      },
+                      {
+                        "name": "2호관(교직원)식당",
+                        "value": "staff2"
+                      },
+                      {
+                        "name": "제1기숙사식당",
+                        "value": "dorm1"
+                      },
+                      {
+                        "name": "사범대식당",
+                        "value": "education"
+                      },
+                      {
+                        "name": "27호관식당",
+                        "value": "bldg27"
+                      },
+                      {
+                        "name": "2기숙사 식당",
+                        "value": "dorm2"
+                      }
+                    ]
+                  }
+                }
+              },
               "android": {
                 "minWidth": 250,
                 "minHeight": 180,

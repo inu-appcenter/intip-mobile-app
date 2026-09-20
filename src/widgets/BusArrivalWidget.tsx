@@ -20,15 +20,15 @@ type BusArrival = {
   route: string;
   /**
    * The estimate as of `observedLabel`, already formatted ("4분 19초",
-   * "곧 도착").
+   * "잠시후").
    *
    * Currently rendered by neither platform: both draw the live countdown from
    * `arrivesAt` instead (see below). It stays in the snapshot as the
    * pre-formatted fallback for a surface that cannot tick — a notification,
-   * say — and because `formatEta` is where "곧 도착" is decided.
+   * say — and because `formatEta` is where "잠시후" is decided.
    */
   eta: string;
-  /** The design's one emphasized case ("곧 도착") gets the brand color instead of tertiary. */
+  /** The design's one emphasized case ("잠시후") gets the brand color instead of tertiary. */
   soon?: boolean;
   /**
    * When the bus is expected, as an epoch millisecond timestamp.
@@ -73,7 +73,7 @@ export const DEFAULT_PROPS: BusArrivalWidgetProps = {
   status: "normal",
   stopLabel: "2번출구",
   arrivals: [
-    { route: "6-1", eta: "곧 도착", soon: true, arrivesAt: Date.now() + 30_000, observedLabel: "12:34 기준" },
+    { route: "6-1", eta: "잠시후", soon: true, arrivesAt: Date.now() + 30_000, observedLabel: "12:34 기준" },
     { route: "8", eta: "4분 19초", arrivesAt: Date.now() + 259_000, observedLabel: "12:34 기준" },
     { route: "순환41", eta: "16분 41초", arrivesAt: Date.now() + 1_001_000, observedLabel: "12:34 기준" },
   ],
@@ -192,30 +192,37 @@ const BusArrivalWidget = (
           {arrival.route}
         </Text>
       </HStack>
-      {/* `dateStyle="timer"` is a self-updating SwiftUI text: on iOS WidgetKit
-          reruns it on its own clock, so this counts down second by second
-          with no timeline reload and no network. expo-widgets-glance renders
-          the same node as a RemoteViews Chronometer, which the launcher ticks
-          for itself — so it is live on both platforms now.
-
-          The countdown being live does not make the *estimate* live: it runs
-          toward an instant derived from whenever the transit API was last
-          read, which is what the footer's "기준" time states. */}
-      <Text
-        date={new Date(arrival.arrivesAt)}
-        dateStyle="timer"
-        modifiers={[
-          // A timer-style Text is flexible-width in SwiftUI — it claims the
-          // room left in the row and draws its digits at the *leading* edge
-          // of that room, so without this the countdown sat right next to
-          // the route number instead of against the right edge.
-          multilineTextAlignment("trailing"),
-          font({ size: 12, weight: arrival.soon ? "medium" : "regular" }),
-          foregroundStyle(
-            arrival.soon ? colors.textBrand : colors.textTertiary,
-          ),
-        ]}
-      />
+      {/* The last minute says "잠시후" instead of counting. Not only a design
+          choice: Android's countdown is a RemoteViews Chronometer, which does
+          not stop at zero — it runs on into "-0:42" — and the repaint that
+          drops an arrived bus is scheduled work that can be late. A row that
+          stops ticking a minute early can't overrun whatever that repaint's
+          delay turns out to be. Same on iOS, for one look on both. */}
+      {arrival.soon ? (
+        <Text modifiers={[font({ size: 12, weight: "medium" }), foregroundStyle(colors.textBrand)]}>
+          잠시후
+        </Text>
+      ) : (
+        // `dateStyle="timer"` is a self-updating text on both platforms —
+        // SwiftUI on iOS, a Chronometer the launcher ticks on Android — so
+        // this counts down with no timeline reload and no network. The
+        // countdown being live does not make the *estimate* live: it runs
+        // toward an instant derived from whenever the transit API was last
+        // read, which is what the footer's "기준" time states.
+        <Text
+          date={new Date(arrival.arrivesAt)}
+          dateStyle="timer"
+          modifiers={[
+            // A timer-style Text is flexible-width in SwiftUI — it claims the
+            // room left in the row and draws its digits at the *leading* edge
+            // of that room, so without this the countdown sat right next to
+            // the route number instead of against the right edge.
+            multilineTextAlignment("trailing"),
+            font({ size: 12, weight: "regular" }),
+            foregroundStyle(colors.textTertiary),
+          ]}
+        />
+      )}
     </HStack>
   );
 
@@ -377,7 +384,9 @@ const BusArrivalWidget = (
           alignment: "topLeading",
         }),
         // Tapping anywhere on the widget opens the app.
-        widgetURL("intipmobileapp://"),
+        // Opens the portal's bus tab — see `widgetPortalPath` in
+        // src/links/deepLink.ts for how `widget/...` links are routed.
+        widgetURL("intipmobileapp://widget/bus"),
       ]}
     >
       {content}

@@ -7,7 +7,7 @@
  * never throws: a refresh that fails leaves whatever the widget already had on
  * screen, which is always better than an error state the user can't act on.
  *
- * ## Why iOS gets timelines and Android gets snapshots
+ * ## Timelines on both platforms
  *
  * The two platforms give a widget its future in opposite ways.
  *
@@ -19,16 +19,17 @@
  * is what makes that possible, and it is the difference between a widget that
  * is correct at 3pm and one that is still showing 9am.
  *
- * Glance has no equivalent: a widget shows what the store last held, and the
- * only way to change it is to write again. So Android gets the current
- * snapshot, and the rest of its day is covered by the refresh hook in
- * expo-widgets-glance, which re-runs this data path when the launcher asks the
- * widget to update. Those are genuinely different mechanisms, and pretending
- * otherwise here would just move the difference somewhere harder to see.
+ * Glance has no equivalent of its own — a widget shows what the store last
+ * held — so expo-widgets-glance supplies one: it keeps the same entries,
+ * renders whichever is current by the clock, and schedules a repaint for each
+ * later one. Android therefore gets the very same entries iOS does. What stays
+ * Android-only is the refresh hook, which re-runs this data path when data
+ * goes stale, and an entry can ask for it (`refresh`) at a moment the data is
+ * known to run out — see the bus widget below.
  */
 import { AppState, Platform } from 'react-native';
 
-import { updateGlanceSnapshot } from 'expo-widgets-glance';
+import { updateGlanceTimeline } from 'expo-widgets-glance';
 
 import BusArrivalWidget from './BusArrivalWidget';
 import CafeteriaMenuWidget from './CafeteriaMenuWidget';
@@ -37,15 +38,11 @@ import TestWidget from './TestWidget';
 import TimetableWidget from './TimetableWidget';
 import TodayClassesWidget from './TodayClassesWidget';
 import { BUS_FOREGROUND_POLL_MS } from './refreshIntervals';
-import {
-  DEFAULT_CAFETERIA,
-  fetchCafeteriaMenu,
-  mealBoundariesOf,
-  toCafeteriaMenuProps,
-} from './data/cafeteria';
+import { fetchCafeteriaMenus, mealBoundariesOf, toCafeteriaMenuProps } from './data/cafeteria';
 import {
   arrivalBoundariesOf,
   arrivalsForStop,
+  arrivalRefreshMomentsOf,
   fetchBusArrivals,
   fetchBusStops,
   nearestStop,
@@ -79,23 +76,40 @@ type Pushable<P extends Record<string, unknown>> = {
  *
  * `at(now)` is called once per boundary rather than being passed a prebuilt
  * list, so the caller describes *how* to render a moment and this decides
- * which moments matter. On Android only the first is used — see the module
+ * which moments matter. Both platforms get the same entries — see the module
  * doc.
  *
  * A boundary already in the past would make WidgetKit show a stale entry as
  * "current", so the list always starts at `now` and only ever moves forward.
+ *
+ * `refreshAt` (epoch ms) is when the widget should refetch. Android only: a
+ * WidgetKit entry can't reach the network. A moment that isn't already a
+ * boundary gets an entry of its own there (same props, just a wake-up), so a
+ * refetch never has to wait for the next visual change.
  */
 function push<P extends Record<string, unknown>>(
   widget: Pushable<P>,
   boundaries: Date[],
   at: (moment: Date) => P,
   now: Date,
+  refreshAt: ReadonlySet<number> = new Set(),
 ): void {
+  const moments = [now, ...boundaries.filter((b) => b.getTime() > now.getTime())];
   if (Platform.OS === 'ios') {
-    const moments = [now, ...boundaries.filter((b) => b.getTime() > now.getTime())];
     widget.ios.updateTimeline(moments.map((date) => ({ date, props: at(date) })));
   } else if (Platform.OS === 'android') {
-    updateGlanceSnapshot(widget.name, at(now));
+    const androidMoments = [
+      ...new Set([
+        ...moments.map((date) => date.getTime()),
+        ...[...refreshAt].filter((ms) => ms > now.getTime()),
+      ]),
+    ]
+      .sort((a, b) => a - b)
+      .map((ms) => new Date(ms));
+    updateGlanceTimeline(
+      widget.name,
+      androidMoments.map((date) => ({ date, props: at(date), refresh: refreshAt.has(date.getTime()) })),
+    );
   }
 }
 
@@ -161,11 +175,17 @@ export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<v
   // stayed on screen with their timers counting back *up* ("12:21:26" the
   // next morning), and nothing new appeared until the app was opened again.
   // The countdown between those moments still ticks on its own.
+  //
+  // On Android, a shown bus's last stretch is also re-fetched every few
+  // seconds, from "잠시후" until just past its due time — the only way to learn
+  // it has actually gone, and to fill its row with the next bus. See
+  // `arrivalRefreshMomentsOf`.
   push(
     BUS_ARRIVAL,
     arrivalBoundariesOf(arrivals, now),
     (at) => toBusArrivalProps(arrivals, stop.label, at),
     now,
+    arrivalRefreshMomentsOf(arrivals, now),
   );
 }
 
@@ -222,15 +242,12 @@ export function watchAppLifecycleForWidgets(): () => void {
 
 /** Refreshes the 학식 메뉴 widget, including today's remaining meal switches. */
 export async function refreshCafeteriaMenuWidget(now: Date = new Date()): Promise<void> {
-  const menu = await fetchCafeteriaMenu(DEFAULT_CAFETERIA, now);
-  if (menu === null) return; // Network failure: keep the last good snapshot.
+  // Every cafeteria, since each widget picks its own — see `data/cafeteria.ts`.
+  const menus = await fetchCafeteriaMenus(now);
+  // Nothing came back at all: a network failure, so keep the last good snapshot.
+  if (Object.values(menus).every((menu) => menu === null)) return;
 
-  push(
-    CAFETERIA_MENU,
-    mealBoundariesOf(now),
-    (at) => toCafeteriaMenuProps(menu, DEFAULT_CAFETERIA, at),
-    now,
-  );
+  push(CAFETERIA_MENU, mealBoundariesOf(now), (at) => toCafeteriaMenuProps(menus, at), now);
 }
 
 /**
