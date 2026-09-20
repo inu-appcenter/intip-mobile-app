@@ -25,7 +25,7 @@
  * an IPA with the production fallback baked in. Expo CLI always reads
  * `.env.local` from the project root, so the file survives that hand-off.
  */
-export const ROOT_URL = process.env.EXPO_PUBLIC_ROOT_URL ?? "https://intip.inuappcenter.kr";
+export const ROOT_URL = "http://localhost:5173";
 
 /** Host that is considered "internal". Anything else opens in the system browser. */
 export const PORTAL_HOST = new URL(ROOT_URL).host;
