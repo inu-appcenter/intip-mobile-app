@@ -72,6 +72,11 @@ export const LibraryOngoingService = {
     const elapsedMinutes = Math.max(0, totalDurationMinutes - remainingMinutes);
 
     const isStudyRoom = job.type === 'STUDY_ROOM_SNIPER';
+    const targetRoomId = job.roomId || job.targetId || '';
+    const libraryPath = isStudyRoom
+      ? `/services/library?tab=study&roomId=${targetRoomId}`
+      : `/services/library?tab=seats&roomId=${targetRoomId}`;
+
     const title = isStudyRoom
       ? `🎯 [스터디룸] ${job.targetName} 취소표 감시 중`
       : `🎯 [열람실] ${job.targetName} 빈자리 감시 중`;
@@ -91,9 +96,9 @@ export const LibraryOngoingService = {
           type: 'library_watch',
           watchType: job.type,
           jobId: job.id,
-          roomId: String(job.roomId || job.targetId || ''),
+          roomId: String(targetRoomId),
           seatNo: String(job.seatNo || ''),
-          path: `/services/library?roomId=${job.roomId || job.targetId || ''}`,
+          path: libraryPath,
           'android.requestPromotedOngoing': 'true',
           'com.samsung.android.support.ongoing_activity': 'true',
         },
@@ -120,7 +125,7 @@ export const LibraryOngoingService = {
           },
           actions: [
             {
-              title: '열람실 보기',
+              title: isStudyRoom ? '스터디룸 보기' : '열람실 보기',
               pressAction: {
                 id: 'library_view',
               },
@@ -194,7 +199,7 @@ export const LibraryOngoingService = {
           seatNo: session.seatNo,
           roomId: String(session.roomId || ''),
           roomName: session.roomName,
-          path: '/services/library?tab=seats',
+          path: '/services/library?tab=my',
           'android.requestPromotedOngoing': 'true',
           'com.samsung.android.support.ongoing_activity': 'true',
         },

@@ -400,6 +400,9 @@ export const LocalWatchManager = {
                 id: job.id,
                 title: '🎉 스터디룸 빈자리(취소표) 발생!',
                 body: `희망하신 ${job.targetName} 취소표가 생겼습니다! 지금 바로 예약하세요.`,
+                data: {
+                  path: `/services/library?tab=study&roomId=${roomId}`,
+                },
                 android: {
                   channelId: LOCAL_WATCH_CHANNEL_ID,
                   pressAction: { id: 'default' },
@@ -486,6 +489,9 @@ export const LocalWatchManager = {
                 id: job.id,
                 title: '🎉 열람실 좌석 빈자리 발생!',
                 body: `기다리시던 [${job.targetName}] 좌석이 지금 비었습니다! 서둘러 배정하세요.`,
+                data: {
+                  path: `/services/library?tab=seats&roomId=${roomId}`,
+                },
                 android: {
                   channelId: LOCAL_WATCH_CHANNEL_ID,
                   pressAction: { id: 'default' },
