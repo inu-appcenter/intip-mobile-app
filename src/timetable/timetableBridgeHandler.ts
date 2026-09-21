@@ -132,7 +132,7 @@ export async function handleTimetableBridgeMessage(
           startTimestamp: now,
           endTimestamp,
           durationMinutes,
-          elapsedMinutes: 5,
+          elapsedMinutes: 0,
         };
         await TimetableStorage.saveTestActivity(testState);
         await TimetableNowBarService.renderActivity(testState);

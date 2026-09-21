@@ -88,6 +88,16 @@ export const TimetableNowBarService = {
       ? `${subtitle} · 수업 시작까지`
       : `${subtitle} · 수업 종료까지`;
 
+    const durationMinutes =
+      state.durationMinutes ||
+      (state.endTimestamp && state.startTimestamp
+        ? Math.max(1, Math.round((state.endTimestamp - state.startTimestamp) / (60 * 1000)))
+        : 75);
+
+    const elapsedMinutes = state.startTimestamp
+      ? Math.max(0, Math.round((Date.now() - state.startTimestamp) / (60 * 1000)))
+      : (state.elapsedMinutes || 0);
+
     try {
       await notifee.displayNotification({
         id: TIMETABLE_ONGOING_NOTIFICATION_ID,
@@ -119,10 +129,10 @@ export const TimetableNowBarService = {
           showChronometer: !!targetTimestamp,
           chronometerDirection: 'down',
           timestamp: targetTimestamp,
-          progress: !isUpcoming && state.durationMinutes
+          progress: !isUpcoming && durationMinutes
             ? {
-                max: Math.max(1, state.durationMinutes),
-                current: Math.min(state.durationMinutes, state.elapsedMinutes || 0),
+                max: Math.max(1, durationMinutes),
+                current: Math.min(durationMinutes, elapsedMinutes),
                 indeterminate: false,
               }
             : undefined,

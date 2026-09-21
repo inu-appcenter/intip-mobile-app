@@ -32,7 +32,13 @@ import { registerFcmTokenRotationListener } from './fcmTokenSync';
 import {
   TIMETABLE_TRIGGER_NOTIFICATION_ID,
   TimetableScheduler,
+  getCurrentActivityState,
 } from '../timetable/timetableScheduler';
+import { TimetableStorage } from '../timetable/timetableStorage';
+import {
+  TimetableNowBarService,
+  TIMETABLE_ONGOING_NOTIFICATION_ID,
+} from '../timetable/timetableNowBarService';
 
 export type { NavIntent };
 
@@ -302,9 +308,60 @@ export function registerBackgroundHandlers(): void {
   });
 
   // Android 16 / One UI 8 Live Notification / Rich Ongoing Activity를 위한 Foreground Service 러너 등록
-  notifee.registerForegroundService(() => {
-    return new Promise(() => {
-      // notifee.stopForegroundService()가 호출될 때까지 서비스가 상주하며 시스템 라이브 알림을 유지합니다.
+  notifee.registerForegroundService((notification) => {
+    return new Promise((resolve) => {
+      // 시간표 Ongoing 알림인 경우 1분(60초)마다 실시간 진행률(경과 시간)을 계산하여 알림 자동 갱신
+      if (notification?.id !== TIMETABLE_ONGOING_NOTIFICATION_ID) {
+        return;
+      }
+
+      const interval = setInterval(async () => {
+        try {
+          // 1. 테스트 액티비티가 활성화되어 있는 경우
+          const testActivity = await TimetableStorage.getTestActivity();
+          if (testActivity && testActivity.phase !== 'NONE') {
+            if (testActivity.endTimestamp && Date.now() >= testActivity.endTimestamp) {
+              clearInterval(interval);
+              await TimetableNowBarService.cancel();
+              resolve();
+              return;
+            }
+            await TimetableNowBarService.renderActivity(testActivity);
+            return;
+          }
+
+          // 2. 시간표 알림 설정 확인
+          const settings = await TimetableStorage.getSettings();
+          if (!settings.enabled) {
+            clearInterval(interval);
+            await TimetableNowBarService.cancel();
+            resolve();
+            return;
+          }
+
+          // 3. 실제 시간표 데이터 확인
+          const data = await TimetableStorage.getTimetableData();
+          if (!data || !data.courses || data.courses.length === 0) {
+            clearInterval(interval);
+            await TimetableNowBarService.cancel();
+            resolve();
+            return;
+          }
+
+          // 4. 현재 수업 상태 계산 및 갱신
+          const state = getCurrentActivityState(data.courses, new Date(), settings.leadTimeMinutes);
+          if (state.phase === 'NONE') {
+            clearInterval(interval);
+            await TimetableNowBarService.cancel();
+            resolve();
+            return;
+          }
+
+          await TimetableNowBarService.renderActivity(state);
+        } catch (err) {
+          console.warn('[ForegroundService] timetable interval error:', err);
+        }
+      }, 60 * 1000);
     });
   });
 
