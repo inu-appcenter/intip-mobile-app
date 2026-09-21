@@ -51,6 +51,7 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.CAMERA",
 
         "android.permission.WRITE_EXTERNAL_STORAGE",

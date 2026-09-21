@@ -29,6 +29,10 @@ import {
   subscribe,
 } from './pendingIntent';
 import { registerFcmTokenRotationListener } from './fcmTokenSync';
+import {
+  TIMETABLE_TRIGGER_NOTIFICATION_ID,
+  TimetableScheduler,
+} from '../timetable/timetableScheduler';
 
 export type { NavIntent };
 
@@ -250,6 +254,11 @@ export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () =
       void clearChatGroup(detail.notification?.data);
       const intent = resolveNavIntent(detail.notification?.data);
       if (intent) deliver(intent);
+    } else if (
+      type === EventType.DELIVERED &&
+      detail.notification?.id === TIMETABLE_TRIGGER_NOTIFICATION_ID
+    ) {
+      void TimetableScheduler.syncSchedule();
     }
   });
   return () => {
@@ -300,6 +309,13 @@ export function registerBackgroundHandlers(): void {
   // `getInitialNotification()` alone, which only ever resolves for a killed
   // -> cold-start launch, not a plain background tap (spec G4).
   notifee.onBackgroundEvent(async ({ type, detail }) => {
+    if (
+      type === EventType.DELIVERED &&
+      detail.notification?.id === TIMETABLE_TRIGGER_NOTIFICATION_ID
+    ) {
+      await TimetableScheduler.syncSchedule();
+      return;
+    }
     if (type !== EventType.PRESS) return;
     if (isDuplicate(detail.notification?.id)) return;
     await clearChatGroup(detail.notification?.data);
