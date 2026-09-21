@@ -59,13 +59,28 @@ describe('resolveDeepLink', () => {
     expect(resolveDeepLink(url)).toEqual({ kind: 'external', url });
   });
 
-  it('ignores other hosts, other schemes and non-URLs', () => {
+  it('routes relative paths and custom scheme paths correctly', () => {
+    expect(resolveDeepLink('/home')).toEqual({
+      kind: 'spa',
+      path: '/home',
+    });
+    expect(resolveDeepLink('/services/library')).toEqual({
+      kind: 'push',
+      path: '/services/library',
+      url: `${ROOT_URL}/services/library`,
+    });
+    expect(resolveDeepLink('intipmobileapp://home/notice/123')).toEqual({
+      kind: 'push',
+      path: '/home/notice/123',
+      url: `${ROOT_URL}/home/notice/123`,
+    });
+  });
+
+  it('ignores other hosts, unrecognised schemes and invalid URLs', () => {
     expect(resolveDeepLink('https://inu.ac.kr/notice/1')).toBeNull();
     expect(resolveDeepLink('https://evil.example.com/home')).toBeNull();
     // A look-alike subdomain must not match either — the host list is exact.
     expect(resolveDeepLink('https://intip.inuappcenter.kr.evil.com/home')).toBeNull();
-    expect(resolveDeepLink('intipmobileapp://webview?url=x')).toBeNull();
-    expect(resolveDeepLink('/home')).toBeNull();
     expect(resolveDeepLink('')).toBeNull();
   });
 });

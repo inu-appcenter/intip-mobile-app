@@ -8,6 +8,8 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import WebViewControllerPanel from "../components/WebViewControllerPanel";
+import { AcademicScraperWebView } from "../agent/AcademicScraperWebView";
+import { LocalWatchManager } from "../agent/localWatchManager";
 import { checkForUpdate } from "../native/updateCheck";
 import {
   registerBackgroundHandlers,
@@ -47,14 +49,12 @@ export default function RootLayout() {
     void requestNotificationPermission();
     // Check for OTA updates (non-blocking; shows a prompt if one is available).
     void checkForUpdate();
+    // Restore active local watch jobs (study room sniper pollers, etc.)
+    void LocalWatchManager.restoreActiveJobs();
     // Seed every designed widget with its sample snapshot so each has
     // *something* to render as soon as it's added to a home screen. Real
     // data isn't wired up for any of them yet (see refresh.ts) — this is
     // only enough to confirm each widget builds and renders end to end.
-    // NOTE (iOS): the expo-widgets plugin is on in app.json, but the App
-    // Group / provisioning profile wiring iOS widgets need for shared
-    // storage hasn't been set up — this seeding call is expected to no-op
-    // on a real iOS build until that's done.
     refreshNextClassWidget();
     refreshTodayClassesWidget();
     refreshBusArrivalWidget();
@@ -108,6 +108,8 @@ export default function RootLayout() {
             </Stack>
             {/* Debug-only GUI controller, rendered above the whole stack. */}
             <WebViewControllerPanel />
+            {/* Hidden WebView for background portal SSO & academic scraping */}
+            <AcademicScraperWebView />
           </WebViewProvider>
         </ShareIntentProvider>
       </KeyboardProvider>

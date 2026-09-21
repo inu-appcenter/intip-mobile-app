@@ -45,6 +45,24 @@ function isExcludedPath(pathname: string): boolean {
  * opened on the *other* host would come up logged out.
  */
 export function resolveDeepLink(url: string): NavIntent | null {
+  if (!url || typeof url !== 'string') return null;
+
+  // 1. 상대 경로 (/home/..., /services/..., etc.)
+  if (url.startsWith('/')) {
+    return intentForPortalPath(url);
+  }
+
+  // 2. 커스텀 앱 스킴 (intipmobileapp://..., intip://...)
+  if (/^intip(mobileapp)?:\/\//i.test(url)) {
+    try {
+      const stripped = url.replace(/^intip(mobileapp)?:\/\//i, '');
+      const pathWithSlash = stripped.startsWith('/') ? stripped : `/${stripped}`;
+      return intentForPortalPath(pathWithSlash);
+    } catch {
+      return null;
+    }
+  }
+
   let parsed: URL;
   try {
     parsed = new URL(url);

@@ -27,13 +27,13 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
   } catch {
     intent = null;
   }
-  if (!intent) return path;
-
-  try {
-    deliver(intent);
-  } catch {
-    // A queueing failure must not block launch; the app still opens at root,
-    // just without the deep-link destination.
+  if (intent) {
+    try {
+      deliver(intent);
+    } catch {
+      // A queueing failure must not block launch; the app still opens at root,
+      // just without the deep-link destination.
+    }
   }
   return '/';
 }
