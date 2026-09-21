@@ -3,13 +3,14 @@ import { ShareIntentProvider } from "expo-share-intent";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { useColorScheme } from "react-native";
+import { AppState, useColorScheme } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import WebViewControllerPanel from "../components/WebViewControllerPanel";
 import { AcademicScraperWebView } from "../agent/AcademicScraperWebView";
 import { LocalWatchManager } from "../agent/localWatchManager";
+import { TimetableScheduler } from "../timetable/timetableScheduler";
 import { checkForUpdate } from "../native/updateCheck";
 import {
   registerBackgroundHandlers,
@@ -60,6 +61,19 @@ export default function RootLayout() {
     refreshBusArrivalWidget();
     refreshCafeteriaMenuWidget();
     refreshTimetableWidget();
+
+    // Sync and restore Timetable Ongoing Activity / Now Bar
+    void TimetableScheduler.syncSchedule();
+
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active" || state === "background") {
+        void TimetableScheduler.syncSchedule();
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+    };
   }, []);
 
   return (

@@ -19,6 +19,8 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "NSSupportsLiveActivities": true,
+        "NSSupportsLiveActivitiesFrequentUpdates": true,
         "UIBackgroundModes": ["remote-notification", "fetch"],
         "NSCameraUsageDescription": "게시판 및 채팅 업로드용 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
         "NSPhotoLibraryUsageDescription": "게시판 및 채팅 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
@@ -51,6 +53,11 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.POST_PROMOTED_NOTIFICATIONS",
         "android.permission.CAMERA",
 
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -77,6 +84,7 @@
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
       "./plugins/withDefaultNotificationChannel",
+      "./plugins/withTimetableForegroundService",
       "./plugins/withAndroidReleaseSigning",
       "./plugins/withIOSManualSigning",
       "./plugins/withWorkManagerVersionAlign",

@@ -50,6 +50,15 @@ export function isDuplicate(id: string | null | undefined): boolean {
   // without this exemption the second tap on a room's summary would be
   // swallowed forever.
   if (id.startsWith(GROUP_SUMMARY_ID_PREFIX)) return false;
+  // 시간표/도서관/LMS Ongoing Activity 및 Now Bar 상주 알림은 사용자가 여러 번 클릭해도 항상 이동할 수 있어야 함
+  if (
+    id === 'timetable_ongoing_activity' ||
+    id === 'library_watch_ongoing' ||
+    id === 'library_seat_session_ongoing' ||
+    id === 'lms_deadline_ongoing'
+  ) {
+    return false;
+  }
   if (seenIds.includes(id)) return true;
   seenIds.push(id);
   if (seenIds.length > DEDUPE_RING_SIZE) seenIds.shift();

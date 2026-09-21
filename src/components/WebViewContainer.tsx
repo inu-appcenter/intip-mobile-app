@@ -59,6 +59,7 @@ import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
 import { saveDownload } from "../native/downloads";
 import { ensureLocationPermission } from "../native/permissions";
 import { handleAgentBridgeMessage } from "../agent/agentBridgeHandler";
+import { handleTimetableBridgeMessage } from "../timetable/timetableBridgeHandler";
 import { clearTokenInfo, saveTokenInfo } from "../native/secureTokenStore";
 import { shareContent } from "../native/share";
 import { flushPendingFcmToken } from "../push/fcmTokenSync";
@@ -248,10 +249,23 @@ export default function WebViewContainer({ url, mode }: Props) {
           true;
         `;
         webViewRef.current?.injectJavaScript(script);
-      }).then((handled) => {
-        if (!handled) {
-          bridge.onMessage(event);
-        }
+      }).then((handledAgent) => {
+        if (handledAgent) return;
+
+        // Timetable: NowBar & Ongoing Activity messages
+        handleTimetableBridgeMessage(raw, (response) => {
+          const script = `
+            window.dispatchEvent(new CustomEvent('intipTimetableResult', {
+              detail: ${JSON.stringify(response)}
+            }));
+            true;
+          `;
+          webViewRef.current?.injectJavaScript(script);
+        }).then((handledTimetable) => {
+          if (!handledTimetable) {
+            bridge.onMessage(event);
+          }
+        });
       });
     },
     [bridge, url, primeLocationPermission],
@@ -349,6 +363,19 @@ export default function WebViewContainer({ url, mode }: Props) {
   const navigateSpa = useCallback(
     (path: string) => {
       bridge.channel.send("navigate", path);
+      // 브릿지 채널 수신 타이밍 문제나 렌더 지연을 방지하기 위해 웹뷰에 직접 pushState 및 popstate를 함께 발송
+      const script = `
+        (function() {
+          try {
+            if (window.location.pathname !== ${JSON.stringify(path)}) {
+              window.history.pushState({}, '', ${JSON.stringify(path)});
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+          } catch (e) {}
+        })();
+        true;
+      `;
+      webViewRef.current?.injectJavaScript(script);
     },
     [bridge],
   );
