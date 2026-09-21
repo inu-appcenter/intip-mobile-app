@@ -149,6 +149,24 @@ export async function handleTimetableBridgeMessage(
       return true;
     }
 
+    case 'cancelTimetableNowBar': {
+      try {
+        await TimetableNowBarService.cancel();
+        reply({
+          type: 'cancelTimetableNowBarResult',
+          success: true,
+          data: { active: false },
+        });
+      } catch (err: any) {
+        reply({
+          type: 'cancelTimetableNowBarResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
     default:
       return false;
   }

@@ -147,4 +147,21 @@ describe('handleTimetableBridgeMessage', () => {
       })
     );
   });
+
+  it('handles cancelTimetableNowBar to dismiss active ongoing notification', async () => {
+    const callback = jest.fn();
+    const message = JSON.stringify({
+      type: 'cancelTimetableNowBar',
+    });
+
+    const handled = await handleTimetableBridgeMessage(message, callback);
+    expect(handled).toBe(true);
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'cancelTimetableNowBarResult',
+        success: true,
+        data: { active: false },
+      })
+    );
+  });
 });
