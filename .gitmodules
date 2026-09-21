@@ -1,3 +1,6 @@
 [submodule "packages/intip-bridge"]
 	path = packages/intip-bridge
 	url = https://github.com/inu-appcenter/intip-bridge.git
+[submodule "packages/expo-widgets-glance"]
+	path = packages/expo-widgets-glance
+	url = https://github.com/KimWash/expo-widgets-glance.git

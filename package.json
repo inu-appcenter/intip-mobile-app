@@ -28,6 +28,7 @@
     "expo-updates": "~56.0.23",
     "expo-web-browser": "~56.0.5",
     "expo-widgets": "~56.0.26",
+    "expo-widgets-glance": "file:packages/expo-widgets-glance",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
@@ -62,7 +63,8 @@
     "prebuild:clean": "expo prebuild --clean",
     "build:android": "./scripts/android-release.sh",
         "submodule:init": "git submodule update --init --recursive || test -d packages/intip-bridge/src || git clone https://github.com/inu-appcenter/intip-bridge.git packages/intip-bridge",
-    "postinstall": "npm run submodule:init",
+    "widgets-glance:build": "cd packages/expo-widgets-glance && npm install --no-audit --no-fund && npm run build:plugin",
+    "postinstall": "npm run submodule:init && npm run widgets-glance:build",
         "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest"

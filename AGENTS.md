@@ -37,3 +37,34 @@ npm / GitHub Packages dependency. `inu-portal-web` uses it the same way.
   version bump, or `npm update`; the pin is a git SHA, not a semver.
 - The bridge source must compile under **both** consumers' strict tsconfig
   (e.g. the web's `noUnusedLocals`).
+
+# Android widget renderer — git submodule, npm-published OSS package
+
+`expo-widgets-glance` (Android/Jetpack Glance renderer for `expo-widgets` home
+screen widgets — see `src/widgets/*.tsx`) is a **standalone OSS package**,
+published at [`KimWash/expo-widgets-glance`](https://github.com/KimWash/expo-widgets-glance)
+and (once published) on npm as `expo-widgets-glance`. Unlike `intip-bridge`
+above, it's meant to be generically reusable outside this app — so it's
+consumed here as a git submodule **for now**, pinned to a real npm release
+being cut. Once that lands, switch `package.json`'s
+`"expo-widgets-glance": "file:packages/expo-widgets-glance"` to a real
+version range (`"^0.1.0"`) and drop the submodule — no reason to keep both.
+
+- **Clone**: same as `intip-bridge` — `git clone --recurse-submodules …`, or
+  `git submodule update --init` after a plain clone. `npm run postinstall`
+  (runs automatically after `npm install`) handles this plus the one thing
+  `intip-bridge` doesn't need: the submodule's own config plugin ships
+  pre-built JS (`plugin/build/`) in its **npm tarball**, but that directory is
+  gitignored in the source repo — so a submodule checkout needs
+  `cd packages/expo-widgets-glance && npm install && npm run build:plugin`
+  once (wired into `npm run widgets-glance:build`, part of `postinstall`) or
+  `app.plugin.js`'s `require('./plugin/build/index')` fails. Forgetting this
+  after a fresh clone or a submodule update is the most likely thing to break.
+- **Changing anything Android-widget-related**: edit + commit + push in the
+  `expo-widgets-glance` repo (not here — this repo's copy is a read-only
+  checkout), then bump the pin — `git submodule update --remote
+  packages/expo-widgets-glance && git add packages/expo-widgets-glance` — and
+  rebuild the plugin (`npm run widgets-glance:build`).
+- `src/widgets/*.tsx` files (`NextClassWidget`, `TodayClassesWidget`,
+  `BusArrivalWidget`, `CafeteriaMenuWidget`, `TimetableWidget`) stay in this
+  app — they're INTIP-specific, unlike the renderer itself.

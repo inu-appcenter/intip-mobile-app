@@ -18,6 +18,13 @@ import {
 } from "../push/messaging";
 import { backgroundColorFor } from "../theme";
 import { WebViewProvider } from "../webview/WebViewContext";
+import {
+  refreshBusArrivalWidget,
+  refreshCafeteriaMenuWidget,
+  refreshNextClassWidget,
+  refreshTimetableWidget,
+  refreshTodayClassesWidget,
+} from "../widgets/refresh";
 
 // Background FCM/notifee handlers must be registered before React renders so
 // they survive a background/quit launch.
@@ -45,6 +52,16 @@ export default function RootLayout() {
     void checkForUpdate();
     // Restore active local watch jobs (study room sniper pollers, etc.)
     void LocalWatchManager.restoreActiveJobs();
+    // Seed every designed widget with its sample snapshot so each has
+    // *something* to render as soon as it's added to a home screen. Real
+    // data isn't wired up for any of them yet (see refresh.ts) — this is
+    // only enough to confirm each widget builds and renders end to end.
+    refreshNextClassWidget();
+    refreshTodayClassesWidget();
+    refreshBusArrivalWidget();
+    refreshCafeteriaMenuWidget();
+    refreshTimetableWidget();
+
     // Sync and restore Timetable Ongoing Activity / Now Bar
     void TimetableScheduler.syncSchedule();
 
@@ -57,10 +74,6 @@ export default function RootLayout() {
     return () => {
       appStateSub.remove();
     };
-    // The home screen widget is not part of this release — the expo-widgets
-    // plugin is off in app.json until the iOS App Group / provisioning profiles
-    // are in place, so there is no widget target to seed. `src/widgets/` stays
-    // for when it is turned back on.
   }, []);
 
   return (
