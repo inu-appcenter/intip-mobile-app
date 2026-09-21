@@ -72,6 +72,7 @@ export const TimetableNowBarService = {
           courseTitle: state.courseTitle || '',
           location: state.location || '',
           'android.requestPromotedOngoing': 'true',
+          'com.samsung.android.support.ongoing_activity': 'true',
         },
         android: {
           channelId: TIMETABLE_CHANNEL_ID,

@@ -44,6 +44,13 @@ module.exports = function withTimetableForegroundService(config) {
       mainApplication.service.push(serviceDefinition);
     }
 
+    // 3. Samsung One UI Now Bar / Ongoing Activity 메타데이터 선언
+    AndroidConfig.Manifest.addMetaDataItemToMainApplication(
+      mainApplication,
+      'com.samsung.android.support.ongoing_activity',
+      'true',
+    );
+
     return cfg;
   });
 };
