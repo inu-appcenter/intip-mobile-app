@@ -6,21 +6,25 @@ import notifee, {
 } from '@notifee/react-native';
 import { TimetableActivityState } from './types';
 
-export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar';
+export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar_v2';
 export const TIMETABLE_ONGOING_NOTIFICATION_ID = 'timetable_ongoing_activity';
 
 export const TimetableNowBarService = {
   /**
-   * 알림 채널 생성 (무음, 진동 없음, 방해 금지)
+   * 알림 채널 생성 (소리/진동 없이 잠금화면 및 상태바에 당당히 상주하도록 DEFAULT 중요도 적용)
    */
   async ensureChannel(): Promise<void> {
     if (Platform.OS !== 'android') return;
     try {
+      // 구 채널 정리
+      await notifee.deleteChannel('timetable_nowbar').catch(() => {});
+
       await notifee.createChannel({
         id: TIMETABLE_CHANNEL_ID,
         name: '실시간 시간표 (나우 바/잠금화면)',
         description: '수업 전후 및 진행 중 실시간 시간표 및 남은 시간 표시',
-        importance: AndroidImportance.LOW, // 소리 및 팝업 헤드업 배너 없이 조용히 잠금화면에 상주
+        importance: AndroidImportance.DEFAULT, // DEFAULT 중요도여야 잠금화면 실시간 카드 및 상단 상태표시줄 칩으로 승격됨
+        visibility: AndroidVisibility.PUBLIC, // 잠금화면 및 AOD에 내용 전체 표시
         sound: undefined,
         vibration: false,
         lights: false,
@@ -69,7 +73,8 @@ export const TimetableNowBarService = {
         },
         android: {
           channelId: TIMETABLE_CHANNEL_ID,
-          category: AndroidCategory.EVENT,
+          category: isUpcoming ? AndroidCategory.EVENT : AndroidCategory.PROGRESS,
+          importance: AndroidImportance.DEFAULT,
           ongoing: true, // 사용자가 스와이프로 임의 종료 불가
           autoCancel: false,
           onlyAlertOnce: true,

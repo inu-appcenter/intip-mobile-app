@@ -9,7 +9,7 @@ import {
   TimetableDay,
 } from './types';
 import { TimetableStorage } from './timetableStorage';
-import { TimetableNowBarService } from './timetableNowBarService';
+import { TimetableNowBarService, TIMETABLE_CHANNEL_ID } from './timetableNowBarService';
 
 const DAYS_MAP: TimetableDay[] = [
   'SUNDAY',
@@ -212,7 +212,7 @@ export const TimetableScheduler = {
           title: '시간표 상태 갱신',
           body: '',
           android: {
-            channelId: 'timetable_nowbar',
+            channelId: TIMETABLE_CHANNEL_ID,
             importance: AndroidImportance.MIN,
             autoCancel: true,
           },
