@@ -4,6 +4,7 @@ const PERMISSIONS = [
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
   'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
+  'android.permission.POST_PROMOTED_NOTIFICATIONS',
 ];
 
 module.exports = function withTimetableForegroundService(config) {
