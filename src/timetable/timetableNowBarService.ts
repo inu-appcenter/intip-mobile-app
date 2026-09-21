@@ -6,13 +6,14 @@ import notifee, {
   AndroidVisibility,
 } from '@notifee/react-native';
 import { TimetableActivityState } from './types';
+import { TimetableLiveActivity, TimetableLiveActivityProps } from '../widgets/TimetableLiveActivity';
 
 export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar_v2';
 export const TIMETABLE_ONGOING_NOTIFICATION_ID = 'timetable_ongoing_activity';
 
 export const TimetableNowBarService = {
   /**
-   * 알림 채널 생성 (소리/진동 없이 잠금화면 및 상태바에 당당히 상주하도록 DEFAULT 중요도 적용)
+   * 알림 채널 생성 (Android 전용: 소리/진동 없이 잠금화면 및 상태바에 당당히 상주하도록 DEFAULT 중요도 적용)
    */
   async ensureChannel(): Promise<void> {
     if (Platform.OS !== 'android') return;
@@ -37,7 +38,7 @@ export const TimetableNowBarService = {
   },
 
   /**
-   * 현재 수업 상태를 기반으로 Ongoing Notification / Now Bar 렌더링
+   * 현재 수업 상태를 기반으로 Ongoing Notification / Now Bar / Dynamic Island 렌더링
    */
   async renderActivity(state: TimetableActivityState): Promise<void> {
     if (state.phase === 'NONE') {
@@ -45,10 +46,38 @@ export const TimetableNowBarService = {
       return;
     }
 
-    await this.ensureChannel();
-
     const isUpcoming = state.phase === 'UPCOMING';
     const targetTimestamp = isUpcoming ? state.startTimestamp : state.endTimestamp;
+
+    // --- iOS: Dynamic Island & Live Activity (ActivityKit) ---
+    if (Platform.OS === 'ios') {
+      try {
+        const liveProps: TimetableLiveActivityProps = {
+          phase: state.phase,
+          courseTitle: state.courseTitle || '강의',
+          location: state.location,
+          professor: state.professor,
+          startTimestamp: state.startTimestamp || Date.now(),
+          endTimestamp: state.endTimestamp || (Date.now() + 75 * 60 * 1000),
+          durationMinutes: state.durationMinutes,
+        };
+
+        const activeInstances = TimetableLiveActivity.getInstances();
+        if (activeInstances.length > 0) {
+          // 이미 활성화된 Dynamic Island가 있으면 상태 업데이트
+          await Promise.all(activeInstances.map((instance) => instance.update(liveProps)));
+        } else {
+          // 새로 Dynamic Island & Live Activity 시작
+          TimetableLiveActivity.start(liveProps, 'intipmobileapp://timetable');
+        }
+      } catch (e) {
+        console.warn('[TimetableNowBarService] iOS Dynamic Island 렌더링 실패:', e);
+      }
+      return;
+    }
+
+    // --- Android: Samsung Now Bar / Rich Ongoing Notification ---
+    await this.ensureChannel();
 
     const title = isUpcoming
       ? `다음 수업: ${state.courseTitle}`
@@ -116,10 +145,20 @@ export const TimetableNowBarService = {
   },
 
   /**
-   * Ongoing 알림 취소 및 제거 (Foreground Service 종료 포함)
+   * Ongoing 알림 취소 및 제거 (iOS Dynamic Island 종료 & Android Foreground Service 종료 포함)
    */
   async cancel(): Promise<void> {
     try {
+      if (Platform.OS === 'ios') {
+        const activeInstances = TimetableLiveActivity.getInstances();
+        await Promise.all(
+          activeInstances.map((instance) =>
+            instance.end('immediate').catch(() => {})
+          )
+        );
+        return;
+      }
+
       if (Platform.OS === 'android') {
         await notifee.stopForegroundService().catch(() => {});
       }
@@ -129,4 +168,5 @@ export const TimetableNowBarService = {
     }
   },
 };
+
 
