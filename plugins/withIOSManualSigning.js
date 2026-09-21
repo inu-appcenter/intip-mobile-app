@@ -1,6 +1,7 @@
 /**
- * Pins the INTIP app target (Release config only) to manual code signing
- * instead of Xcode's automatic signing.
+ * Pins the INTIP app target — and, once its provisioning profile is
+ * available, the ExpoWidgetsTarget widget extension — to manual code signing
+ * instead of Xcode's automatic signing (Release config only).
  *
  * Why this exists: the CI Archive step used to pass `-allowProvisioningUpdates`
  * so Xcode would resolve/create the signing identity itself via the App Store
@@ -14,56 +15,68 @@
  * "iOS Development") eventually fills up with orphaned certs, and Archive
  * fails with "Choose a certificate to revoke" (CI#53).
  *
- * The already-imported distribution `.p12` + provisioning profile (CI
+ * The already-imported distribution `.p12` + provisioning profile(s) (CI
  * secrets `IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64` /
- * `IOS_PROVISIONING_PROFILE_BASE64`) were never actually being used because
- * of this — Automatic signing ignores them. This plugin makes the target use
- * them instead, so no certificate ever gets created at build time.
+ * `IOS_PROVISIONING_PROFILE_BASE64` / `IOS_WIDGET_PROVISIONING_PROFILE_BASE64`)
+ * were never actually being used because of this — Automatic signing ignores
+ * them. This plugin makes each target use its own instead, so no certificate
+ * ever gets created at build time.
  *
  * `ios/` is gitignored and rebuilt by `expo prebuild` every time, so
  * hand-editing the Xcode project doesn't stick — same reasoning as
  * `withAndroidReleaseSigning.js` for the Android side.
  *
- * Activation: only when `IOS_PROVISIONING_PROFILE_NAME` is set in the
- * environment at prebuild time (CI decodes the profile and extracts its
- * `Name` before running `expo prebuild --platform ios` — see
- * `.github/workflows/ci.yml`, "Import signing credentials"). Without it this
- * plugin is a no-op, so local `expo prebuild` / `expo run:ios` is unaffected
- * and keeps using Xcode's normal Automatic signing.
+ * Activation: each target is pinned independently, gated on its own env var
+ * being set at prebuild time (CI decodes the profile and extracts its `Name`
+ * before running `expo prebuild --platform ios` — see
+ * `.github/workflows/ci.yml`, "Import signing credentials"):
+ *   - INTIP target            → IOS_PROVISIONING_PROFILE_NAME
+ *   - ExpoWidgetsTarget       → IOS_WIDGET_PROVISIONING_PROFILE_NAME
+ * Without the relevant env var, that target is left alone (no-op), so local
+ * `expo prebuild` / `expo run:ios` is unaffected and keeps using Xcode's
+ * normal Automatic signing. The widget target simply won't exist in the
+ * generated project unless `expo-widgets` is configured, so gating it
+ * separately from the app target also covers that case for free.
  */
 const { withXcodeProject } = require("expo/config-plugins");
 
-const TARGET_NAME = "INTIP";
+const APP_TARGET_NAME = "INTIP";
+const WIDGET_TARGET_NAME = "ExpoWidgetsTarget";
 const BUILD_CONFIG = "Release";
+
+function pinManualSigning(proj, { targetName, profileName, team }) {
+  proj.updateBuildProperty("CODE_SIGN_STYLE", "Manual", BUILD_CONFIG, targetName);
+  proj.updateBuildProperty(
+    "PROVISIONING_PROFILE_SPECIFIER",
+    `"${profileName}"`,
+    BUILD_CONFIG,
+    targetName,
+  );
+  // "iPhone Distribution" is the generic identity string Xcode has always
+  // matched against — it resolves to whichever cert is actually installed,
+  // old-style "iPhone Distribution: ..." or the current "Apple
+  // Distribution: ...", so this doesn't need to know which one the
+  // imported .p12 actually contains.
+  proj.updateBuildProperty("CODE_SIGN_IDENTITY", '"iPhone Distribution"', BUILD_CONFIG, targetName);
+  proj.updateBuildProperty("DEVELOPMENT_TEAM", team, BUILD_CONFIG, targetName);
+}
 
 module.exports = function withIOSManualSigning(config) {
   return withXcodeProject(config, (cfg) => {
-    const profileName = process.env.IOS_PROVISIONING_PROFILE_NAME;
-    if (!profileName) {
+    const appProfileName = process.env.IOS_PROVISIONING_PROFILE_NAME;
+    const widgetProfileName = process.env.IOS_WIDGET_PROVISIONING_PROFILE_NAME;
+    if (!appProfileName && !widgetProfileName) {
       return cfg;
     }
     const team = process.env.IOS_DEVELOPMENT_TEAM || "AANGG4Q668";
-
     const proj = cfg.modResults;
-    proj.updateBuildProperty("CODE_SIGN_STYLE", "Manual", BUILD_CONFIG, TARGET_NAME);
-    proj.updateBuildProperty(
-      "PROVISIONING_PROFILE_SPECIFIER",
-      `"${profileName}"`,
-      BUILD_CONFIG,
-      TARGET_NAME,
-    );
-    // "iPhone Distribution" is the generic identity string Xcode has always
-    // matched against — it resolves to whichever cert is actually installed,
-    // old-style "iPhone Distribution: ..." or the current "Apple
-    // Distribution: ...", so this doesn't need to know which one the
-    // imported .p12 actually contains.
-    proj.updateBuildProperty(
-      "CODE_SIGN_IDENTITY",
-      '"iPhone Distribution"',
-      BUILD_CONFIG,
-      TARGET_NAME,
-    );
-    proj.updateBuildProperty("DEVELOPMENT_TEAM", team, BUILD_CONFIG, TARGET_NAME);
+
+    if (appProfileName) {
+      pinManualSigning(proj, { targetName: APP_TARGET_NAME, profileName: appProfileName, team });
+    }
+    if (widgetProfileName) {
+      pinManualSigning(proj, { targetName: WIDGET_TARGET_NAME, profileName: widgetProfileName, team });
+    }
 
     return cfg;
   });

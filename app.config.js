@@ -24,6 +24,26 @@ const { expo } = require("./app.json");
 
 const isDevVariant = process.env.APP_VARIANT === "development";
 
+// expo-widgets computes its widget target's bundle id and App Group from
+// `config.ios.bundleIdentifier` — which the dev variant overrides below to
+// `kr.inuappcenter.intip.dev`. That means a dev build would need its own
+// `.dev.ExpoWidgetsTarget` Bundle ID, its own `group.kr.inuappcenter.intip.dev`
+// App Group, and its own signing (dev-build.yml only wires up
+// IOS_PROVISIONING_PROFILE_NAME for the app target, not a widget one) — none
+// of which exist on Apple's side. Without this exclusion, dev Archive fails
+// with "Signing for ExpoWidgetsTarget requires a development team" and the
+// app target's own dev ad-hoc profile stops matching once expo-widgets adds
+// the App Groups entitlement to it. Simplest fix: dev builds don't get the
+// home screen widgets at all — `src/widgets/refresh.ts`'s calls still run,
+// they just have no widget extension to display the snapshot they write.
+const WIDGET_PLUGIN_NAMES = new Set(["expo-widgets", "expo-widgets-glance"]);
+const plugins = isDevVariant
+  ? expo.plugins.filter((plugin) => {
+      const name = Array.isArray(plugin) ? plugin[0] : plugin;
+      return !WIDGET_PLUGIN_NAMES.has(name);
+    })
+  : expo.plugins;
+
 module.exports = () => ({
   expo: {
     ...expo,
@@ -34,12 +54,7 @@ module.exports = () => ({
         bundleIdentifier: "kr.inuappcenter.intip.dev",
         icon: "./assets/icon-dev.icon",
         googleServicesFile: "./GoogleService-Info-Dev.plist",
-        associatedDomains: [
-          "applinks:intip-test.pages.dev",
-          "applinks:6c90707e.intip-test.pages.dev",
-          "applinks:25a58911.intip-test.pages.dev",
-          "applinks:feat-ai-academic-client-acti.intip-test.pages.dev",
-        ],
+        associatedDomains: ["applinks:intip-test.pages.dev"],
         // aps-environment는 운영과 같은 "production"으로 둔다(app.json에서 상속).
         // 개발 빌드는 ad-hoc 배포 서명인데, ad-hoc/App Store 프로파일의
         // 엔타이틀먼트에는 항상 aps-environment=production만 들어간다 —
@@ -66,12 +81,7 @@ module.exports = () => ({
           {
             action: "VIEW",
             autoVerify: true,
-            data: [
-              { scheme: "https", host: "intip-test.pages.dev" },
-              { scheme: "https", host: "6c90707e.intip-test.pages.dev" },
-              { scheme: "https", host: "25a58911.intip-test.pages.dev" },
-              { scheme: "https", host: "feat-ai-academic-client-acti.intip-test.pages.dev" },
-            ],
+            data: [{ scheme: "https", host: "intip-test.pages.dev" }],
             category: ["BROWSABLE", "DEFAULT"],
           },
         ],
@@ -87,7 +97,7 @@ module.exports = () => ({
     ...(isDevVariant && { runtimeVersion: "3.0.13-sso.5" }),
     ...(isDevVariant && { scheme: "intipmobileappdev" }),
     plugins: [
-      ...expo.plugins,
+      ...plugins,
       "./plugins/withErpSsoCleartext",
       ...(isDevVariant ? ["./plugins/withDevAppLabel"] : []),
     ],
