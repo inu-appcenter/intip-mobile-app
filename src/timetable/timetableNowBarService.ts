@@ -77,16 +77,12 @@ export const TimetableNowBarService = {
     }
 
     // --- Android: Samsung Now Bar / Rich Ongoing Notification ---
-    await this.ensureChannel();
+    const title = state.courseTitle || '강의';
+    const subtitle = isUpcoming ? '다음 수업' : '수업 중';
 
-    const title = isUpcoming
-      ? `다음 수업: ${state.courseTitle}`
-      : `${state.courseTitle} (수업 중)`;
-
-    const subtitle = state.location || (isUpcoming ? '수업 준비' : '수업 진행 중');
-    const body = isUpcoming
-      ? `${subtitle} · 수업 시작까지`
-      : `${subtitle} · 수업 종료까지`;
+    const locationText = state.location ? `📍 ${state.location}` : '📍 강의실 미지정';
+    const profText = state.professor ? ` · ${state.professor}` : '';
+    const body = `${locationText}${profText}`;
 
     const durationMinutes =
       state.durationMinutes ||
@@ -99,6 +95,7 @@ export const TimetableNowBarService = {
       : (state.elapsedMinutes || 0);
 
     try {
+      await this.ensureChannel();
       await notifee.displayNotification({
         id: TIMETABLE_ONGOING_NOTIFICATION_ID,
         title,

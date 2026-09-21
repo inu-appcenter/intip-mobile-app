@@ -129,6 +129,7 @@ export async function handleTimetableBridgeMessage(
           phase: 'ONGOING' as const,
           courseTitle: payload?.title || '테스트 강의 (알고리즘)',
           location: payload?.location || '정보기술대학 7호관 314호',
+          professor: payload?.professor || '홍길동 교수님',
           startTimestamp: now,
           endTimestamp,
           durationMinutes,
