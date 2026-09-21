@@ -363,6 +363,19 @@ export default function WebViewContainer({ url, mode }: Props) {
   const navigateSpa = useCallback(
     (path: string) => {
       bridge.channel.send("navigate", path);
+      // 브릿지 채널 수신 타이밍 문제나 렌더 지연을 방지하기 위해 웹뷰에 직접 pushState 및 popstate를 함께 발송
+      const script = `
+        (function() {
+          try {
+            if (window.location.pathname !== ${JSON.stringify(path)}) {
+              window.history.pushState({}, '', ${JSON.stringify(path)});
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+          } catch (e) {}
+        })();
+        true;
+      `;
+      webViewRef.current?.injectJavaScript(script);
     },
     [bridge],
   );

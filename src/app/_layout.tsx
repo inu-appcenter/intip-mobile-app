@@ -49,7 +49,7 @@ export default function RootLayout() {
     void TimetableScheduler.syncSchedule();
 
     const appStateSub = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
+      if (state === "active" || state === "background") {
         void TimetableScheduler.syncSchedule();
       }
     });

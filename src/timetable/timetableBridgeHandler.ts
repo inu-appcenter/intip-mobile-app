@@ -120,20 +120,22 @@ export async function handleTimetableBridgeMessage(
     }
 
     case 'testTimetableNowBar': {
-      // 즉시 테스트용 진행 중 액티비티 노출
+      // 즉시 테스트용 진행 중 액티비티 노출 및 상태 보존
       try {
         const now = Date.now();
         const durationMinutes = payload?.minutes || 75;
         const endTimestamp = now + durationMinutes * 60 * 1000;
-        await TimetableNowBarService.renderActivity({
-          phase: 'ONGOING',
+        const testState = {
+          phase: 'ONGOING' as const,
           courseTitle: payload?.title || '테스트 강의 (알고리즘)',
           location: payload?.location || '정보기술대학 7호관 314호',
           startTimestamp: now,
           endTimestamp,
           durationMinutes,
           elapsedMinutes: 5,
-        });
+        };
+        await TimetableStorage.saveTestActivity(testState);
+        await TimetableNowBarService.renderActivity(testState);
         reply({
           type: 'testTimetableNowBarResult',
           success: true,
@@ -151,6 +153,7 @@ export async function handleTimetableBridgeMessage(
 
     case 'cancelTimetableNowBar': {
       try {
+        await TimetableStorage.clearTestActivity();
         await TimetableNowBarService.cancel();
         reply({
           type: 'cancelTimetableNowBarResult',

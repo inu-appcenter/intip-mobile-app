@@ -91,4 +91,42 @@ export const TimetableStorage = {
       return DEFAULT_NOWBAR_SETTINGS;
     }
   },
+
+  /**
+   * 테스트용 Ongoing Activity 상태 조회 (존재하고 만료되지 않은 경우 반환)
+   */
+  async getTestActivity(): Promise<any | null> {
+    try {
+      const raw = await SecureStore.getItemAsync('intip_timetable_test_activity');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed.endTimestamp && Date.now() > parsed.endTimestamp) {
+        await this.clearTestActivity();
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * 테스트용 Ongoing Activity 상태 저장
+   */
+  async saveTestActivity(activity: any): Promise<void> {
+    try {
+      await SecureStore.setItemAsync('intip_timetable_test_activity', JSON.stringify(activity));
+    } catch (e) {
+      console.error('[TimetableStorage] 테스트 액티비티 저장 실패:', e);
+    }
+  },
+
+  /**
+   * 테스트용 Ongoing Activity 상태 삭제
+   */
+  async clearTestActivity(): Promise<void> {
+    try {
+      await SecureStore.deleteItemAsync('intip_timetable_test_activity');
+    } catch {}
+  },
 };

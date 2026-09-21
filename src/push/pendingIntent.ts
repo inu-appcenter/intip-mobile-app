@@ -50,6 +50,8 @@ export function isDuplicate(id: string | null | undefined): boolean {
   // without this exemption the second tap on a room's summary would be
   // swallowed forever.
   if (id.startsWith(GROUP_SUMMARY_ID_PREFIX)) return false;
+  // 시간표 Ongoing Activity / Now Bar 알림은 상주 알림이므로 사용자가 여러 번 클릭해도 항상 이동할 수 있어야 함
+  if (id === 'timetable_ongoing_activity') return false;
   if (seenIds.includes(id)) return true;
   seenIds.push(id);
   if (seenIds.length > DEDUPE_RING_SIZE) seenIds.shift();

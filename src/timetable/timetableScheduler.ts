@@ -169,6 +169,13 @@ export const TimetableScheduler = {
       return { phase: 'NONE' };
     }
 
+    // 1. 진행 중인 테스트 액티비티가 있으면 우선 유지 및 렌더링
+    const testActivity = await TimetableStorage.getTestActivity();
+    if (testActivity && testActivity.phase !== 'NONE') {
+      await TimetableNowBarService.renderActivity(testActivity);
+      return testActivity;
+    }
+
     const data = await TimetableStorage.getTimetableData();
     if (!data || !data.courses || data.courses.length === 0) {
       await TimetableNowBarService.cancel();

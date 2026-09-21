@@ -249,7 +249,7 @@ export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () =
     if (intent) deliver(intent);
   });
   const unsubNotifee = notifee.onForegroundEvent(({ type, detail }) => {
-    if (type === EventType.PRESS) {
+    if (type === EventType.PRESS || type === EventType.ACTION_PRESS) {
       if (isDuplicate(detail.notification?.id)) return;
       void clearChatGroup(detail.notification?.data);
       const intent = resolveNavIntent(detail.notification?.data);
@@ -323,7 +323,7 @@ export function registerBackgroundHandlers(): void {
       await TimetableScheduler.syncSchedule();
       return;
     }
-    if (type !== EventType.PRESS) return;
+    if (type !== EventType.PRESS && type !== EventType.ACTION_PRESS) return;
     if (isDuplicate(detail.notification?.id)) return;
     await clearChatGroup(detail.notification?.data);
     deliver(resolveNavIntent(detail.notification?.data));
