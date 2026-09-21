@@ -105,7 +105,7 @@ const TimetableLiveActivityLayout: LiveActivityComponent<TimetableLiveActivityPr
               foregroundStyle(secondaryText),
             ]}
           >
-            📍 {subtitleText} {props.professor ? `· ${props.professor}` : ''}
+            {subtitleText} {props.professor ? `· ${props.professor}` : ''}
           </Text>
           <Spacer />
         </HStack>

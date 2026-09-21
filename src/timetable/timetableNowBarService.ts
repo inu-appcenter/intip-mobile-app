@@ -80,7 +80,7 @@ export const TimetableNowBarService = {
     const title = state.courseTitle || '강의';
     const subtitle = isUpcoming ? '다음 수업' : '수업 중';
 
-    const locationText = state.location ? `📍 ${state.location}` : '📍 강의실 미지정';
+    const locationText = state.location || '강의실 미지정';
     const profText = state.professor ? ` · ${state.professor}` : '';
     const body = `${locationText}${profText}`;
 
