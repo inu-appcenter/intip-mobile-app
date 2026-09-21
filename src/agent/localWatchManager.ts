@@ -8,6 +8,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { executeAgentAction } from './agentActionExecutor';
 import { LibraryAgentTools } from './libraryTools';
+import { LibraryOngoingService } from '../library/libraryOngoingService';
 
 const STORAGE_KEY_LOCAL_WATCH = 'intip_local_watch_jobs';
 const LOCAL_WATCH_CHANNEL_ID = 'local_watch_channel';
@@ -145,18 +146,9 @@ export const LocalWatchManager = {
     // 감시 폴러 즉시 시작
     this.startStudyRoomPoller(newJob);
 
-    // 알림바에 상주 포그라운드성 알림 등록
+    // 알림바에 상주 Ongoing 알림 (Foreground Service / Now Bar) 등록
     try {
-      await notifee.displayNotification({
-        id,
-        title: '🎯 스터디룸 취소표 감시 시작',
-        body: `${params.roomName} ${params.targetHour}:00 취소표가 나오면 즉시 알려드릴게요. (최대 ${duration}분)`,
-        android: {
-          channelId: LOCAL_WATCH_CHANNEL_ID,
-          pressAction: { id: 'default' },
-          ongoing: false,
-        },
-      });
+      await LibraryOngoingService.renderWatchActivity(newJob, 1);
     } catch {}
 
     return newJob;
@@ -220,18 +212,9 @@ export const LocalWatchManager = {
     // 감시 폴러 즉시 시작
     this.startSpecificSeatPoller(newJob);
 
-    // 알림바에 상주 알림 등록
+    // 알림바에 상주 Ongoing 알림 (Foreground Service / Now Bar) 등록
     try {
-      await notifee.displayNotification({
-        id,
-        title: '🎯 특정 좌석 빈자리 감시 시작',
-        body: `${params.roomName} ${params.seatNo}번 좌석이 비면 즉시 알려드릴게요. (최대 ${duration}분)`,
-        android: {
-          channelId: LOCAL_WATCH_CHANNEL_ID,
-          pressAction: { id: 'default' },
-          ongoing: false,
-        },
-      });
+      await LibraryOngoingService.renderWatchActivity(newJob, 1);
     } catch {}
 
     return newJob;
@@ -328,6 +311,7 @@ export const LocalWatchManager = {
     this.stopPoller(id);
     try {
       await notifee.cancelNotification(id);
+      await LibraryOngoingService.cancelWatchActivity();
     } catch {}
 
     const jobs = await this.getJobs();
@@ -344,6 +328,7 @@ export const LocalWatchManager = {
    */
   async markJobNotified(id: string): Promise<void> {
     this.stopPoller(id);
+    await LibraryOngoingService.cancelWatchActivity();
     const jobs = await this.getJobs();
     const target = jobs.find((j) => j.id === id);
     if (target) {
@@ -365,12 +350,15 @@ export const LocalWatchManager = {
    */
   startStudyRoomPoller(job: LocalWatchJob) {
     this.stopPoller(job.id);
+    let pollCount = 0;
 
     const checkAvailability = async () => {
+      pollCount++;
       const now = Date.now();
       if (job.expiresAt <= now) {
         console.log(`[LocalWatch] Job ${job.id} expired.`);
         this.stopPoller(job.id);
+        await LibraryOngoingService.cancelWatchActivity();
         const jobs = await this.getJobs();
         const target = jobs.find((j) => j.id === job.id);
         if (target && target.status === 'ACTIVE') {
@@ -379,6 +367,11 @@ export const LocalWatchManager = {
         }
         return;
       }
+
+      // Ongoing 알림 갱신 (실시간 카운트다운 및 프로그레스 바)
+      try {
+        await LibraryOngoingService.renderWatchActivity(job, pollCount);
+      } catch {}
 
       try {
         const roomId = Number(job.targetId);
@@ -401,7 +394,8 @@ export const LocalWatchManager = {
             const isAvailable = targetSlot.minutes.some((m) => m.selectable);
             if (isAvailable) {
               console.log(`[LocalWatch] 취소표 발견! Room ${roomId}, Hour ${job.targetHour}`);
-              // 1. 헤드업 로컬 푸시 발송
+              // 1. 기존 Ongoing 알림 취소 후 헤드업 로컬 푸시 발송
+              await LibraryOngoingService.cancelWatchActivity();
               await notifee.displayNotification({
                 id: job.id,
                 title: '🎉 스터디룸 빈자리(취소표) 발생!',
@@ -434,12 +428,15 @@ export const LocalWatchManager = {
    */
   startSpecificSeatPoller(job: LocalWatchJob) {
     this.stopPoller(job.id);
+    let pollCount = 0;
 
     const checkSeatAvailability = async () => {
+      pollCount++;
       const now = Date.now();
       if (job.expiresAt <= now) {
         console.log(`[LocalWatch] Seat Job ${job.id} expired.`);
         this.stopPoller(job.id);
+        await LibraryOngoingService.cancelWatchActivity();
         const jobs = await this.getJobs();
         const target = jobs.find((j) => j.id === job.id);
         if (target && target.status === 'ACTIVE') {
@@ -448,6 +445,11 @@ export const LocalWatchManager = {
         }
         return;
       }
+
+      // Ongoing 알림 갱신 (실시간 카운트다운 및 프로그레스 바)
+      try {
+        await LibraryOngoingService.renderWatchActivity(job, pollCount);
+      } catch {}
 
       try {
         const roomId = Number(job.roomId || job.targetId);
@@ -478,7 +480,8 @@ export const LocalWatchManager = {
                 `[LocalWatch] 빈자리 발견! Room ${roomId}, Seat ${job.seatNo || targetSeat.code}`
               );
 
-              // 1. 헤드업 로컬 푸시 발송
+              // 1. 기존 Ongoing 알림 취소 후 헤드업 로컬 푸시 발송
+              await LibraryOngoingService.cancelWatchActivity();
               await notifee.displayNotification({
                 id: job.id,
                 title: '🎉 열람실 좌석 빈자리 발생!',

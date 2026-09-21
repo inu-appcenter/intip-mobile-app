@@ -39,6 +39,16 @@ import {
   TimetableNowBarService,
   TIMETABLE_ONGOING_NOTIFICATION_ID,
 } from '../timetable/timetableNowBarService';
+import {
+  LibraryOngoingService,
+  LIBRARY_WATCH_NOTIFICATION_ID,
+  LIBRARY_SEAT_SESSION_NOTIFICATION_ID,
+} from '../library/libraryOngoingService';
+import {
+  LmsOngoingService,
+  LMS_DEADLINE_NOTIFICATION_ID,
+} from '../lms/lmsOngoingService';
+import { LocalWatchManager } from '../agent/localWatchManager';
 
 export type { NavIntent };
 
@@ -310,68 +320,128 @@ export function registerBackgroundHandlers(): void {
   // Android 16 / One UI 8 Live Notification / Rich Ongoing Activity를 위한 Foreground Service 러너 등록
   notifee.registerForegroundService((notification) => {
     return new Promise((resolve) => {
-      // 시간표 Ongoing 알림인 경우 1분(60초)마다 실시간 진행률(경과 시간)을 계산하여 알림 자동 갱신
-      if (notification?.id !== TIMETABLE_ONGOING_NOTIFICATION_ID) {
-        return;
-      }
+      const notificationId = notification?.id;
 
-      const interval = setInterval(async () => {
-        try {
-          // 1. 테스트 액티비티가 활성화되어 있는 경우
-          const testActivity = await TimetableStorage.getTestActivity();
-          if (testActivity && testActivity.phase !== 'NONE') {
-            if (testActivity.endTimestamp && Date.now() >= testActivity.endTimestamp) {
+      // 1. 시간표 Ongoing 알림인 경우 1분(60초)마다 실시간 진행률(경과 시간)을 계산하여 알림 자동 갱신
+      if (notificationId === TIMETABLE_ONGOING_NOTIFICATION_ID) {
+        const interval = setInterval(async () => {
+          try {
+            // 1) 테스트 액티비티가 활성화되어 있는 경우
+            const testActivity = await TimetableStorage.getTestActivity();
+            if (testActivity && testActivity.phase !== 'NONE') {
+              if (testActivity.endTimestamp && Date.now() >= testActivity.endTimestamp) {
+                clearInterval(interval);
+                await TimetableNowBarService.cancel();
+                resolve();
+                return;
+              }
+              await TimetableNowBarService.renderActivity(testActivity);
+              return;
+            }
+
+            // 2) 시간표 알림 설정 확인
+            const settings = await TimetableStorage.getSettings();
+            if (!settings.enabled) {
               clearInterval(interval);
               await TimetableNowBarService.cancel();
               resolve();
               return;
             }
-            await TimetableNowBarService.renderActivity(testActivity);
-            return;
-          }
 
-          // 2. 시간표 알림 설정 확인
-          const settings = await TimetableStorage.getSettings();
-          if (!settings.enabled) {
-            clearInterval(interval);
-            await TimetableNowBarService.cancel();
-            resolve();
-            return;
-          }
+            // 3) 실제 시간표 데이터 확인
+            const data = await TimetableStorage.getTimetableData();
+            if (!data || !data.courses || data.courses.length === 0) {
+              clearInterval(interval);
+              await TimetableNowBarService.cancel();
+              resolve();
+              return;
+            }
 
-          // 3. 실제 시간표 데이터 확인
-          const data = await TimetableStorage.getTimetableData();
-          if (!data || !data.courses || data.courses.length === 0) {
-            clearInterval(interval);
-            await TimetableNowBarService.cancel();
-            resolve();
-            return;
-          }
+            // 4) 현재 수업 상태 계산 및 갱신
+            const state = getCurrentActivityState(data.courses, new Date(), settings.leadTimeMinutes);
+            if (state.phase === 'NONE') {
+              clearInterval(interval);
+              await TimetableNowBarService.cancel();
+              resolve();
+              return;
+            }
 
-          // 4. 현재 수업 상태 계산 및 갱신
-          const state = getCurrentActivityState(data.courses, new Date(), settings.leadTimeMinutes);
-          if (state.phase === 'NONE') {
-            clearInterval(interval);
-            await TimetableNowBarService.cancel();
-            resolve();
-            return;
+            await TimetableNowBarService.renderActivity(state);
+          } catch (err) {
+            console.warn('[ForegroundService] timetable interval error:', err);
           }
+        }, 60 * 1000);
+        return;
+      }
 
-          await TimetableNowBarService.renderActivity(state);
-        } catch (err) {
-          console.warn('[ForegroundService] timetable interval error:', err);
-        }
-      }, 60 * 1000);
+      // 2. 도서관 빈자리 / 스터디룸 취소표 감시 Ongoing 알림인 경우
+      if (notificationId === LIBRARY_WATCH_NOTIFICATION_ID) {
+        const interval = setInterval(async () => {
+          try {
+            const jobs = await LocalWatchManager.getJobs();
+            const activeJob = jobs.find(
+              (j) => j.status === 'ACTIVE' && (j.type === 'SPECIFIC_SEAT_SNIPER' || j.type === 'STUDY_ROOM_SNIPER')
+            );
+
+            if (!activeJob || activeJob.expiresAt <= Date.now()) {
+              clearInterval(interval);
+              await LibraryOngoingService.cancelWatchActivity();
+              resolve();
+              return;
+            }
+
+            // 활성 폴러가 동작 중이므로 현황 Ongoing 알림 갱신
+            await LibraryOngoingService.renderWatchActivity(activeJob);
+          } catch (err) {
+            console.warn('[ForegroundService] library watch interval error:', err);
+          }
+        }, 60 * 1000);
+        return;
+      }
+
+      // 3. 도서관 이용 중 좌석 세션 Ongoing 알림인 경우
+      if (notificationId === LIBRARY_SEAT_SESSION_NOTIFICATION_ID) {
+        const interval = setInterval(async () => {
+          try {
+            // 만료 시각 체크
+            const data = notification?.data;
+            const endTime = data?.endTime ? Number(data.endTime) : 0;
+            if (endTime && Date.now() >= endTime) {
+              clearInterval(interval);
+              await LibraryOngoingService.cancelActiveSeatSession();
+              resolve();
+              return;
+            }
+          } catch (err) {
+            console.warn('[ForegroundService] library seat session interval error:', err);
+          }
+        }, 60 * 1000);
+        return;
+      }
+
+      // 4. LMS 마감 임박 Ongoing 알림인 경우
+      if (notificationId === LMS_DEADLINE_NOTIFICATION_ID) {
+        const interval = setInterval(async () => {
+          try {
+            const data = notification?.data;
+            const dueTime = data?.timestamp ? Number(data.timestamp) : 0;
+            if (dueTime && Date.now() >= dueTime) {
+              clearInterval(interval);
+              await LmsOngoingService.cancel();
+              resolve();
+              return;
+            }
+          } catch (err) {
+            console.warn('[ForegroundService] lms deadline interval error:', err);
+          }
+        }, 60 * 1000);
+        return;
+      }
     });
   });
 
   // Taps on notifee-displayed notifications while backgrounded (or after the
   // app was killed — notifee runs this via a headless task either way).
-  // Resolve the intent and hand it to the module-scope queue: delivered
-  // immediately if `subscribeNotificationOpen` is already mounted, queued
-  // otherwise (see `pendingIntent.ts`). Previously a no-op relying on
-  // `getInitialNotification()` alone, which only ever resolves for a killed
-  // -> cold-start launch, not a plain background tap (spec G4).
   notifee.onBackgroundEvent(async ({ type, detail }) => {
     if (
       type === EventType.DELIVERED &&
@@ -380,6 +450,33 @@ export function registerBackgroundHandlers(): void {
       await TimetableScheduler.syncSchedule();
       return;
     }
+
+    // --- 액션 버튼 처리 ---
+    if (type === EventType.ACTION_PRESS) {
+      const pressActionId = detail.pressAction?.id;
+      if (pressActionId === 'library_extend_seat') {
+        await LibraryOngoingService.handleQuickExtend();
+        return;
+      }
+      if (pressActionId === 'library_return_seat') {
+        await LibraryOngoingService.handleQuickReturn();
+        return;
+      }
+      if (pressActionId === 'cancel_library_watch') {
+        const jobId = detail.notification?.data?.jobId;
+        if (jobId) {
+          await LocalWatchManager.cancelJob(String(jobId));
+        } else {
+          await LibraryOngoingService.cancelWatchActivity();
+        }
+        return;
+      }
+      if (pressActionId === 'cancel_lms_deadline') {
+        await LmsOngoingService.cancel();
+        return;
+      }
+    }
+
     if (type !== EventType.PRESS && type !== EventType.ACTION_PRESS) return;
     if (isDuplicate(detail.notification?.id)) return;
     await clearChatGroup(detail.notification?.data);

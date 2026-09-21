@@ -6,6 +6,8 @@ import { LibraryAuthService } from './libraryAuthService';
 import { LmsAuthService } from './lmsAuthService';
 import { executeAgentAction } from './agentActionExecutor';
 import { LocalWatchManager } from './localWatchManager';
+import { LibraryOngoingService } from '../library/libraryOngoingService';
+import { LmsOngoingService } from '../lms/lmsOngoingService';
 
 export interface AgentBridgeResponse {
   type: string;
@@ -337,6 +339,100 @@ export async function handleAgentBridgeMessage(
       } catch (err: any) {
         sendWrappedResponse({
           type: 'cancelLocalWatchJobResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'startLibrarySeatSession': {
+      try {
+        const { seatId, seatNo, roomName, roomId, startTime, endTime, totalMinutes } = payload || {};
+        if (!seatNo || !endTime) {
+          throw new Error('seatNo 및 endTime 파라미터가 필요합니다.');
+        }
+        await LibraryOngoingService.renderActiveSeatSession({
+          seatId: seatId ? Number(seatId) : undefined,
+          seatNo: String(seatNo),
+          roomName: roomName || '열람실',
+          roomId: roomId ? Number(roomId) : undefined,
+          startTime: startTime ? new Date(startTime).getTime() : Date.now(),
+          endTime: new Date(endTime).getTime(),
+          totalMinutes: totalMinutes ? Number(totalMinutes) : undefined,
+        });
+        sendWrappedResponse({
+          type: 'startLibrarySeatSessionResult',
+          success: true,
+          data: { seatNo, roomName },
+        });
+      } catch (err: any) {
+        sendWrappedResponse({
+          type: 'startLibrarySeatSessionResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'cancelLibrarySeatSession': {
+      try {
+        await LibraryOngoingService.cancelActiveSeatSession();
+        sendWrappedResponse({
+          type: 'cancelLibrarySeatSessionResult',
+          success: true,
+        });
+      } catch (err: any) {
+        sendWrappedResponse({
+          type: 'cancelLibrarySeatSessionResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'startLmsDeadlineOngoing': {
+      try {
+        const { id, courseName, itemName, type: itemType, dueTime, courseId, cmid } = payload || {};
+        if (!itemName || !dueTime) {
+          throw new Error('itemName 및 dueTime 파라미터가 필요합니다.');
+        }
+        await LmsOngoingService.renderUrgentDeadline({
+          id: id || Date.now(),
+          courseName: courseName || '강의',
+          itemName,
+          type: itemType || 'ASSIGNMENT',
+          dueTime: new Date(dueTime).getTime(),
+          courseId: courseId ? Number(courseId) : undefined,
+          cmid: cmid ? Number(cmid) : undefined,
+        });
+        sendWrappedResponse({
+          type: 'startLmsDeadlineOngoingResult',
+          success: true,
+          data: { itemName },
+        });
+      } catch (err: any) {
+        sendWrappedResponse({
+          type: 'startLmsDeadlineOngoingResult',
+          success: false,
+          errorMessage: err?.message,
+        });
+      }
+      return true;
+    }
+
+    case 'cancelLmsDeadlineOngoing': {
+      try {
+        await LmsOngoingService.cancel();
+        sendWrappedResponse({
+          type: 'cancelLmsDeadlineOngoingResult',
+          success: true,
+        });
+      } catch (err: any) {
+        sendWrappedResponse({
+          type: 'cancelLmsDeadlineOngoingResult',
           success: false,
           errorMessage: err?.message,
         });
