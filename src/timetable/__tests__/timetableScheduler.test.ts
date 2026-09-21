@@ -15,9 +15,11 @@ jest.mock('@notifee/react-native', () => ({
     displayNotification: jest.fn(),
     cancelNotification: jest.fn(),
     createTriggerNotification: jest.fn(),
+    stopForegroundService: jest.fn(),
   },
-  AndroidCategory: { EVENT: 'event' },
-  AndroidImportance: { LOW: 2, MIN: 1 },
+  AndroidCategory: { EVENT: 'event', PROGRESS: 'progress' },
+  AndroidImportance: { DEFAULT: 3, LOW: 2, MIN: 1 },
+  AndroidStyle: { BIGTEXT: 1 },
   AndroidVisibility: { PUBLIC: 1 },
   TriggerType: { TIMESTAMP: 0 },
 }));

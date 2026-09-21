@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import notifee, {
   AndroidCategory,
   AndroidImportance,
+  AndroidStyle,
   AndroidVisibility,
 } from '@notifee/react-native';
 import { TimetableActivityState } from './types';
@@ -73,12 +74,17 @@ export const TimetableNowBarService = {
         },
         android: {
           channelId: TIMETABLE_CHANNEL_ID,
+          asForegroundService: true, // Android 16 / One UI 8 실시간 알림 섹션 고정 및 Now Bar 캡슐 승격 필수 속성
           category: isUpcoming ? AndroidCategory.EVENT : AndroidCategory.PROGRESS,
           importance: AndroidImportance.DEFAULT,
           ongoing: true, // 사용자가 스와이프로 임의 종료 불가
           autoCancel: false,
           onlyAlertOnce: true,
           visibility: AndroidVisibility.PUBLIC,
+          style: {
+            type: AndroidStyle.BIGTEXT,
+            text: body,
+          },
           showChronometer: !!targetTimestamp,
           chronometerDirection: 'down',
           timestamp: targetTimestamp,
@@ -108,13 +114,17 @@ export const TimetableNowBarService = {
   },
 
   /**
-   * Ongoing 알림 취소 및 제거
+   * Ongoing 알림 취소 및 제거 (Foreground Service 종료 포함)
    */
   async cancel(): Promise<void> {
     try {
+      if (Platform.OS === 'android') {
+        await notifee.stopForegroundService().catch(() => {});
+      }
       await notifee.cancelNotification(TIMETABLE_ONGOING_NOTIFICATION_ID);
     } catch (e) {
       console.warn('[TimetableNowBarService] 알림 취소 실패:', e);
     }
   },
 };
+

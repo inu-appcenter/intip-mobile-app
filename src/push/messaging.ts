@@ -301,6 +301,13 @@ export function registerBackgroundHandlers(): void {
     }
   });
 
+  // Android 16 / One UI 8 Live Notification / Rich Ongoing Activity를 위한 Foreground Service 러너 등록
+  notifee.registerForegroundService(() => {
+    return new Promise(() => {
+      // notifee.stopForegroundService()가 호출될 때까지 서비스가 상주하며 시스템 라이브 알림을 유지합니다.
+    });
+  });
+
   // Taps on notifee-displayed notifications while backgrounded (or after the
   // app was killed — notifee runs this via a headless task either way).
   // Resolve the intent and hand it to the module-scope queue: delivered
