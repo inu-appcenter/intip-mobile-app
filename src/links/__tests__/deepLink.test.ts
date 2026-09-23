@@ -77,18 +77,43 @@ describe('resolveDeepLink', () => {
     expect(resolveDeepLink('intipmobileapp://widget')).toEqual({ kind: 'spa', path: '/' });
   });
 
-  it('does not mistake a look-alike for a widget link', () => {
-    expect(resolveDeepLink('intipmobileapp://widgets/timetable')).toBeNull();
-    expect(resolveDeepLink('/widgetfoo')).toBeNull();
+  it('routes relative paths and custom scheme paths as portal paths', () => {
+    expect(resolveDeepLink('/home')).toEqual({
+      kind: 'spa',
+      path: '/home',
+    });
+    expect(resolveDeepLink('/services/library')).toEqual({
+      kind: 'push',
+      path: '/services/library',
+      url: `${ROOT_URL}/services/library`,
+    });
+    expect(resolveDeepLink('intipmobileapp://home/notice/123')).toEqual({
+      kind: 'push',
+      path: '/home/notice/123',
+      url: `${ROOT_URL}/home/notice/123`,
+    });
   });
 
-  it('ignores other hosts, other schemes and non-URLs', () => {
+  it('does not strip the prefix off a widget look-alike', () => {
+    // `widget` only counts as the widget prefix on a path boundary; anything
+    // else is just another portal path, not a widget link.
+    expect(resolveDeepLink('intipmobileapp://widgets/timetable')).toEqual({
+      kind: 'push',
+      path: '/widgets/timetable',
+      url: `${ROOT_URL}/widgets/timetable`,
+    });
+    expect(resolveDeepLink('/widgetfoo')).toEqual({
+      kind: 'push',
+      path: '/widgetfoo',
+      url: `${ROOT_URL}/widgetfoo`,
+    });
+  });
+
+  it('ignores other hosts, unrecognised schemes and invalid URLs', () => {
     expect(resolveDeepLink('https://inu.ac.kr/notice/1')).toBeNull();
     expect(resolveDeepLink('https://evil.example.com/home')).toBeNull();
     // A look-alike subdomain must not match either — the host list is exact.
     expect(resolveDeepLink('https://intip.inuappcenter.kr.evil.com/home')).toBeNull();
-    expect(resolveDeepLink('intipmobileapp://webview?url=x')).toBeNull();
-    expect(resolveDeepLink('/home')).toBeNull();
     expect(resolveDeepLink('')).toBeNull();
   });
 });

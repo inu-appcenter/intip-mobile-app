@@ -24,6 +24,7 @@ jest.mock('@notifee/react-native', () => ({
     onBackgroundEvent: (cb: unknown) => mockOnBackgroundEvent(cb),
     onForegroundEvent: jest.fn(() => () => {}),
     getInitialNotification: jest.fn(async () => null),
+    registerForegroundService: jest.fn(),
   },
   AndroidGroupAlertBehavior: { CHILDREN: 1 },
   AndroidImportance: { HIGH: 4, LOW: 2 },

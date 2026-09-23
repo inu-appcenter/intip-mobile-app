@@ -3,11 +3,14 @@ import { ShareIntentProvider } from "expo-share-intent";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { useColorScheme } from "react-native";
+import { AppState, useColorScheme } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import WebViewControllerPanel from "../components/WebViewControllerPanel";
+import { AcademicScraperWebView } from "../agent/AcademicScraperWebView";
+import { LocalWatchManager } from "../agent/localWatchManager";
+import { TimetableScheduler } from "../timetable/timetableScheduler";
 import { checkForUpdate } from "../native/updateCheck";
 import {
   registerBackgroundHandlers,
@@ -41,6 +44,9 @@ export default function RootLayout() {
     void requestNotificationPermission();
     // Check for OTA updates (non-blocking; shows a prompt if one is available).
     void checkForUpdate();
+    // Restore active local watch jobs (library seat / study room snipers).
+    void LocalWatchManager.restoreActiveJobs();
+
     // Fetch each widget's data and push it. Fire-and-forget on purpose: the
     // widgets already have whatever they were last given, so nothing here
     // blocks the first render, and every failure inside is handled per-widget
@@ -58,6 +64,19 @@ export default function RootLayout() {
     // hasn't been set up — these calls are expected to no-op on a real iOS
     // build until that's done.
     void refreshAllWidgets();
+
+    // Sync and restore the timetable Ongoing Activity / Now Bar.
+    void TimetableScheduler.syncSchedule();
+
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active" || state === "background") {
+        void TimetableScheduler.syncSchedule();
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+    };
   }, []);
 
   // Refresh every widget when the app goes to the background — the moment
@@ -111,6 +130,8 @@ export default function RootLayout() {
             </Stack>
             {/* Debug-only GUI controller, rendered above the whole stack. */}
             <WebViewControllerPanel />
+            {/* Hidden WebView for background portal SSO & academic scraping */}
+            <AcademicScraperWebView />
           </WebViewProvider>
         </ShareIntentProvider>
       </KeyboardProvider>
