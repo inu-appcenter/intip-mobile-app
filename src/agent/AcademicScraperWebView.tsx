@@ -349,11 +349,11 @@ export const AcademicScraperWebView: React.FC = () => {
 
                   // 2. 현재 연도 및 학기 산출 (파라미터가 있으면 우선 사용, 없으면 현재 날짜 기준)
                   var now = new Date();
-                  var currentYy = String((target && target.params && target.params.yy) || now.getFullYear());
+                  var currentYy = String((target && target.data && target.data.yy) || (target && target.params && target.params.yy) || (target && target.yy) || now.getFullYear());
                   var currentMonth = now.getMonth() + 1;
                   // 1학기: 10, 여름: 30, 2학기: 20, 겨울: 40
                   var defaultTm = (currentMonth >= 2 && currentMonth <= 6) ? '10' : (currentMonth >= 8 && currentMonth <= 12) ? '20' : (currentMonth === 7) ? '30' : '40';
-                  var currentTmGbn = String((target && target.params && target.params.tmGbn) || defaultTm);
+                  var currentTmGbn = String((target && target.data && target.data.tmGbn) || (target && target.params && target.params.tmGbn) || (target && target.tmGbn) || defaultTm);
 
                   var body = 'SSV:utf-8' + RS +
                     'WMONID=' + wmonid + RS +
