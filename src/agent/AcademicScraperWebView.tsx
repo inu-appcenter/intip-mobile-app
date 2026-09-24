@@ -335,10 +335,15 @@ export const AcademicScraperWebView: React.FC = () => {
                 var actionId = ${JSON.stringify(optionsRef.current?.actionId || 'PORTAL_GET_ACADEMIC_RECORD')};
                 var target = ${JSON.stringify(optionsRef.current?.target || {})};
 
-                if (actionId === 'PORTAL_GET_STUDENT_TIMETABLE' || (target && target.url && target.url.indexOf('findStdSukangAplyList') >= 0)) {
-                  // 1. 메뉴 권한 확인
-                  var menuId = (target && target.params && target.params.menuId) || 'M003150';
-                  var pgmId = (target && target.params && target.params.pgmId) || 'P001416';
+                if (
+                  actionId === 'PORTAL_GET_STUDENT_TIMETABLE' ||
+                  actionId === 'PORTAL_GET_GRADE_REPORT' ||
+                  actionId === 'PORTAL_GET_FULL_ACADEMIC_RECORD' ||
+                  (target && target.url && (target.url.indexOf('findStdSukangAplyList') >= 0 || target.url.indexOf('findTlsnAplyDetaCtntList') >= 0))
+                ) {
+                  // M002043 (개인학적조회) 메뉴 권한 확인
+                  var menuId = 'M002043';
+                  var pgmId = 'P001878';
                   try {
                     await fetch('/com/PermCtr/findMenuGrdOne.do?menuId=' + menuId + '&pgmId=' + pgmId, {
                       method: 'POST',
@@ -347,38 +352,110 @@ export const AcademicScraperWebView: React.FC = () => {
                     });
                   } catch(e) {}
 
-                  // 2. 현재 연도 및 학기 산출 (파라미터가 있으면 우선 사용, 없으면 현재 날짜 기준)
+                  // 현재 연도 및 학기 산출 (파라미터 우선)
                   var now = new Date();
                   var currentYy = String((target && target.data && target.data.yy) || (target && target.params && target.params.yy) || (target && target.yy) || now.getFullYear());
                   var currentMonth = now.getMonth() + 1;
-                  // 1학기: 10, 여름: 30, 2학기: 20, 겨울: 40
                   var defaultTm = (currentMonth >= 2 && currentMonth <= 6) ? '10' : (currentMonth >= 8 && currentMonth <= 12) ? '20' : (currentMonth === 7) ? '30' : '40';
                   var currentTmGbn = String((target && target.data && target.data.tmGbn) || (target && target.params && target.params.tmGbn) || (target && target.tmGbn) || defaultTm);
 
-                  var body = 'SSV:utf-8' + RS +
-                    'WMONID=' + wmonid + RS +
-                    '_ba_exist=true' + RS +
-                    'login_domain=inu.ac.kr' + RS +
-                    'Dataset:DS_COND' + RS +
-                    '_RowType_' + US + 'deptClsfCd' + US + 'yy' + US + 'tmGbn' + US + 'stuno' + US + 'korNm' + US + 'pageType' + RS +
-                    'U' + US + '0000587' + US + currentYy + US + currentTmGbn + US + ${JSON.stringify(studentId)} + US + NULL + US + 'sukang' + RS +
-                    'O' + US + NULL + US + NULL + US + NULL + US + NULL + US + NULL + US + NULL + RS;
+                  // 1. 범용 다중 요청(batchRequests)이 웹에서 전달된 경우: 앱은 순수 브라우저 익스큐터 역할만 수행
+                  if (target && Array.isArray(target.batchRequests) && target.batchRequests.length > 0) {
+                    var menuId = (target && target.params && target.params.menuId) || 'M002043';
+                    var pgmId = (target && target.params && target.params.pgmId) || 'P001878';
+                    try {
+                      await fetch('/com/PermCtr/findMenuGrdOne.do?menuId=' + menuId + '&pgmId=' + pgmId, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'REQFOUNDATAION': 'nexacro' },
+                        body: base + 'menuId=' + menuId + RS
+                      });
+                    } catch(e) {}
 
-                  var url = (target && target.url) || '/uni/cour/CorrCtr/findStdSukangAplyList.do';
-                  if (url.indexOf('?') < 0) url += '?menuId=' + menuId + '&pgmId=' + pgmId;
+                    var resultMap = {};
+                    var fetchPromises = target.batchRequests.map(function(item) {
+                      var reqBody = base + (item.body || '');
+                      var reqUrl = item.url;
+                      if (reqUrl.indexOf('?') < 0 && (item.menuId || menuId)) {
+                        reqUrl += '?menuId=' + (item.menuId || menuId) + '&pgmId=' + (item.pgmId || pgmId);
+                      }
+                      return fetch(reqUrl, {
+                        method: item.method || 'POST',
+                        headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'REQFOUNDATAION': 'nexacro' },
+                        body: reqBody
+                      }).then(function(r) { return r.text(); })
+                        .then(function(text) { resultMap[item.key] = text; })
+                        .catch(function() { resultMap[item.key] = ''; });
+                    });
 
-                  var res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'REQFOUNDATAION': 'nexacro' },
-                    body: body
-                  });
-                  var text = await res.text();
-                  if (!res.ok) throw new Error('ERP 시간표 조회 HTTP 오류');
+                    await Promise.all(fetchPromises);
 
-                  window.ReactNativeWebView.postMessage(JSON.stringify({
-                    type: 'ACADEMIC_RESULT',
-                    data: JSON.stringify({ actionId: actionId, ssv: text, yy: currentYy, tmGbn: currentTmGbn })
-                  }));
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'ACADEMIC_RESULT',
+                      data: JSON.stringify(Object.assign({
+                        actionId: actionId,
+                        yy: currentYy,
+                        tmGbn: currentTmGbn,
+                        ssv: resultMap.timetableSsv || resultMap.ssv || '',
+                      }, resultMap))
+                    }));
+                  } else {
+                    // Fallback: 기본 사전 정의된 개인학적조회 일괄 조회
+                    var sid = ${JSON.stringify(studentId)};
+                    var bodyCond = 'Dataset:DS_COND' + RS +
+                      '_RowType_' + US + 'stuno' + US + 'korNm' + US + 'gbn' + US + 'colgGrscCd' + US + 'colgCd' + US + 'earnMintStom' + RS +
+                      'N' + US + sid + US + NULL + US + NULL + US + NULL + US + NULL + US + '1' + RS;
+
+                    var bodyCond02 = 'Dataset:DS_COND02' + RS +
+                      '_RowType_' + US + 'stuno' + US + 'yy' + US + 'tmGbn' + RS +
+                      'N' + US + sid + US + currentYy + US + currentTmGbn + RS;
+
+                    var bodyCond02All = 'Dataset:DS_COND02' + RS +
+                      '_RowType_' + US + 'stuno' + US + 'yy' + US + 'tmGbn' + RS +
+                      'N' + US + sid + US + '' + US + '' + RS;
+
+                    var postOpts = function(body) {
+                      return {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'REQFOUNDATAION': 'nexacro' },
+                        body: base + body
+                      };
+                    };
+
+                    var [rTimetable, rTmMrks, rScMrks, rCptn, rTmCnt, rScal, rGrdt] = await Promise.all([
+                      fetch('/uni/sreg/TsimCtr/findTlsnAplyDetaCtntList.do?menuId=' + menuId + '&pgmId=' + pgmId, postOpts(bodyCond02)).catch(function() { return null; }),
+                      fetch('/uni/sreg/TsimCtr/findTmClsfMrksList.do?menuId=' + menuId + '&pgmId=' + pgmId, postOpts(bodyCond)).catch(function() { return null; }),
+                      fetch('/uni/sreg/TsimCtr/findScClsfMrksList.do?menuId=' + menuId + '&pgmId=' + pgmId, postOpts(bodyCond02All)).catch(function() { return null; }),
+                      fetch('/uni/sreg/TsimCtr/findCptnGbnClsfMrksOne.do?menuId=' + menuId + '&pgmId=' + pgmId, postOpts(bodyCond)).catch(function() { return null; }),
+                      fetch('/uni/sreg/TsimCtr/findTmCntOne.do?menuId=' + menuId + '&pgmId=' + pgmId, postOpts(bodyCond)).catch(function() { return null; }),
+                      fetch('/uni/sreg/TsimCtr/findScalCtntList.do?menuId=' + menuId + '&pgmId=' + pgmId, postOpts(bodyCond)).catch(function() { return null; }),
+                      fetch('/uni/sreg/TsimCtr/findSustGrdtCtntList.do?menuId=' + menuId + '&pgmId=' + pgmId, postOpts(bodyCond)).catch(function() { return null; })
+                    ]);
+
+                    var textTimetable = rTimetable ? await rTimetable.text() : '';
+                    var textTmMrks = rTmMrks ? await rTmMrks.text() : '';
+                    var textScMrks = rScMrks ? await rScMrks.text() : '';
+                    var textCptn = rCptn ? await rCptn.text() : '';
+                    var textTmCnt = rTmCnt ? await rTmCnt.text() : '';
+                    var textScal = rScal ? await rScal.text() : '';
+                    var textGrdt = rGrdt ? await rGrdt.text() : '';
+
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'ACADEMIC_RESULT',
+                      data: JSON.stringify({
+                        actionId: actionId,
+                        ssv: textTimetable,
+                        timetableSsv: textTimetable,
+                        semesterGradesSsv: textTmMrks,
+                        courseGradesSsv: textScMrks,
+                        creditSummarySsv: textCptn,
+                        semesterCountSsv: textTmCnt,
+                        scholarshipSsv: textScal,
+                        graduationSsv: textGrdt,
+                        yy: currentYy,
+                        tmGbn: currentTmGbn
+                      })
+                    }));
+                  }
                 } else {
                   // 기본 학적 정보 조회 (PORTAL_GET_ACADEMIC_RECORD)
                   try {
