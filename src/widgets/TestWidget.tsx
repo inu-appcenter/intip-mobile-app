@@ -32,8 +32,13 @@ export type TestWidgetProps = {
  * inside the function, so every constant it needs is declared in its body.
  *
  * The name passed to `createWidget` must match a `widgets[].name` entry in the
- * `expo-widgets` plugin config in app.json (`TestWidget`), which is what the
- * plugin turns into a Swift struct during prebuild.
+ * `expo-widgets` plugin config in app.json, which is what the plugin turns
+ * into a Swift struct during prebuild.
+ *
+ * No longer registered: `TestWidget` was dropped from app.json so it doesn't
+ * show up in users' widget gallery, and nothing imports this file anymore.
+ * It stays as the reference the other widgets' `'widget'` directive notes
+ * point at — re-add the app.json entry to use it as a test bed again.
  */
 const TestWidget = (props: TestWidgetProps, environment: WidgetEnvironment) => {
   'widget';

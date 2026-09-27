@@ -34,7 +34,6 @@ import { updateGlanceTimeline } from 'expo-widgets-glance';
 import BusArrivalWidget from './BusArrivalWidget';
 import CafeteriaMenuWidget from './CafeteriaMenuWidget';
 import NextClassWidget from './NextClassWidget';
-import TestWidget from './TestWidget';
 import TimetableWidget from './TimetableWidget';
 import TodayClassesWidget from './TodayClassesWidget';
 import { BUS_FOREGROUND_POLL_MS } from './refreshIntervals';
@@ -263,23 +262,6 @@ export async function refreshAllWidgets(now: Date = new Date()): Promise<void> {
     refreshBusArrivalWidget(now),
     refreshCafeteriaMenuWidget(now),
   ]);
-}
-
-/**
- * Pushes a snapshot into the test countdown widget.
- *
- * iOS-only: `TestWidget` is a test bed with no Android counterpart, not one of
- * the designed widgets, so there is no `updateGlanceSnapshot` call to pair here.
- */
-export function refreshTestWidget(): void {
-  if (Platform.OS !== 'ios') return;
-
-  const now = Date.now();
-  TestWidget.updateSnapshot({
-    label: '테스트 카운트다운',
-    targetAt: now + 60 * 60 * 1000,
-    updatedAt: now,
-  });
 }
 
 // Declared after the functions purely so the exported API reads first; these

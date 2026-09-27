@@ -2,7 +2,7 @@
   "expo": {
     "name": "INTIP",
     "slug": "intip-mobile-app",
-    "version": "3.0.13",
+    "version": "3.0.14",
     "orientation": "portrait",
     "scheme": "intipmobileapp",
     "userInterfaceStyle": "light",
@@ -34,7 +34,7 @@
     },
     "android": {
       "package": "inu.appcenter.intip_android",
-      "versionCode": 30,
+      "versionCode": 31,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -95,6 +95,7 @@
       "./plugins/withIOSManualSigning",
       "./plugins/withWorkManagerVersionAlign",
       "./plugins/withExpoWidgetsVersionSync",
+      "./plugins/withApsEnvironmentProduction",
       [
         "expo-share-intent",
         {
@@ -137,18 +138,6 @@
         "expo-widgets",
         {
           "widgets": [
-            {
-              "name": "TestWidget",
-              "displayName": "테스트 카운트다운",
-              "description": "expo-widgets 동작 확인용 테스트 위젯입니다.",
-              "ios": {
-                "contentMarginsDisabled": true,
-                "supportedFamilies": [
-                  "systemSmall",
-                  "systemMedium"
-                ]
-              }
-            },
             {
               "name": "NextClassWidget",
               "displayName": "다음 수업",
