@@ -43,3 +43,8 @@ jest.mock('expo-secure-store', () => ({
   setItemAsync: jest.fn(async () => {}),
   deleteItemAsync: jest.fn(async () => {}),
 }));
+
+// `agentActionExecutor` reaches the hidden scraper WebView, so any test that
+// touches the push/agent graph loads react-native-webview — whose native
+// module lookup (`TurboModuleRegistry.getEnforcing`) throws under jest.
+jest.mock('react-native-webview', () => ({ WebView: 'WebView' }));

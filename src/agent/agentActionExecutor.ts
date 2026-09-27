@@ -1,6 +1,7 @@
 import { LibraryAuthService } from './libraryAuthService';
 import { LmsAuthService } from './lmsAuthService';
 import { PortalSecureStore } from './secureStore';
+import { AcademicScraperManager } from './AcademicScraperWebView';
 
 /**
  * AI 에이전트로부터 하달되는 범용 액션 명령 규격 (Generic Protocol)
@@ -39,6 +40,45 @@ export async function executeAgentAction(
   const { actionId, authDomain, request } = instruction;
 
   try {
+    // 0. 포털 ERP (Nexacro SSV) 전용 액션 처리
+    if (authDomain === 'PORTAL') {
+      const creds = await PortalSecureStore.getCredentials();
+      if (!creds) {
+        return {
+          actionId,
+          success: false,
+          errorCode: 'AUTH_REQUIRED',
+          errorMessage: '포털 로그인이 필요합니다.',
+        };
+      }
+
+      try {
+        const rawResult = await AcademicScraperManager.executeErpAction({
+          creds,
+          actionId,
+          target: request,
+        });
+
+        let parsedData: any = rawResult;
+        try {
+          parsedData = JSON.parse(rawResult);
+        } catch (_) {}
+
+        return {
+          actionId,
+          success: true,
+          statusCode: 200,
+          data: parsedData,
+        };
+      } catch (scrapeErr: any) {
+        return {
+          actionId,
+          success: false,
+          errorCode: 'ERP_SCRAPE_ERROR',
+          errorMessage: scrapeErr?.message || '포털 ERP 데이터 조회 실패',
+        };
+      }
+    }
     let finalUrl = request.url;
     if (request.params && Object.keys(request.params).length > 0) {
       const urlObj = new URL(request.url);
