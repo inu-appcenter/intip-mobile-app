@@ -7,6 +7,18 @@ const PORTAL_LOGIN_URL = 'https://portal.inu.ac.kr:444/enview/user/login.face';
 const ERP_SSO_URL = 'http://erp.inu.ac.kr:8881/com/SsoCtr/initPageWork.do?loginGbn=sso';
 const SCRAPE_TIMEOUT_MS = 35000;
 const MIN_SCRAPER_VIEW_SIZE = 1;
+/**
+ * The idle (nothing-to-scrape) source.
+ *
+ * NOT `{ uri: 'about:blank' }`: react-native-webview's iOS `visitSource` picks
+ * `loadRequest` vs `loadFileURL` by whether the URL has a *host*, and
+ * `about:blank` has none — so it calls `loadFileURL:` with a non-file URL and
+ * WebKit raises `NSInvalidArgumentException: about:blank is not a file URL`,
+ * which is an uncaught ObjC exception and takes the whole app down. An empty
+ * `html` source hits the static-HTML branch instead (which itself uses
+ * `about:blank` as the base URL), and leaves the WebView just as blank.
+ */
+const IDLE_SOURCE = { html: '' } as const;
 const SESSION_CAPTURE = `
   (function() {
     window.__erpMetadata = {};
@@ -106,9 +118,16 @@ export const AcademicScraperManager = {
 
 export const AcademicScraperWebView: React.FC = () => {
   const webViewRef = useRef<WebView>(null);
-  const [targetUrl, setTargetUrl] = useState<string>('about:blank');
+  // `null` = idle; see `IDLE_SOURCE`.
+  const [targetUrl, setTargetUrl] = useState<string | null>(null);
   const credsRef = useRef<PortalCredentials | null>(null);
   const stepRef = useRef<'IDLE' | 'LOGIN' | 'ERP_REDIRECT' | 'ERP_QUERY'>('IDLE');
+  // The login page is the only page the login script belongs on, but `onLoadEnd`
+  // also fires for the post-login portal main page while the step is still
+  // `LOGIN` (the step only advances on the `PORTAL_READY` message). Without
+  // this the script was injected a second time there, hunting for id/pw inputs
+  // that no longer exist.
+  const loginScriptInjectedRef = useRef(false);
 
   const finishScrapeSuccess = useCallback((result: string) => {
     if (activeTimeoutTimer) {
@@ -123,7 +142,7 @@ export const AcademicScraperWebView: React.FC = () => {
 
     stepRef.current = 'IDLE';
     credsRef.current = null;
-    setTargetUrl('about:blank');
+    setTargetUrl(null);
   }, []);
 
   const finishScrapeError = useCallback((err: Error) => {
@@ -139,7 +158,7 @@ export const AcademicScraperWebView: React.FC = () => {
 
     stepRef.current = 'IDLE';
     credsRef.current = null;
-    setTargetUrl('about:blank');
+    setTargetUrl(null);
   }, []);
 
   // Register synchronously after the native tree commits, before the hosted
@@ -148,6 +167,7 @@ export const AcademicScraperWebView: React.FC = () => {
     triggerComponentScrape = (creds: PortalCredentials) => {
       credsRef.current = creds;
       stepRef.current = 'LOGIN';
+      loginScriptInjectedRef.current = false;
       console.log('[AcademicScraper] Starting scraper for student:', creds.studentId);
       setTargetUrl(PORTAL_LOGIN_URL);
     };
@@ -202,6 +222,8 @@ export const AcademicScraperWebView: React.FC = () => {
     if (stepRef.current === 'IDLE' || !credsRef.current) return;
 
     if (stepRef.current === 'LOGIN') {
+      if (loginScriptInjectedRef.current) return;
+      loginScriptInjectedRef.current = true;
       const { studentId, password } = credsRef.current;
       console.log('[AcademicScraper] Injecting login script at:', targetUrl);
 
@@ -255,7 +277,7 @@ export const AcademicScraperWebView: React.FC = () => {
         url.includes('/main/main.face') ||
         url.includes('portal.face')
       ) {
-        console.log('[AcademicScraper] Portal login succeeded. Navigating to ERP SSO...');
+        if (!loading) console.log('[AcademicScraper] Portal login succeeded. Navigating to ERP SSO...');
         if (!loading) webViewRef.current?.injectJavaScript(`window.ReactNativeWebView.postMessage(JSON.stringify({type:'PORTAL_READY', studentId: window.temp_user_id || ''})); true;`);
       }
     }
@@ -380,7 +402,7 @@ export const AcademicScraperWebView: React.FC = () => {
       <WebView
         ref={webViewRef}
         injectedJavaScriptBeforeContentLoaded={SESSION_CAPTURE}
-        source={{ uri: targetUrl }}
+        source={targetUrl ? { uri: targetUrl } : IDLE_SOURCE}
         style={styles.hiddenWebView}
         javaScriptEnabled={true}
         domStorageEnabled={true}
