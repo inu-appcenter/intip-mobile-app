@@ -263,6 +263,16 @@ export default function WebViewContainer({ url, mode }: Props) {
         return;
       }
 
+      // React Native pools this event object: `nativeEvent` is nulled out as
+      // soon as the handler returns, and both bridge handlers below are async,
+      // so anything past their first `await` sees `event.nativeEvent === null`.
+      // Passing the pooled `event` into `bridge.onMessage` from inside a
+      // `.then()` threw `TypeError: Cannot read property 'data' of null` (the
+      // adapter reads `event.nativeEvent.data`) — an unhandled rejection that
+      // silently dropped every ordinary bridge message on app start. The
+      // payload is already captured in `raw`, so hand the channel a snapshot.
+      const relayedEvent = { nativeEvent: { data: raw } } as WebViewMessageEvent;
+
       // AI Agent: Portal account & Academic info messages
       handleAgentBridgeMessage(raw, (response) => {
         const script = `
@@ -286,7 +296,7 @@ export default function WebViewContainer({ url, mode }: Props) {
           webViewRef.current?.injectJavaScript(script);
         }).then((handledTimetable) => {
           if (!handledTimetable) {
-            bridge.onMessage(event);
+            bridge.onMessage(relayedEvent);
           }
         });
       });
