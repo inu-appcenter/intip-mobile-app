@@ -267,6 +267,15 @@ jobs:
       # eas-cli reads EXPO_TOKEN directly, so no interactive login is needed.
       # Create one at https://expo.dev/settings/access-tokens (the account must
       # own gang_03/intip-mobile-app) and add it as the EXPO_TOKEN repo secret.
+      # 릴리스 잡과 같은 이유(아래 "Remove stray .env.local and Metro cache"
+      # 참고): 개발 빌드가 남긴 .env.local과 테스트 포털로 인라인된 Metro
+      # 변환 캐시가 OTA 번들에 섞이지 않게 한다.
+      - name: Remove stray .env.local and Metro cache
+        if: steps.native_guard.outputs.changed != 'true'
+        run: |
+          rm -f .env.local
+          rm -rf "$(node -p 'require("os").tmpdir()')"/metro-*
+
       - name: Publish EAS Update
         if: steps.native_guard.outputs.changed != 'true'
         env:
@@ -374,8 +383,17 @@ jobs:
       # 가리킨다)이 같은 self-hosted 러너의 워크스페이스에 남아 있으면, 운영
       # 릴리스가 조용히 intip-test.pages.dev를 보게 된다. actions/checkout이
       # 보통 untracked 파일을 지우지만 그 동작에 기대지 않는다.
-      - name: Remove stray .env.local
-        run: rm -f .env.local
+      # 방어 2: .env.local을 지우는 것만으로는 부족하다. Metro 변환 캐시
+      # ($TMPDIR/metro-cache)는 러너(= 같은 맥 사용자)의 모든 실행이 공유하고,
+      # 캐시 키에 EXPO_PUBLIC_* 값이 들어가지 않는다 — 개발 빌드가
+      # `var ROOT_URL = "https://intip-test.pages.dev"`로 인라인해 둔
+      # constants.ts 변환 결과를, 소스가 같으면 운영 번들링이 그대로 재사용한다
+      # (3.0.14 첫 릴리스 IPA/APK가 실제로 테스트 포털을 보고 나갔다). 그래서
+      # 번들링 전에 캐시를 비운다.
+      - name: Remove stray .env.local and Metro cache
+        run: |
+          rm -f .env.local
+          rm -rf "$(node -p 'require("os").tmpdir()')"/metro-*
 
       - name: Prebuild (android)
         run: npx expo prebuild --clean --platform android
@@ -574,8 +592,17 @@ jobs:
       # 가리킨다)이 같은 self-hosted 러너의 워크스페이스에 남아 있으면, 운영
       # 릴리스가 조용히 intip-test.pages.dev를 보게 된다. actions/checkout이
       # 보통 untracked 파일을 지우지만 그 동작에 기대지 않는다.
-      - name: Remove stray .env.local
-        run: rm -f .env.local
+      # 방어 2: .env.local을 지우는 것만으로는 부족하다. Metro 변환 캐시
+      # ($TMPDIR/metro-cache)는 러너(= 같은 맥 사용자)의 모든 실행이 공유하고,
+      # 캐시 키에 EXPO_PUBLIC_* 값이 들어가지 않는다 — 개발 빌드가
+      # `var ROOT_URL = "https://intip-test.pages.dev"`로 인라인해 둔
+      # constants.ts 변환 결과를, 소스가 같으면 운영 번들링이 그대로 재사용한다
+      # (3.0.14 첫 릴리스 IPA/APK가 실제로 테스트 포털을 보고 나갔다). 그래서
+      # 번들링 전에 캐시를 비운다.
+      - name: Remove stray .env.local and Metro cache
+        run: |
+          rm -f .env.local
+          rm -rf "$(node -p 'require("os").tmpdir()')"/metro-*
 
       - name: Prebuild (ios)
         run: npx expo prebuild --clean --platform ios
