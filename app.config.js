@@ -36,7 +36,13 @@ const isDevVariant = process.env.APP_VARIANT === "development";
 // the App Groups entitlement to it. Simplest fix: dev builds don't get the
 // home screen widgets at all — `src/widgets/refresh.ts`'s calls still run,
 // they just have no widget extension to display the snapshot they write.
-const WIDGET_PLUGIN_NAMES = new Set(["expo-widgets", "expo-widgets-glance"]);
+// `withWidgetAssets` goes with them: it patches the `ExpoWidgetsTarget` that
+// expo-widgets creates and throws when that target is missing.
+const WIDGET_PLUGIN_NAMES = new Set([
+  "expo-widgets",
+  "expo-widgets-glance",
+  "./plugins/withWidgetAssets",
+]);
 const plugins = isDevVariant
   ? expo.plugins.filter((plugin) => {
       const name = Array.isArray(plugin) ? plugin[0] : plugin;
@@ -93,7 +99,13 @@ module.exports = () => ({
         requestHeaders: { "expo-channel-name": "development" },
       }),
     },
+    // 네이티브 SSO 동작이 바뀐 개발 설치본은 기존 OTA 캐시를 로드하면 안 된다.
+    ...(isDevVariant && { runtimeVersion: "3.0.13-sso.5" }),
     ...(isDevVariant && { scheme: "intipmobileappdev" }),
-    plugins: [...plugins, ...(isDevVariant ? ["./plugins/withDevAppLabel"] : [])],
+    plugins: [
+      ...plugins,
+      "./plugins/withErpSsoCleartext",
+      ...(isDevVariant ? ["./plugins/withDevAppLabel"] : []),
+    ],
   },
 });

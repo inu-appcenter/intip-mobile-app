@@ -2,7 +2,7 @@
   "expo": {
     "name": "INTIP",
     "slug": "intip-mobile-app",
-    "version": "3.0.13",
+    "version": "3.0.14",
     "orientation": "portrait",
     "scheme": "intipmobileapp",
     "userInterfaceStyle": "light",
@@ -20,6 +20,8 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "NSSupportsLiveActivities": true,
+        "NSSupportsLiveActivitiesFrequentUpdates": true,
         "UIBackgroundModes": [
           "remote-notification",
           "fetch"
@@ -32,7 +34,7 @@
     },
     "android": {
       "package": "inu.appcenter.intip_android",
-      "versionCode": 30,
+      "versionCode": 31,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -58,6 +60,11 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.POST_PROMOTED_NOTIFICATIONS",
         "android.permission.CAMERA",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -83,10 +90,12 @@
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
       "./plugins/withDefaultNotificationChannel",
+      "./plugins/withTimetableForegroundService",
       "./plugins/withAndroidReleaseSigning",
       "./plugins/withIOSManualSigning",
       "./plugins/withWorkManagerVersionAlign",
       "./plugins/withExpoWidgetsVersionSync",
+      "./plugins/withApsEnvironmentProduction",
       [
         "expo-share-intent",
         {
@@ -129,18 +138,6 @@
         "expo-widgets",
         {
           "widgets": [
-            {
-              "name": "TestWidget",
-              "displayName": "테스트 카운트다운",
-              "description": "expo-widgets 동작 확인용 테스트 위젯입니다.",
-              "ios": {
-                "contentMarginsDisabled": true,
-                "supportedFamilies": [
-                  "systemSmall",
-                  "systemMedium"
-                ]
-              }
-            },
             {
               "name": "NextClassWidget",
               "displayName": "다음 수업",

@@ -58,6 +58,8 @@ import { PROTOCOL_VERSION, type TokenInfoPayload } from "../../packages/intip-br
 import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
 import { saveDownload } from "../native/downloads";
 import { ensureLocationPermission } from "../native/permissions";
+import { handleAgentBridgeMessage } from "../agent/agentBridgeHandler";
+import { handleTimetableBridgeMessage } from "../timetable/timetableBridgeHandler";
 import { clearTokenInfo, readTokenInfo, saveTokenInfo } from "../native/secureTokenStore";
 import { shareContent } from "../native/share";
 import { flushPendingFcmToken } from "../push/fcmTokenSync";
@@ -260,7 +262,44 @@ export default function WebViewContainer({ url, mode }: Props) {
         void adoptWebToken(probe.token);
         return;
       }
-      bridge.onMessage(event);
+
+      // React Native pools this event object: `nativeEvent` is nulled out as
+      // soon as the handler returns, and both bridge handlers below are async,
+      // so anything past their first `await` sees `event.nativeEvent === null`.
+      // Passing the pooled `event` into `bridge.onMessage` from inside a
+      // `.then()` threw `TypeError: Cannot read property 'data' of null` (the
+      // adapter reads `event.nativeEvent.data`) — an unhandled rejection that
+      // silently dropped every ordinary bridge message on app start. The
+      // payload is already captured in `raw`, so hand the channel a snapshot.
+      const relayedEvent = { nativeEvent: { data: raw } } as WebViewMessageEvent;
+
+      // AI Agent: Portal account & Academic info messages
+      handleAgentBridgeMessage(raw, (response) => {
+        const script = `
+          window.dispatchEvent(new CustomEvent('intipAgentResult', {
+            detail: ${JSON.stringify(response)}
+          }));
+          true;
+        `;
+        webViewRef.current?.injectJavaScript(script);
+      }).then((handledAgent) => {
+        if (handledAgent) return;
+
+        // Timetable: NowBar & Ongoing Activity messages
+        handleTimetableBridgeMessage(raw, (response) => {
+          const script = `
+            window.dispatchEvent(new CustomEvent('intipTimetableResult', {
+              detail: ${JSON.stringify(response)}
+            }));
+            true;
+          `;
+          webViewRef.current?.injectJavaScript(script);
+        }).then((handledTimetable) => {
+          if (!handledTimetable) {
+            bridge.onMessage(relayedEvent);
+          }
+        });
+      });
     },
     [bridge, url, primeLocationPermission, adoptWebToken],
   );
@@ -357,6 +396,19 @@ export default function WebViewContainer({ url, mode }: Props) {
   const navigateSpa = useCallback(
     (path: string) => {
       bridge.channel.send("navigate", path);
+      // 브릿지 채널 수신 타이밍 문제나 렌더 지연을 방지하기 위해 웹뷰에 직접 pushState 및 popstate를 함께 발송
+      const script = `
+        (function() {
+          try {
+            if (window.location.pathname !== ${JSON.stringify(path)}) {
+              window.history.pushState({}, '', ${JSON.stringify(path)});
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+          } catch (e) {}
+        })();
+        true;
+      `;
+      webViewRef.current?.injectJavaScript(script);
     },
     [bridge],
   );

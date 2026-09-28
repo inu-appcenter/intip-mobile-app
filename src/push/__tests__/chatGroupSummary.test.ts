@@ -7,7 +7,13 @@
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import { GROUP_SUMMARY_ID_PREFIX } from '../pendingIntent';
 
-jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
+// `StyleSheet` is here only because the module graph now reaches the hidden
+// scraper WebView (messaging -> localWatchManager -> agentActionExecutor), and
+// its stylesheet is built at import time.
+jest.mock('react-native', () => ({
+  Platform: { OS: 'android' },
+  StyleSheet: { create: (styles: unknown) => styles },
+}));
 
 const mockDisplayed: { id: string; notification: { data?: Record<string, unknown> } }[] = [];
 const mockCancel = jest.fn(async () => {});
@@ -24,6 +30,7 @@ jest.mock('@notifee/react-native', () => ({
     onBackgroundEvent: (cb: unknown) => mockOnBackgroundEvent(cb),
     onForegroundEvent: jest.fn(() => () => {}),
     getInitialNotification: jest.fn(async () => null),
+    registerForegroundService: jest.fn(),
   },
   AndroidGroupAlertBehavior: { CHILDREN: 1 },
   AndroidImportance: { HIGH: 4, LOW: 2 },

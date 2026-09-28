@@ -67,8 +67,29 @@ function isExcludedPath(pathname: string): boolean {
  * opened on the *other* host would come up logged out.
  */
 export function resolveDeepLink(url: string): NavIntent | null {
+  if (!url || typeof url !== 'string') return null;
+
+  // Widget links (`intipmobileapp://widget/...`, `/widget/...`) first: the
+  // bare-path and custom-scheme branches below would otherwise pass the
+  // `widget` prefix straight through as a portal path.
   const widgetPath = widgetPortalPath(url);
   if (widgetPath !== null) return intentForPortalPath(widgetPath);
+
+  // Bare paths (`/home/...`, `/services/...`), as an Ongoing-activity tap sends.
+  if (url.startsWith('/')) {
+    return intentForPortalPath(url);
+  }
+
+  // Custom app schemes (`intipmobileapp://...`, `intip://...`).
+  if (/^intip(mobileapp)?:\/\//i.test(url)) {
+    try {
+      const stripped = url.replace(/^intip(mobileapp)?:\/\//i, '');
+      const pathWithSlash = stripped.startsWith('/') ? stripped : `/${stripped}`;
+      return intentForPortalPath(pathWithSlash);
+    } catch {
+      return null;
+    }
+  }
 
   let parsed: URL;
   try {
