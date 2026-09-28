@@ -114,8 +114,16 @@ jobs:
       # 이 파일은 .gitignore(.env*.local) 대상이고, 같은 러너를 쓰는 ci.yml의
       # 운영 릴리스에 새어 들어가면 운영 앱이 테스트 포털을 보게 되므로
       # 아래 정리 스텝에서 반드시 지운다.
-      - name: Write .env.local (포털 URL)
-        run: echo "EXPO_PUBLIC_ROOT_URL=${EXPO_PUBLIC_ROOT_URL}" > .env.local
+      #
+      # Metro 변환 캐시($TMPDIR/metro-cache)도 비운다. 이 캐시는 러너의 모든
+      # 실행이 공유하고 키에 EXPO_PUBLIC_* 값이 들어가지 않아서, 운영 빌드가
+      # 남긴 변환 결과(운영 URL 인라인)를 그대로 재사용할 수 있다 — 위
+      # run 34024945756에서 "env가 인라인되지 않았다"고 본 것도 이것일 수 있다.
+      # 반대 방향(개발 → 운영) 오염은 ci.yml 릴리스 잡이 같은 방식으로 막는다.
+      - name: Write .env.local (포털 URL) and clear Metro cache
+        run: |
+          echo "EXPO_PUBLIC_ROOT_URL=${EXPO_PUBLIC_ROOT_URL}" > .env.local
+          rm -rf "$(node -p 'require("os").tmpdir()')"/metro-*
 
       - name: Prebuild (android)
         run: npx expo prebuild --clean --platform android
@@ -238,8 +246,16 @@ jobs:
       # 이 파일은 .gitignore(.env*.local) 대상이고, 같은 러너를 쓰는 ci.yml의
       # 운영 릴리스에 새어 들어가면 운영 앱이 테스트 포털을 보게 되므로
       # 아래 정리 스텝에서 반드시 지운다.
-      - name: Write .env.local (포털 URL)
-        run: echo "EXPO_PUBLIC_ROOT_URL=${EXPO_PUBLIC_ROOT_URL}" > .env.local
+      #
+      # Metro 변환 캐시($TMPDIR/metro-cache)도 비운다. 이 캐시는 러너의 모든
+      # 실행이 공유하고 키에 EXPO_PUBLIC_* 값이 들어가지 않아서, 운영 빌드가
+      # 남긴 변환 결과(운영 URL 인라인)를 그대로 재사용할 수 있다 — 위
+      # run 34024945756에서 "env가 인라인되지 않았다"고 본 것도 이것일 수 있다.
+      # 반대 방향(개발 → 운영) 오염은 ci.yml 릴리스 잡이 같은 방식으로 막는다.
+      - name: Write .env.local (포털 URL) and clear Metro cache
+        run: |
+          echo "EXPO_PUBLIC_ROOT_URL=${EXPO_PUBLIC_ROOT_URL}" > .env.local
+          rm -rf "$(node -p 'require("os").tmpdir()')"/metro-*
 
       - name: Prebuild (ios)
         run: npx expo prebuild --clean --platform ios

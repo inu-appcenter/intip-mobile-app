@@ -125,11 +125,16 @@ function createClient(args = {}) {
 }
 
 async function findBundleId(client, identifier) {
+  // filter[identifier]는 정확히 일치가 아니라 접두사처럼 매칭된다 —
+  // `kr.inuappcenter.intip`으로 찾으면 `.ShareExtension`, `.dev` 등도 섞여
+  // 오고, 그 첫 번째가 본체라는 보장이 없다(실제로 ShareExtension이 먼저 와서
+  // 본체용이라 생각한 프로파일이 ShareExtension용으로 발급된 적이 있다).
+  // 그래서 여러 개를 받아 identifier가 정확히 같은 것만 고른다.
   const data = await client.request(
     "GET",
-    `/bundleIds?filter[identifier]=${encodeURIComponent(identifier)}&limit=1`,
+    `/bundleIds?filter[identifier]=${encodeURIComponent(identifier)}&limit=200&fields[bundleIds]=identifier`,
   );
-  return data.data?.[0]?.id ?? null;
+  return data.data?.find((b) => b.attributes?.identifier === identifier)?.id ?? null;
 }
 
 /** CLI 어디서나 쓰는 공통 --key/--key-id/--issuer 플래그를 소비한다. 매칭 안 되면 false. */
