@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import notifee, {
   TriggerType,
   TimestampTrigger,
@@ -22,6 +23,9 @@ const DAYS_MAP: TimetableDay[] = [
 ];
 
 export const TIMETABLE_TRIGGER_NOTIFICATION_ID = 'timetable_nowbar_trigger';
+
+// iOS 전용 상태 전이 타이머 (scheduleNextAlarm 참고)
+let iosTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Date 객체에서 TimetableDay 추출
@@ -204,6 +208,25 @@ export const TimetableScheduler = {
    * 다음 상태 변경 시점에 앱을 깨우도록 Notifee TimestampTrigger 등록
    */
   async scheduleNextAlarm(targetTimestamp: number): Promise<void> {
+    // iOS는 로컬 알림이 도착해도 백그라운드/종료 상태의 앱 JS를 깨우지 않고,
+    // 포그라운드에서는 "시간표 상태 갱신" 배너가 그대로 사용자에게 보인다.
+    // 게다가 Live Activity 시작(Activity.request)은 포그라운드에서만 가능하므로
+    // 포그라운드용 JS 타이머로 대신한다. 백그라운드 동안은 JS가 멈추지만, 복귀 시
+    // AppState 'active'에서 syncSchedule이 다시 돈다.
+    if (Platform.OS === 'ios') {
+      if (iosTransitionTimer) clearTimeout(iosTransitionTimer);
+      // 이전 버전이 예약해 둔 트리거 알림 정리
+      await notifee.cancelNotification(TIMETABLE_TRIGGER_NOTIFICATION_ID).catch(() => {});
+      iosTransitionTimer = setTimeout(
+        () => {
+          iosTransitionTimer = null;
+          void this.syncSchedule();
+        },
+        Math.max(0, targetTimestamp - Date.now()) + 500,
+      );
+      return;
+    }
+
     try {
       await notifee.cancelNotification(TIMETABLE_TRIGGER_NOTIFICATION_ID);
 

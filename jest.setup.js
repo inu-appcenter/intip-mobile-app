@@ -27,6 +27,7 @@ jest.mock('@expo/ui/swift-ui', () => ({
   Spacer: 'Spacer',
   ProgressView: 'ProgressView',
   Image: 'Image',
+  ZStack: 'ZStack',
 }));
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
@@ -36,6 +37,12 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
   padding: jest.fn(),
   widgetURL: jest.fn(),
   containerBackground: jest.fn(),
+  frame: jest.fn(),
+  labelsHidden: jest.fn(),
+  lineLimit: jest.fn(),
+  multilineTextAlignment: jest.fn(),
+  progressViewStyle: jest.fn(),
+  tint: jest.fn(),
 }));
 
 jest.mock('expo-secure-store', () => ({
