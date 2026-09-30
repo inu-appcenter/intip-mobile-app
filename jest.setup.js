@@ -18,6 +18,7 @@ jest.mock('expo-widgets', () => ({
     getInstances: jest.fn(() => []),
   })),
   createWidget: jest.fn(),
+  addPushToStartTokenListener: jest.fn(() => ({ remove: jest.fn() })),
 }));
 
 jest.mock('@expo/ui/swift-ui', () => ({
@@ -44,6 +45,17 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
   progressViewStyle: jest.fn(),
   tint: jest.fn(),
 }));
+
+// The Firebase native module never exists under jest; importing messaging
+// throws "Native module RNFBAppModule not found" at module load.
+jest.mock('@react-native-firebase/messaging', () => {
+  const instance = {
+    getToken: jest.fn(() => Promise.resolve('test-fcm-token')),
+    onTokenRefresh: jest.fn(() => jest.fn()),
+  };
+  const messaging = jest.fn(() => instance);
+  return { __esModule: true, default: messaging };
+});
 
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(async () => null),

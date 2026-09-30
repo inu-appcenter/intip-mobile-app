@@ -63,7 +63,10 @@ const TimetableLiveActivityLayout: LiveActivityComponent<TimetableLiveActivityPr
   const lockAccent = '#3D7EF5';
 
   const symbol = 'graduationcap.fill';
-  const isUpcoming = props.phase === 'UPCOMING';
+  // 서버 push-to-start로 시작된 Activity는 수업이 시작돼도 UPCOMING 그대로다(서버에 업데이트
+  // 토큰이 없고 앱은 꺼져 있을 수 있다). 서버는 stale-date를 수업 시작으로 두므로, 그때 시스템이
+  // 다시 그리면 현재 시각으로 "수업 중"을 판단한다.
+  const isUpcoming = props.phase === 'UPCOMING' && Date.now() < props.startTimestamp;
   const startDate = new Date(props.startTimestamp);
   const endDate = new Date(props.endTimestamp);
   const targetDate = isUpcoming ? startDate : endDate;

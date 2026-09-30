@@ -45,7 +45,17 @@ export const TimetableNowBarService = {
   /**
    * 현재 수업 상태를 기반으로 Ongoing Notification / Now Bar / Dynamic Island 렌더링
    */
-  async renderActivity(state: TimetableActivityState): Promise<void> {
+  async renderActivity(
+    state: TimetableActivityState,
+    options: {
+      /**
+       * iOS: 실행 중인 Live Activity가 없을 때 UPCOMING을 새로 시작할지. 서버가 push-to-start로
+       * 곧 시작해 줄 기기에서는 false로 넘겨 두 개가 겹치지 않게 한다 (TimetableScheduler 참고).
+       */
+      startUpcoming?: boolean;
+    } = {},
+  ): Promise<void> {
+    const { startUpcoming = true } = options;
     if (state.phase === 'NONE') {
       await this.cancel();
       return;
@@ -71,11 +81,15 @@ export const TimetableNowBarService = {
         };
         const propsJson = JSON.stringify(liveProps);
 
-        const activeInstances = TimetableLiveActivity.getInstances();
-        if (activeInstances.length > 0) {
-          if (propsJson === lastLiveActivityPropsJson) return;
-          // 이미 활성화된 Dynamic Island가 있으면 상태 업데이트
-          await Promise.all(activeInstances.map((instance) => instance.update(liveProps)));
+        const [activeInstance, ...duplicates] = TimetableLiveActivity.getInstances();
+        // 앱이 시작한 것과 서버 push-to-start가 시작한 것이 겹쳤으면 하나만 남긴다.
+        await Promise.all(duplicates.map((instance) => instance.end('immediate').catch(() => {})));
+        if (activeInstance) {
+          if (propsJson === lastLiveActivityPropsJson && duplicates.length === 0) return;
+          // 이미 활성화된 Dynamic Island가 있으면 상태 업데이트 (서버가 시작한 것도 여기서 이어받는다)
+          await activeInstance.update(liveProps);
+        } else if (state.phase === 'UPCOMING' && !startUpcoming) {
+          return;
         } else {
           // 새로 Dynamic Island & Live Activity 시작
           TimetableLiveActivity.start(liveProps, 'intipmobileapp://timetable');

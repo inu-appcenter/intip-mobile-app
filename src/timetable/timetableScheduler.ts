@@ -11,6 +11,7 @@ import {
 } from './types';
 import { TimetableStorage } from './timetableStorage';
 import { TimetableNowBarService, TIMETABLE_CHANNEL_ID } from './timetableNowBarService';
+import { isLiveActivityPushToStartRegistered } from './liveActivityPushToStart';
 
 const DAYS_MAP: TimetableDay[] = [
   'SUNDAY',
@@ -192,7 +193,12 @@ export const TimetableScheduler = {
     if (state.phase === 'NONE') {
       await TimetableNowBarService.cancel();
     } else {
-      await TimetableNowBarService.renderActivity(state);
+      // iOS에서 서버가 수업 전 알림을 push-to-start로 보내는 기기라면 UPCOMING은 서버에 맡긴다.
+      // 앱이 먼저 시작해 두면 서버 푸시가 하나를 더 시작해 잠금화면에 두 개가 겹친다.
+      // 이미 떠 있는 것(서버가 시작한 것 포함)을 갱신하거나 ONGOING을 시작하는 건 그대로 한다.
+      await TimetableNowBarService.renderActivity(state, {
+        startUpcoming: !(await isLiveActivityPushToStartRegistered()),
+      });
     }
 
     // 다음 전환 시점 계산 및 알람 등록
