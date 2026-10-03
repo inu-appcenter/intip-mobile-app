@@ -46,6 +46,34 @@ jest.mock('@react-native-firebase/messaging', () => {
 
 jest.mock('../fcmTokenSync', () => ({ registerFcmTokenRotationListener: jest.fn() }));
 jest.mock('../../native/permissions', () => ({ ensureAndroidPostNotifications: jest.fn() }));
+jest.mock('../../library/libraryOngoingService', () => ({
+  LibraryOngoingService: {
+    cancelActiveSeatSession: jest.fn(),
+    handleQuickExtend: jest.fn(),
+    handleQuickReturn: jest.fn(),
+    cancelWatchActivity: jest.fn(),
+    renderWatchActivity: jest.fn(),
+  },
+  LIBRARY_WATCH_NOTIFICATION_ID: 'library_watch_ongoing',
+  LIBRARY_SEAT_SESSION_NOTIFICATION_ID: 'library_seat_session_ongoing',
+}));
+jest.mock('../../lms/lmsOngoingService', () => ({
+  LmsOngoingService: { cancel: jest.fn() },
+  LMS_DEADLINE_NOTIFICATION_ID: 'lms_deadline_ongoing',
+}));
+jest.mock('../../agent/localWatchManager', () => ({
+  LocalWatchManager: { getJobs: jest.fn(async () => []), cancelJob: jest.fn() },
+}));
+jest.mock('../../timetable/timetableScheduler', () => ({
+  TimetableScheduler: { syncSchedule: jest.fn() },
+  getCurrentActivityState: jest.fn(),
+  TIMETABLE_TRIGGER_NOTIFICATION_ID: 'timetable_nowbar_trigger',
+}));
+jest.mock('../../timetable/timetableNowBarService', () => ({
+  TimetableNowBarService: { renderActivity: jest.fn(), cancel: jest.fn() },
+  TIMETABLE_ONGOING_NOTIFICATION_ID: 'timetable_ongoing_activity',
+  TIMETABLE_CHANNEL_ID: 'timetable_nowbar_v2',
+}));
 
 const ROOM = '42';
 const data = { type: 'CHAT', chatRoomId: ROOM };

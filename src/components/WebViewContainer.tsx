@@ -81,6 +81,7 @@ import {
   isMainTabPath,
   NATIVE_FEATURES,
   PORTAL_HOST,
+  ROOT_URL,
   STRINGS,
 } from "../webview/constants";
 import {
@@ -176,8 +177,9 @@ const BRIDGE_SHIM_SCRIPT = buildBridgeShimScript(
   Platform.OS === "ios" ? "ios" : "android",
 );
 
-/** Dev builds also relay the web's console.* to the Metro log (webConsole.ts). */
-const BEFORE_CONTENT_SCRIPT = __DEV__
+/** Dev builds and dev variant also relay the web's console.* to the Metro log (webConsole.ts). */
+const isDevHost = __DEV__ || ROOT_URL.includes("pages.dev");
+const BEFORE_CONTENT_SCRIPT = isDevHost
   ? BRIDGE_SHIM_SCRIPT + WEB_CONSOLE_SCRIPT
   : BRIDGE_SHIM_SCRIPT;
 
@@ -1014,7 +1016,7 @@ export default function WebViewContainer({ url, mode }: Props) {
       // stretched the blank reveal gap on push (spec §5.B still holds).
       cacheEnabled
       // Dev builds only: chrome://inspect (Android) / Safari Web Inspector (iOS).
-      webviewDebuggingEnabled={__DEV__}
+      webviewDebuggingEnabled={isDevHost}
       // Bridge wiring: shims + alert override before content, observers after.
       onMessage={onWebViewMessage}
       injectedJavaScriptBeforeContentLoaded={beforeContentScript}
