@@ -72,6 +72,29 @@ describe('TimetableNowBarService (iOS Live Activity)', () => {
     expect(liveActivity.start).not.toHaveBeenCalled();
   });
 
+  it('leaves running activities alone when the server manages them', async () => {
+    // 서버가 시작한 다음 수업 것과 끝난 이전 수업 것이 함께 떠 있어도 덮어쓰거나 끝내지 않는다.
+    const nextClass = instance();
+    const previousClass = instance();
+    liveActivity.getInstances.mockReturnValue([nextClass, previousClass]);
+    await TimetableNowBarService.renderActivity(
+      { ...upcoming, phase: 'ONGOING' },
+      { startUpcoming: false, leaveExisting: true },
+    );
+    expect(nextClass.update).not.toHaveBeenCalled();
+    expect(previousClass.end).not.toHaveBeenCalled();
+    expect(liveActivity.start).not.toHaveBeenCalled();
+  });
+
+  it('still starts ONGOING when the server manages activities but none is running', async () => {
+    liveActivity.getInstances.mockReturnValue([]);
+    await TimetableNowBarService.renderActivity(
+      { ...upcoming, phase: 'ONGOING' },
+      { startUpcoming: false, leaveExisting: true },
+    );
+    expect(liveActivity.start).toHaveBeenCalledTimes(1);
+  });
+
   it('ends duplicates and keeps one', async () => {
     const first = instance();
     const second = instance();

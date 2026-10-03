@@ -5,6 +5,7 @@ const mockFetch = jest.fn<(url: string, init?: any) => Promise<{ ok: boolean }>>
 const mockGetValidAccessToken = jest.fn<() => Promise<string | null>>();
 let mockSettings = { enabled: true, leadTimeMinutes: 15 };
 let tokenListener: ((event: { activityPushToStartToken: string }) => void) | null = null;
+let activityListener: ((event: any) => void) | null = null;
 
 jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 
@@ -18,6 +19,13 @@ jest.mock('expo-secure-store', () => ({
 jest.mock('expo-widgets', () => ({
   addPushToStartTokenListener: jest.fn((listener: any) => {
     tokenListener = listener;
+    return { remove: jest.fn() };
+  }),
+}));
+
+jest.mock('../../../modules/intip-live-activity-tokens', () => ({
+  addActivityPushTokenListener: jest.fn((listener: any) => {
+    activityListener = listener;
     return { remove: jest.fn() };
   }),
 }));
@@ -42,7 +50,8 @@ function loadModule(): Module {
 }
 
 async function flush(): Promise<void> {
-  for (let i = 0; i < 10; i++) await Promise.resolve();
+  // 동기화 체인(설정 조회 → FCM 토큰 → 세션 → fetch)이 모두 끝나도록 매크로태스크까지 비운다.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function bodyOf(call: number): any {
@@ -58,6 +67,7 @@ describe('liveActivityPushToStart', () => {
     mockGetValidAccessToken.mockResolvedValue('access');
     mockSettings = { enabled: true, leadTimeMinutes: 15 };
     tokenListener = null;
+    activityListener = null;
     (global as any).fetch = mockFetch;
   });
 
@@ -123,6 +133,41 @@ describe('liveActivityPushToStart', () => {
     await mod.syncLiveActivityStartToken();
     expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(await mod.isLiveActivityPushToStartRegistered()).toBe(true);
+  });
+
+  it('registers each timetable Live Activity update token', async () => {
+    const mod = loadModule();
+    mod.registerLiveActivityPushToStart();
+    activityListener!({ activityId: 'A1', pushToken: 'up-1', name: 'TimetableLiveActivity', props: '{"phase":"UPCOMING"}' });
+    activityListener!({ activityId: 'X', pushToken: 'up-x', name: 'SomeOtherActivity', props: '{}' });
+    await flush();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe('https://api.test/api/tokens/live-activity/activities');
+    expect(bodyOf(0)).toEqual({
+      token: 'test-fcm-token',
+      activityId: 'A1',
+      pushToken: 'up-1',
+      props: '{"phase":"UPCOMING"}',
+    });
+
+    // 이미 보낸 토큰은 다시 보내지 않는다
+    await mod.syncLiveActivityStartToken();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an activity token until a session exists', async () => {
+    mockGetValidAccessToken.mockResolvedValue(null);
+    const mod = loadModule();
+    mod.registerLiveActivityPushToStart();
+    activityListener!({ activityId: 'A1', pushToken: 'up-1', name: 'TimetableLiveActivity', props: '{}' });
+    await flush();
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    mockGetValidAccessToken.mockResolvedValue('access');
+    await mod.syncLiveActivityStartToken();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(bodyOf(0).activityId).toBe('A1');
   });
 
   it('restores the registered flag across launches', async () => {

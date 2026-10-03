@@ -190,14 +190,15 @@ export const TimetableScheduler = {
     const state = getCurrentActivityState(data.courses, targetDate, settings.leadTimeMinutes);
 
     // 알림 표시 또는 취소
+    // iOS에서 push-to-start가 등록된 기기는 서버가 Live Activity의 시작(UPCOMING)·갱신·종료를 맡는다.
+    // 앱은 떠 있는 것이 없을 때 ONGOING만 시작하고, 떠 있는 것은 덮어쓰거나 끝내지 않는다.
+    const serverManaged = await isLiveActivityPushToStartRegistered();
     if (state.phase === 'NONE') {
-      await TimetableNowBarService.cancel();
+      if (!serverManaged) await TimetableNowBarService.cancel();
     } else {
-      // iOS에서 서버가 수업 전 알림을 push-to-start로 보내는 기기라면 UPCOMING은 서버에 맡긴다.
-      // 앱이 먼저 시작해 두면 서버 푸시가 하나를 더 시작해 잠금화면에 두 개가 겹친다.
-      // 이미 떠 있는 것(서버가 시작한 것 포함)을 갱신하거나 ONGOING을 시작하는 건 그대로 한다.
       await TimetableNowBarService.renderActivity(state, {
-        startUpcoming: !(await isLiveActivityPushToStartRegistered()),
+        startUpcoming: !serverManaged,
+        leaveExisting: serverManaged,
       });
     }
 

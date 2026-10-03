@@ -21,6 +21,12 @@ jest.mock('expo-widgets', () => ({
   addPushToStartTokenListener: jest.fn(() => ({ remove: jest.fn() })),
 }));
 
+// Local iOS module (modules/intip-live-activity-tokens). Its native half never
+// exists under jest, and importing `expo` there breaks some test environments.
+jest.mock('./modules/intip-live-activity-tokens', () => ({
+  addActivityPushTokenListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
 jest.mock('@expo/ui/swift-ui', () => ({
   HStack: 'HStack',
   VStack: 'VStack',

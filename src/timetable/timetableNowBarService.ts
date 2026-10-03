@@ -53,9 +53,14 @@ export const TimetableNowBarService = {
        * 곧 시작해 줄 기기에서는 false로 넘겨 두 개가 겹치지 않게 한다 (TimetableScheduler 참고).
        */
       startUpcoming?: boolean;
+      /**
+       * iOS: 서버가 Live Activity의 갱신·종료를 맡는 기기(push-to-start 등록됨)에서 true. 떠 있는
+       * Activity는 건드리지 않는다 — 다음 수업 것을 현재 수업으로 덮어쓰거나 끝내 버리지 않도록.
+       */
+      leaveExisting?: boolean;
     } = {},
   ): Promise<void> {
-    const { startUpcoming = true } = options;
+    const { startUpcoming = true, leaveExisting = false } = options;
     if (state.phase === 'NONE') {
       await this.cancel();
       return;
@@ -81,7 +86,9 @@ export const TimetableNowBarService = {
         };
         const propsJson = JSON.stringify(liveProps);
 
-        const [activeInstance, ...duplicates] = TimetableLiveActivity.getInstances();
+        const instances = TimetableLiveActivity.getInstances();
+        if (leaveExisting && instances.length > 0) return;
+        const [activeInstance, ...duplicates] = instances;
         // 앱이 시작한 것과 서버 push-to-start가 시작한 것이 겹쳤으면 하나만 남긴다.
         await Promise.all(duplicates.map((instance) => instance.end('immediate').catch(() => {})));
         if (activeInstance) {
