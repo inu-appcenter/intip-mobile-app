@@ -18,6 +18,13 @@ jest.mock('expo-widgets', () => ({
     getInstances: jest.fn(() => []),
   })),
   createWidget: jest.fn(),
+  addPushToStartTokenListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
+// Local iOS module (modules/intip-live-activity-tokens). Its native half never
+// exists under jest, and importing `expo` there breaks some test environments.
+jest.mock('./modules/intip-live-activity-tokens', () => ({
+  addActivityPushTokenListener: jest.fn(() => ({ remove: jest.fn() })),
 }));
 
 jest.mock('@expo/ui/swift-ui', () => ({
@@ -27,6 +34,7 @@ jest.mock('@expo/ui/swift-ui', () => ({
   Spacer: 'Spacer',
   ProgressView: 'ProgressView',
   Image: 'Image',
+  ZStack: 'ZStack',
 }));
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
@@ -36,7 +44,24 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
   padding: jest.fn(),
   widgetURL: jest.fn(),
   containerBackground: jest.fn(),
+  frame: jest.fn(),
+  labelsHidden: jest.fn(),
+  lineLimit: jest.fn(),
+  multilineTextAlignment: jest.fn(),
+  progressViewStyle: jest.fn(),
+  tint: jest.fn(),
 }));
+
+// The Firebase native module never exists under jest; importing messaging
+// throws "Native module RNFBAppModule not found" at module load.
+jest.mock('@react-native-firebase/messaging', () => {
+  const instance = {
+    getToken: jest.fn(() => Promise.resolve('test-fcm-token')),
+    onTokenRefresh: jest.fn(() => jest.fn()),
+  };
+  const messaging = jest.fn(() => instance);
+  return { __esModule: true, default: messaging };
+});
 
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(async () => null),

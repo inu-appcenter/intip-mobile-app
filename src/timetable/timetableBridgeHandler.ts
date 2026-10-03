@@ -1,6 +1,7 @@
 import { TimetableStorage } from './timetableStorage';
 import { TimetableScheduler } from './timetableScheduler';
 import { TimetableNowBarService } from './timetableNowBarService';
+import { syncLiveActivityStartToken } from './liveActivityPushToStart';
 import { TimetableCourseItem } from './types';
 
 export interface TimetableBridgeResponse {
@@ -101,6 +102,8 @@ export async function handleTimetableBridgeMessage(
       try {
         const updated = await TimetableStorage.saveSettings(payload || {});
         const state = await TimetableScheduler.syncSchedule();
+        // 끄면 서버의 push-to-start 등록도 해제한다 (켜면 다시 등록).
+        void syncLiveActivityStartToken();
         reply({
           type: 'setTimetableNowBarSettingsResult',
           success: true,
