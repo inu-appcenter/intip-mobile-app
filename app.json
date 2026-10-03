@@ -137,6 +137,8 @@
       [
         "expo-widgets",
         {
+          "enablePushNotifications": true,
+          "frequentUpdates": true,
           "widgets": [
             {
               "name": "NextClassWidget",

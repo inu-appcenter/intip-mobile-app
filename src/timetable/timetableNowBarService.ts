@@ -6,10 +6,15 @@ import notifee, {
   AndroidVisibility,
 } from '@notifee/react-native';
 import { TimetableActivityState } from './types';
+import { TimetableStorage } from './timetableStorage';
 import { TimetableLiveActivity, TimetableLiveActivityProps } from '../widgets/TimetableLiveActivity';
 
 export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar_v2';
 export const TIMETABLE_ONGOING_NOTIFICATION_ID = 'timetable_ongoing_activity';
+
+// 마지막으로 Live Activity에 반영한 props. AppState 전환마다 syncSchedule이 돌기 때문에
+// 같은 내용이면 업데이트를 건너뛴다 (HIG: 새 내용이 있을 때만 업데이트).
+let lastLiveActivityPropsJson: string | null = null;
 
 export const TimetableNowBarService = {
   /**
@@ -40,7 +45,22 @@ export const TimetableNowBarService = {
   /**
    * 현재 수업 상태를 기반으로 Ongoing Notification / Now Bar / Dynamic Island 렌더링
    */
-  async renderActivity(state: TimetableActivityState): Promise<void> {
+  async renderActivity(
+    state: TimetableActivityState,
+    options: {
+      /**
+       * iOS: 실행 중인 Live Activity가 없을 때 UPCOMING을 새로 시작할지. 서버가 push-to-start로
+       * 곧 시작해 줄 기기에서는 false로 넘겨 두 개가 겹치지 않게 한다 (TimetableScheduler 참고).
+       */
+      startUpcoming?: boolean;
+      /**
+       * iOS: 서버가 Live Activity의 갱신·종료를 맡는 기기(push-to-start 등록됨)에서 true. 떠 있는
+       * Activity는 건드리지 않는다 — 다음 수업 것을 현재 수업으로 덮어쓰거나 끝내 버리지 않도록.
+       */
+      leaveExisting?: boolean;
+    } = {},
+  ): Promise<void> {
+    const { startUpcoming = true, leaveExisting = false } = options;
     if (state.phase === 'NONE') {
       await this.cancel();
       return;
@@ -52,24 +72,36 @@ export const TimetableNowBarService = {
     // --- iOS: Dynamic Island & Live Activity (ActivityKit) ---
     if (Platform.OS === 'ios') {
       try {
+        const startTimestamp = state.startTimestamp || Date.now();
+        const { leadTimeMinutes } = await TimetableStorage.getSettings();
         const liveProps: TimetableLiveActivityProps = {
           phase: state.phase,
           courseTitle: state.courseTitle || '강의',
           location: state.location,
           professor: state.professor,
-          startTimestamp: state.startTimestamp || Date.now(),
-          endTimestamp: state.endTimestamp || (Date.now() + 75 * 60 * 1000),
+          startTimestamp,
+          endTimestamp: state.endTimestamp || (startTimestamp + 75 * 60 * 1000),
+          countdownFromTimestamp: startTimestamp - leadTimeMinutes * 60 * 1000,
           durationMinutes: state.durationMinutes,
         };
+        const propsJson = JSON.stringify(liveProps);
 
-        const activeInstances = TimetableLiveActivity.getInstances();
-        if (activeInstances.length > 0) {
-          // 이미 활성화된 Dynamic Island가 있으면 상태 업데이트
-          await Promise.all(activeInstances.map((instance) => instance.update(liveProps)));
+        const instances = TimetableLiveActivity.getInstances();
+        if (leaveExisting && instances.length > 0) return;
+        const [activeInstance, ...duplicates] = instances;
+        // 앱이 시작한 것과 서버 push-to-start가 시작한 것이 겹쳤으면 하나만 남긴다.
+        await Promise.all(duplicates.map((instance) => instance.end('immediate').catch(() => {})));
+        if (activeInstance) {
+          if (propsJson === lastLiveActivityPropsJson && duplicates.length === 0) return;
+          // 이미 활성화된 Dynamic Island가 있으면 상태 업데이트 (서버가 시작한 것도 여기서 이어받는다)
+          await activeInstance.update(liveProps);
+        } else if (state.phase === 'UPCOMING' && !startUpcoming) {
+          return;
         } else {
           // 새로 Dynamic Island & Live Activity 시작
           TimetableLiveActivity.start(liveProps, 'intipmobileapp://timetable');
         }
+        lastLiveActivityPropsJson = propsJson;
       } catch (e) {
         console.warn('[TimetableNowBarService] iOS Dynamic Island 렌더링 실패:', e);
       }
@@ -157,6 +189,7 @@ export const TimetableNowBarService = {
   async cancel(): Promise<void> {
     try {
       if (Platform.OS === 'ios') {
+        lastLiveActivityPropsJson = null;
         const activeInstances = TimetableLiveActivity.getInstances();
         await Promise.all(
           activeInstances.map((instance) =>

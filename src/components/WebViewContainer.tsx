@@ -63,6 +63,7 @@ import { handleTimetableBridgeMessage } from "../timetable/timetableBridgeHandle
 import { clearTokenInfo, readTokenInfo, saveTokenInfo } from "../native/secureTokenStore";
 import { shareContent } from "../native/share";
 import { flushPendingFcmToken } from "../push/fcmTokenSync";
+import { syncLiveActivityStartToken } from "../timetable/liveActivityPushToStart";
 import {
   getFcmTokenWithRetry,
   getInitialNavIntent,
@@ -391,6 +392,9 @@ export default function WebViewContainer({ url, mode }: Props) {
       registry.mergeSession({ fcmToken: token });
     }
     flushPendingFcmToken();
+    // Same survival points (login success etc.) — the push-to-start token
+    // needs a session to register, just like the FCM token.
+    void syncLiveActivityStartToken();
   }, [bridge, registry]);
 
   const navigateSpa = useCallback(

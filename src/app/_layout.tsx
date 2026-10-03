@@ -11,6 +11,10 @@ import WebViewControllerPanel from "../components/WebViewControllerPanel";
 import { AcademicScraperWebView } from "../agent/AcademicScraperWebView";
 import { LocalWatchManager } from "../agent/localWatchManager";
 import { TimetableScheduler } from "../timetable/timetableScheduler";
+import {
+  registerLiveActivityPushToStart,
+  syncLiveActivityStartToken,
+} from "../timetable/liveActivityPushToStart";
 import { checkForUpdate } from "../native/updateCheck";
 import {
   registerBackgroundHandlers,
@@ -68,14 +72,23 @@ export default function RootLayout() {
     // Sync and restore the timetable Ongoing Activity / Now Bar.
     void TimetableScheduler.syncSchedule();
 
+    // iOS: register the ActivityKit push-to-start token so the server's
+    // pre-class alert can start the timetable Live Activity while the app is
+    // closed (see liveActivityPushToStart.ts).
+    const unregisterPushToStart = registerLiveActivityPushToStart();
+
     const appStateSub = AppState.addEventListener("change", (state) => {
       if (state === "active" || state === "background") {
         void TimetableScheduler.syncSchedule();
+      }
+      if (state === "active") {
+        void syncLiveActivityStartToken();
       }
     });
 
     return () => {
       appStateSub.remove();
+      unregisterPushToStart();
     };
   }, []);
 
