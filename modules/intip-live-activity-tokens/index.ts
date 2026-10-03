@@ -14,3 +14,11 @@ export function addActivityPushTokenListener(
   if (!IntipLiveActivityTokensModule) return { remove() {} };
   return IntipLiveActivityTokensModule.addListener('onActivityPushToken', listener);
 }
+
+/**
+ * 앱이 push-to-start로 백그라운드 실행됐을 때 네이티브가 확보해 둔 실행 시간을 돌려준다.
+ * Activity 토큰을 서버에 등록한 뒤 부른다. 확보한 시간이 없으면 아무 일도 하지 않는다.
+ */
+export function finishBackgroundWork(): void {
+  IntipLiveActivityTokensModule?.finishBackgroundWork();
+}
