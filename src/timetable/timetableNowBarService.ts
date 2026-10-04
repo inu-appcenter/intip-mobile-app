@@ -8,9 +8,11 @@ import notifee, {
 import { TimetableActivityState } from './types';
 import { TimetableStorage } from './timetableStorage';
 import { TimetableLiveActivity, TimetableLiveActivityProps } from '../widgets/TimetableLiveActivity';
+import { IntipAndroidLiveUpdate } from '../../modules/intip-android-live-update';
 
 export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar_v2';
 export const TIMETABLE_ONGOING_NOTIFICATION_ID = 'timetable_ongoing_activity';
+export const TIMETABLE_NOTIFICATION_INT_ID = 1001;
 
 // 마지막으로 Live Activity에 반영한 props. AppState 전환마다 syncSchedule이 돌기 때문에
 // 같은 내용이면 업데이트를 건너뛴다 (HIG: 새 내용이 있을 때만 업데이트).
@@ -126,6 +128,37 @@ export const TimetableNowBarService = {
       ? Math.max(0, Math.round((Date.now() - state.startTimestamp) / (60 * 1000)))
       : (state.elapsedMinutes || 0);
 
+    // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
+    if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
+      try {
+        const leadMinutes = 15;
+        const progressPercent = isUpcoming
+          ? 0
+          : Math.min(100, Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100)));
+        const shortCriticalText = isUpcoming ? '곧 시작' : '수업 중';
+
+        IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
+          id: TIMETABLE_NOTIFICATION_INT_ID,
+          channelId: TIMETABLE_CHANNEL_ID,
+          channelName: '실시간 시간표 (나우 바)',
+          title,
+          text: body,
+          shortCriticalText,
+          progress: progressPercent,
+          segments: [
+            { length: leadMinutes, color: '#5B8DEF' },
+            { length: durationMinutes, color: '#043799' },
+          ],
+          targetTimestamp: targetTimestamp || undefined,
+          ongoing: true,
+        });
+        return;
+      } catch (e) {
+        console.warn('[TimetableNowBarService] Android LiveUpdate 실패, Notifee로 폴백:', e);
+      }
+    }
+
+    // --- Android 15 이하: 기존 Notifee Rich Ongoing Notification Fallback ---
     try {
       await this.ensureChannel();
       await notifee.displayNotification({
@@ -139,15 +172,13 @@ export const TimetableNowBarService = {
           phase: state.phase,
           courseTitle: state.courseTitle || '',
           location: state.location || '',
-          'android.requestPromotedOngoing': 'true',
-          'com.samsung.android.support.ongoing_activity': 'true',
         },
         android: {
           channelId: TIMETABLE_CHANNEL_ID,
-          asForegroundService: true, // Android 16 / One UI 8 실시간 알림 섹션 고정 및 Now Bar 캡슐 승격 필수 속성
+          asForegroundService: true,
           category: isUpcoming ? AndroidCategory.EVENT : AndroidCategory.PROGRESS,
           importance: AndroidImportance.DEFAULT,
-          ongoing: true, // 사용자가 스와이프로 임의 종료 불가
+          ongoing: true,
           autoCancel: false,
           onlyAlertOnce: true,
           visibility: AndroidVisibility.PUBLIC,
@@ -184,7 +215,7 @@ export const TimetableNowBarService = {
   },
 
   /**
-   * Ongoing 알림 취소 및 제거 (iOS Dynamic Island 종료 & Android Foreground Service 종료 포함)
+   * Ongoing 알림 취소 및 제거 (iOS Dynamic Island 종료 & Android LiveUpdate/Notifee 종료 포함)
    */
   async cancel(): Promise<void> {
     try {
@@ -200,6 +231,7 @@ export const TimetableNowBarService = {
       }
 
       if (Platform.OS === 'android') {
+        IntipAndroidLiveUpdate.stopLiveUpdate(TIMETABLE_NOTIFICATION_INT_ID);
         await notifee.stopForegroundService().catch(() => {});
       }
       await notifee.cancelNotification(TIMETABLE_ONGOING_NOTIFICATION_ID);
