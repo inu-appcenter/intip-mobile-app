@@ -134,6 +134,7 @@
       ],
       "expo-secure-store",
       "./plugins/withWidgetAssets",
+      "./plugins/withBusArrivalRefreshIntent",
       [
         "expo-widgets",
         {
