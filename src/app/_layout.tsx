@@ -16,17 +16,10 @@ import {
   syncLiveActivityStartToken,
 } from "../timetable/liveActivityPushToStart";
 import { checkForUpdate } from "../native/updateCheck";
-import {
-  registerBackgroundHandlers,
-  requestNotificationPermission,
-} from "../push/messaging";
+import { requestNotificationPermission } from "../push/messaging";
 import { backgroundColorFor } from "../theme";
 import { WebViewProvider } from "../webview/WebViewContext";
 import { refreshAllWidgets, watchAppLifecycleForWidgets } from "../widgets/refresh";
-
-// Background FCM/notifee handlers must be registered before React renders so
-// they survive a background/quit launch.
-registerBackgroundHandlers();
 
 // Hold the system splash until SplashArt has actually drawn its artwork, so it
 // hands straight over instead of flashing the bare window background in
