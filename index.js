@@ -10,5 +10,13 @@
  * start there is no React tree.
  */
 import './src/widgets/headless';
+import { registerBackgroundHandlers } from './src/push/messaging';
 
 import 'expo-router/entry';
+
+// Same reason, for FCM and notifee: a data-only push or a notification
+// dismissed while the app is killed starts the bundle headless too. Registered
+// from `_layout.tsx` instead, these never existed in that start — expo-router
+// only evaluates route modules while rendering — and every such event was
+// dropped with "[notifee] no background event handler has been set".
+registerBackgroundHandlers();

@@ -23,6 +23,7 @@ import messaging from '@react-native-firebase/messaging';
 import { addPushToStartTokenListener } from 'expo-widgets';
 import {
   addActivityPushTokenListener,
+  finishBackgroundWork,
   type ActivityPushTokenEvent,
 } from '../../modules/intip-live-activity-tokens';
 import { API_BASE_URL } from '../config/env';
@@ -121,12 +122,15 @@ async function syncStartToken(fcmToken: string, accessToken: string): Promise<vo
 }
 
 async function syncActivityTokens(fcmToken: string, accessToken: string): Promise<void> {
+  if (pendingActivityTokens.size === 0) return;
   for (const [activityId, event] of [...pendingActivityTokens]) {
     if (await putActivityToken(fcmToken, event, accessToken)) {
       // 보내는 사이 같은 Activity의 토큰이 갱신됐으면 남겨 둔다.
       if (pendingActivityTokens.get(activityId) === event) pendingActivityTokens.delete(activityId);
     }
   }
+  // push-to-start로 백그라운드 실행된 경우 네이티브가 실행 시간을 붙잡고 있다 — 다 보냈으면 돌려준다.
+  if (pendingActivityTokens.size === 0) finishBackgroundWork();
 }
 
 async function doSync(): Promise<void> {
