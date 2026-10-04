@@ -59,14 +59,33 @@ type BusArrival = {
  * `src/widgets/refresh.ts`) — so this only has the one populated state plus
  * a fallback for whenever the upstream arrival API has nothing to show.
  */
-export type BusArrivalWidgetProps =
+export type BusArrivalWidgetProps = (
   | {
       status: "normal";
       /** The stop nearest the user, as the portal names it ("2번출구") — see `data/busArrival.ts`. */
       stopLabel: string;
       arrivals: BusArrival[];
     }
-  | { status: "noData" };
+  | { status: "noData" }
+) & {
+  /**
+   * What the iOS widget extension needs to refetch on its own when the
+   * refresh icon is tapped — see `plugins/widget-ios/BusArrivalRefresh.swift`.
+   * Not rendered. Absent (never null — see `refresh.ts`) when no stop could
+   * be picked, in which case a tap does nothing.
+   */
+  source?: BusArrivalRefreshSource;
+};
+
+/** The stop the app last picked, for the extension's tap-to-refresh. */
+export type BusArrivalRefreshSource = {
+  /** `API_BASE_URL` — the extension has no build config of its own to read it from. */
+  apiBaseUrl: string;
+  bstopId: string;
+  stopLabel: string;
+  /** Routes shown at the stop; empty means "don't filter" (`arrivalsForStop`). */
+  routeIds: string[];
+};
 
 /** Sample snapshot, matching the Figma frame's exact sample content. */
 export const DEFAULT_PROPS: BusArrivalWidgetProps = {
@@ -226,17 +245,17 @@ const BusArrivalWidget = (
     </HStack>
   );
 
-  // Refresh. Different on each platform because the platforms differ in what
-  // a widget tap can do, not by preference:
+  // Refresh. An in-place refresh on both platforms — no app launch — wired
+  // differently because the renderers differ:
   //
-  // - Android: a real in-place refresh. A `Button` with this reserved target
-  //   makes expo-widgets-glance start the app's own refresh task headlessly
-  //   (its HandlePressAction.REFRESH_TARGET) — no app launch.
-  // - iOS: just the icon. A WidgetKit button runs in the widget extension,
-  //   which has no network and can't reach the app, so it could not fetch;
-  //   worse, it would steal the tap from `widgetURL`. This is a small widget,
-  //   so the whole widget is one tap target that opens the app — and the app
-  //   refreshes the bus widget as it comes to the foreground.
+  // - Android: a `Button` with this reserved target makes
+  //   expo-widgets-glance start the app's own refresh task headlessly (its
+  //   HandlePressAction.REFRESH_TARGET).
+  // - iOS: just the icon here. expo-widgets' `Button` can only run its own
+  //   intent, which can't fetch, so the tap target is a native button laid
+  //   over this corner by `plugins/withBusArrivalRefreshIntent.js`; its intent
+  //   refetches in the widget extension using `props.source`. Keep the icon
+  //   in the bottom-trailing corner, inside that button's 44pt square.
   //
   // The target string is spelled out because a widget layout can't import
   // anything; it must match GLANCE_REFRESH_TARGET in expo-widgets-glance.

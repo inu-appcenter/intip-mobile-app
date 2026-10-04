@@ -31,7 +31,9 @@ import { AppState, Platform } from 'react-native';
 
 import { updateGlanceTimeline } from 'expo-widgets-glance';
 
-import BusArrivalWidget from './BusArrivalWidget';
+import { API_BASE_URL } from '../config/env';
+
+import BusArrivalWidget, { type BusArrivalRefreshSource } from './BusArrivalWidget';
 import CafeteriaMenuWidget from './CafeteriaMenuWidget';
 import NextClassWidget from './NextClassWidget';
 import TimetableWidget from './TimetableWidget';
@@ -163,6 +165,16 @@ export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<v
   const fetched = await fetchBusArrivals(stop.bstopId);
   if (fetched === null) return; // Network failure: keep the last good snapshot.
 
+  // Lets the iOS widget extension refetch this same stop when its refresh
+  // icon is tapped (see `plugins/widget-ios/BusArrivalRefresh.swift`). Carried
+  // on every entry, `noData` included — that is when a refresh matters most.
+  const source: BusArrivalRefreshSource = {
+    apiBaseUrl: API_BASE_URL,
+    bstopId: stop.bstopId,
+    stopLabel: stop.label,
+    routeIds: stop.routeIds,
+  };
+
   // Pinned to this fetch before any future entry is built: an item without an
   // upstream `observedAt` would otherwise be re-anchored to each entry's own
   // time, and its bus would never arrive.
@@ -182,7 +194,7 @@ export async function refreshBusArrivalWidget(now: Date = new Date()): Promise<v
   push(
     BUS_ARRIVAL,
     arrivalBoundariesOf(arrivals, now),
-    (at) => toBusArrivalProps(arrivals, stop.label, at),
+    (at) => ({ ...toBusArrivalProps(arrivals, stop.label, at), source }),
     now,
     arrivalRefreshMomentsOf(arrivals, now),
   );

@@ -36,12 +36,14 @@ const isDevVariant = process.env.APP_VARIANT === "development";
 // the App Groups entitlement to it. Simplest fix: dev builds don't get the
 // home screen widgets at all — `src/widgets/refresh.ts`'s calls still run,
 // they just have no widget extension to display the snapshot they write.
-// `withWidgetAssets` goes with them: it patches the `ExpoWidgetsTarget` that
-// expo-widgets creates and throws when that target is missing.
+// `withWidgetAssets` and `withBusArrivalRefreshIntent` go with them: they patch
+// the `ExpoWidgetsTarget` that expo-widgets creates and throw when that target
+// is missing.
 const WIDGET_PLUGIN_NAMES = new Set([
   "expo-widgets",
   "expo-widgets-glance",
   "./plugins/withWidgetAssets",
+  "./plugins/withBusArrivalRefreshIntent",
 ]);
 const plugins = isDevVariant
   ? expo.plugins.filter((plugin) => {
