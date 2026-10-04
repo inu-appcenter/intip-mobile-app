@@ -52,7 +52,12 @@ import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTyp
 // Shared bridge is vendored as a git submodule under packages/intip-bridge and
 // compiled from source (no npm package / registry). See AGENTS.md.
 import { nativeAlert } from "../../modules/intip-native-dialog";
-import { useSystemGestureBand } from "../../modules/intip-system-gestures";
+import {
+  canMuteWebViewHaptics,
+  muteWebViewHaptics,
+  unmuteWebViewHaptics,
+  useSystemGestureBand,
+} from "../../modules/intip-system-gestures";
 import { createNativeChannel } from "../../packages/intip-bridge/src/adapters/native";
 import { PROTOCOL_VERSION, type TokenInfoPayload } from "../../packages/intip-bridge/src/messages";
 import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
@@ -336,16 +341,20 @@ export default function WebViewContainer({ url, mode }: Props) {
   // 가장자리 touchstart를 preventDefault하면 인터랙티브 백 스와이프가 씹힌다.
   const edgeGuardEnabled = Platform.OS === "android";
 
-  // 초기 로드 후에는 아래 effect에서 변경된 폭을 주입한다.
+  // 페이지를 새로 불러올 때마다 다시 실행되므로 현재 폭을 담아야 한다. 이미
+  // 떠 있는 페이지에는 아래 effect가 변경된 폭을 주입한다.
   const documentEndScript = useMemo(
     () =>
       INJECTED_SCRIPT +
       (edgeGuardEnabled
-        ? buildEdgeLongPressGuardScript(gestureBand.left, gestureBand.right) +
+        ? buildEdgeLongPressGuardScript(
+            gestureBand.left,
+            gestureBand.right,
+            !canMuteWebViewHaptics,
+          ) +
           (__DEV__ ? buildEdgeGuardDiagnosticsScript() : "")
         : ""),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [edgeGuardEnabled, gestureBand.left, gestureBand.right],
   );
 
   // Connect this container to the WebView orchestrator (shared dev controller).
@@ -990,6 +999,12 @@ export default function WebViewContainer({ url, mode }: Props) {
             edge === "left" ? EDGE_GUARD_SLOP_DP : -EDGE_GUARD_SLOP_DP,
           )
           .failOffsetY([-EDGE_GUARD_SLOP_DP, EDGE_GUARD_SLOP_DP])
+          // 영역에서 시작한 터치 동안 웹뷰 롱프레스 햅틱을 끈다. 시스템이
+          // 백 제스처를 가져가면 이 가드는 바로 취소되므로, 되돌리는 시점은
+          // unmuteWebViewHaptics가 최소 시간 뒤로 미룬다.
+          .runOnJS(true)
+          .onBegin(muteWebViewHaptics)
+          .onFinalize(unmuteWebViewHaptics)
           // iOS와 버튼 내비게이션에서는 가드를 사용하지 않는다.
           .enabled(Platform.OS === "android" && width > 0),
         `pan/${edge}`,

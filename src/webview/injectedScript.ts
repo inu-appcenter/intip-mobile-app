@@ -231,22 +231,22 @@ true;
 `;
 
 /**
- * 가장자리 터치의 기본 동작을 막아 웹뷰의 롱프레스·선택을 방지한다.
+ * 시스템 백 제스처 영역에서 시작한 터치가 웹 페이지로 새지 않게 막는다.
  *
- * 가장자리에서 시작한 터치는 페이지 이벤트보다 먼저 차단한다.
+ *  - 시작 이벤트(touchstart·pointerdown·mousedown)를 캡처 단계에서 멈춰
+ *    페이지의 드래그·스와이프 핸들러가 백 제스처를 따라 움직이지 않게 한다.
+ *  - 가드 활성 중 선택·드래그 방지 스타일과 contextmenu 차단을 적용한다.
  *
- * touchstart은 preventDefault하고, 선택·드래그 방지 스타일을 함께 적용한다.
- *
- * 가장자리에서 시작한 터치는 다음과 같이 처리한다.
- *
- *  - touchstart를 preventDefault하고 시작 이벤트를 캡처 단계에서 차단한다.
- *  - 선택·드래그 방지 스타일과 contextmenu를 가드 활성 중 적용한다.
- *
- * 탭은 touchend에서 복구하고, 입력 요소와 영역 밖의 터치는 그대로 둔다.
+ * 롱프레스 햅틱은 네이티브에서 웹뷰 햅틱을 꺼서 막는다(WebViewContainer의
+ * 제스처 가드). touchstart를 preventDefault해도 막히지만, 그러면 영역에서
+ * 시작한 스크롤까지 죽어 가장자리가 데드존이 된다. 그래서 preventDefault는
+ * 네이티브 수단이 없는 바이너리에서만 쓰고, 그때만 탭을 touchend에서
+ * 다시 보낸다. 입력 요소와 영역 밖의 터치는 그대로 둔다.
  */
 export function buildEdgeLongPressGuardScript(
   leftPx: number,
   rightPx: number,
+  preventDefault: boolean,
 ): string {
   return `
 (function () {
@@ -320,7 +320,7 @@ export function buildEdgeLongPressGuardScript(
   // 네이티브에서 갱신할 수 있는 가드 상태.
   var handle = {
     blocking: true,
-    preventDefault: true,
+    preventDefault: ${preventDefault},
     // 시스템 설정 변경 시 buildEdgeGuardBandScript로 갱신한다.
     left: ${leftPx},
     right: ${rightPx}
@@ -331,7 +331,9 @@ export function buildEdgeLongPressGuardScript(
   function blockGestureStart(e) {
     if (!handle.blocking || !isGuarded(e)) return;
     e.stopPropagation();
-    if (handle.preventDefault && e.cancelable) e.preventDefault();
+    if (!handle.preventDefault || !e.cancelable) return;
+    e.preventDefault();
+    // 기본 동작을 막으면 click도 합성되지 않으므로 touchend에서 다시 보낸다.
     if (e.type === 'touchstart') {
       var t0 = e.touches[0];
       pendingTap = { target: e.target, x: t0.clientX, y: t0.clientY, at: Date.now() };
@@ -351,7 +353,12 @@ export function buildEdgeLongPressGuardScript(
     if (Date.now() - p.at > TAP_MAX_MS) return;
     var t = e.changedTouches && e.changedTouches[0];
     if (t && (Math.abs(t.clientX - p.x) > TAP_SLOP_PX || Math.abs(t.clientY - p.y) > TAP_SLOP_PX)) return;
-    try { if (p.target && p.target.click) p.target.click(); } catch (e4) {}
+    // SVG 요소에는 click()이 없으므로 이벤트를 직접 보낸다.
+    try {
+      p.target.dispatchEvent(new MouseEvent('click', {
+        bubbles: true, cancelable: true, view: window, clientX: p.x, clientY: p.y
+      }));
+    } catch (e4) {}
   }
 
   document.addEventListener('touchmove', function (e) {
