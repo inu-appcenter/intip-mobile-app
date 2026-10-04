@@ -14,6 +14,9 @@ declare class IntipSystemGesturesModule extends NativeModule {
    * null과 0은 다르다. 0은 버튼 내비게이션이 보고하는 정상 값이다.
    */
   getGestureInsets(): GestureInsets | null;
+
+  /** 화면의 모든 웹뷰에 대해 뷰 단위 햅틱 피드백을 켜거나 끈다. */
+  setWebViewHapticsEnabled(enabled: boolean): Promise<void>;
 }
 
 /**

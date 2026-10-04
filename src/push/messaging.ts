@@ -131,8 +131,25 @@ function chatRoomIdOf(data?: Record<string, unknown>): string | null {
   return typeof chatRoomId === 'string' && chatRoomId !== '' ? chatRoomId : null;
 }
 
+/** True when the message carries anything a notification could show. */
+function hasDisplayableContent(remoteMessage: any): boolean {
+  const n = remoteMessage?.notification;
+  const data = remoteMessage?.data as Record<string, unknown> | undefined;
+  return [n?.title, n?.body, data?.title, data?.body, data?.chatRoomName, data?.messageText].some(
+    (v) => typeof v === 'string' && v.trim() !== ''
+  );
+}
+
 /** Helper to display a notification with grouping support. */
 async function handleDisplayNotification(remoteMessage: any): Promise<void> {
+  // Not every RECEIVE broadcast is a message. When the user opens or dismisses
+  // a notification the FCM SDK displayed itself (a `notification` payload that
+  // arrived while backgrounded), FCM reports it with a c2dm RECEIVE broadcast,
+  // and RNFirebase's receiver forwards that as a RemoteMessage with nothing in
+  // it. Displayed, it was a blank "새 메시지" appearing the instant the real
+  // notification was swiped away (seen on device: dismiss → +46ms).
+  if (!hasDisplayableContent(remoteMessage)) return;
+
   await ensureAndroidChannels();
 
   // Sweep up summaries whose children are already gone before adding anything

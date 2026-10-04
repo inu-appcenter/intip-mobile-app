@@ -25,6 +25,7 @@ jest.mock('expo-widgets', () => ({
 // exists under jest, and importing `expo` there breaks some test environments.
 jest.mock('./modules/intip-live-activity-tokens', () => ({
   addActivityPushTokenListener: jest.fn(() => ({ remove: jest.fn() })),
+  finishBackgroundWork: jest.fn(),
 }));
 
 jest.mock('@expo/ui/swift-ui', () => ({

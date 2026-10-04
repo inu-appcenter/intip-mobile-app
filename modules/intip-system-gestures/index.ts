@@ -20,6 +20,48 @@ function read(): GestureInsets | null {
   }
 }
 
+export const canMuteWebViewHaptics =
+  Platform.OS === 'android' &&
+  typeof IntipSystemGesturesModule?.setWebViewHapticsEnabled === 'function';
+
+/**
+ * 백 제스처 영역에서 시작한 터치의 웹뷰 롱프레스 햅틱을 막는 최소 시간(ms).
+ *
+ * 시스템이 백 제스처를 가져가면 네이티브 가드는 곧바로 취소되지만, 웹뷰
+ * 쪽 터치는 손을 뗄 때까지 살아 있어서 롱프레스 타이머가 그대로 돈다
+ * (기기 측정: 가드 종료 +160ms, 햅틱 +700ms). 롱프레스는 터치당 한 번,
+ * 시스템 "길게 누르기 시간"(접근성 설정 최대 1.5초) 뒤에 오므로 그보다
+ * 길게 잡는다.
+ */
+const EDGE_HAPTICS_MUTE_MIN_MS = 2000;
+
+let mutedAt = 0;
+let unmuteTimer: ReturnType<typeof setTimeout> | null = null;
+
+function setHaptics(enabled: boolean): void {
+  IntipSystemGesturesModule?.setWebViewHapticsEnabled?.(enabled).catch(() => {});
+}
+
+/** 영역 터치 시작: 웹뷰 롱프레스 햅틱을 끈다. */
+export function muteWebViewHaptics(): void {
+  if (!canMuteWebViewHaptics) return;
+  if (unmuteTimer) clearTimeout(unmuteTimer);
+  unmuteTimer = null;
+  mutedAt = Date.now();
+  setHaptics(false);
+}
+
+/** 영역 터치 종료: 최소 시간이 지난 뒤 햅틱을 되돌린다. */
+export function unmuteWebViewHaptics(): void {
+  if (!canMuteWebViewHaptics) return;
+  if (unmuteTimer) clearTimeout(unmuteTimer);
+  const wait = Math.max(0, mutedAt + EDGE_HAPTICS_MUTE_MIN_MS - Date.now());
+  unmuteTimer = setTimeout(() => {
+    unmuteTimer = null;
+    setHaptics(true);
+  }, wait);
+}
+
 /** 가드를 사용하지 않을 때의 폭. */
 const NO_BAND = { left: 0, right: 0 };
 

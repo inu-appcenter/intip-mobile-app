@@ -23,11 +23,13 @@ jest.mock('expo-widgets', () => ({
   }),
 }));
 
+const mockFinishBackgroundWork = jest.fn();
 jest.mock('../../../modules/intip-live-activity-tokens', () => ({
   addActivityPushTokenListener: jest.fn((listener: any) => {
     activityListener = listener;
     return { remove: jest.fn() };
   }),
+  finishBackgroundWork: () => mockFinishBackgroundWork(),
 }));
 
 jest.mock('../../config/env', () => ({ API_BASE_URL: 'https://api.test' }));
@@ -68,6 +70,7 @@ describe('liveActivityPushToStart', () => {
     mockSettings = { enabled: true, leadTimeMinutes: 15 };
     tokenListener = null;
     activityListener = null;
+    mockFinishBackgroundWork.mockReset();
     (global as any).fetch = mockFetch;
   });
 
@@ -151,6 +154,9 @@ describe('liveActivityPushToStart', () => {
       props: '{"phase":"UPCOMING"}',
     });
 
+    // 다 보냈으면 백그라운드 실행 시간을 돌려준다
+    expect(mockFinishBackgroundWork).toHaveBeenCalledTimes(1);
+
     // 이미 보낸 토큰은 다시 보내지 않는다
     await mod.syncLiveActivityStartToken();
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -163,6 +169,7 @@ describe('liveActivityPushToStart', () => {
     activityListener!({ activityId: 'A1', pushToken: 'up-1', name: 'TimetableLiveActivity', props: '{}' });
     await flush();
     expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFinishBackgroundWork).not.toHaveBeenCalled();
 
     mockGetValidAccessToken.mockResolvedValue('access');
     await mod.syncLiveActivityStartToken();

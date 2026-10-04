@@ -1,6 +1,7 @@
 {
   "platforms": ["apple"],
   "apple": {
-    "modules": ["IntipLiveActivityTokensModule"]
+    "modules": ["IntipLiveActivityTokensModule"],
+    "appDelegateSubscribers": ["IntipLiveActivityTokensAppDelegate"]
   }
 }

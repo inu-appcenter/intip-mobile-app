@@ -2,18 +2,29 @@ import { LibraryAuthService } from './libraryAuthService';
 import { LmsAuthService } from './lmsAuthService';
 import { PortalSecureStore } from './secureStore';
 import { AcademicScraperManager } from './AcademicScraperWebView';
+import { saveDownload } from '../native/downloads';
 
 /**
  * AI 에이전트로부터 하달되는 범용 액션 명령 규격 (Generic Protocol)
  */
 export interface ClientActionInstruction {
   actionId: string;
-  authDomain: 'LIBRARY' | 'PORTAL' | 'LMS' | 'NONE';
+  authDomain: 'LIBRARY' | 'PORTAL' | 'LMS' | 'DORM' | 'NONE';
+  actionType?: 'QUERY' | 'MUTATION' | 'DOWNLOAD';
+  requiresConfirmation?: boolean;
+  confirmationMessage?: string;
+  downloadMetadata?: {
+    file_name?: string;
+    fileName?: string;
+    mime_type?: string;
+    mimeType?: string;
+  };
   request: {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
     url: string;
     headers?: Record<string, string>;
     body?: any;
+    bodyTemplate?: any;
     params?: Record<string, string | number | boolean>;
   };
 }
@@ -40,8 +51,8 @@ export async function executeAgentAction(
   const { actionId, authDomain, request } = instruction;
 
   try {
-    // 0. 포털 ERP (Nexacro SSV) 전용 액션 처리
-    if (authDomain === 'PORTAL') {
+    // 0. 포털 ERP (Nexacro SSV) 전용 액션 처리 (기숙사 DORM 포함)
+    if (authDomain === 'PORTAL' || authDomain === 'DORM') {
       const creds = await PortalSecureStore.getCredentials();
       if (!creds) {
         return {
@@ -86,6 +97,25 @@ export async function executeAgentAction(
         urlObj.searchParams.append(key, String(val));
       });
       finalUrl = urlObj.toString();
+    }
+
+    // 0-1. 파일 다운로드 (DOWNLOAD) 전용 액션 처리
+    if (instruction.actionType === 'DOWNLOAD' || instruction.downloadMetadata) {
+      const suggestedName =
+        instruction.downloadMetadata?.file_name ||
+        instruction.downloadMetadata?.fileName ||
+        'download_file';
+      await saveDownload(finalUrl, suggestedName);
+      return {
+        actionId,
+        success: true,
+        statusCode: 200,
+        data: {
+          downloaded: true,
+          fileName: suggestedName,
+          message: `${suggestedName} 다운로드가 완료되었습니다.`,
+        },
+      };
     }
 
     const headers: Record<string, string> = {
