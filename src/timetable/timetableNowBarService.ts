@@ -18,7 +18,19 @@ export const TIMETABLE_NOTIFICATION_INT_ID = 1001;
 // 같은 내용이면 업데이트를 건너뛴다 (HIG: 새 내용이 있을 때만 업데이트).
 let lastLiveActivityPropsJson: string | null = null;
 
+type CancelListener = () => void;
+const cancelListeners: Set<CancelListener> = new Set();
+
 export const TimetableNowBarService = {
+  /**
+   * 알림 취소 이벤트 리스너 등록
+   */
+  onCancel(listener: CancelListener): () => void {
+    cancelListeners.add(listener);
+    return () => {
+      cancelListeners.delete(listener);
+    };
+  },
   /**
    * 알림 채널 생성 (Android 전용: 소리/진동 없이 잠금화면 및 상태바에 당당히 상주하도록 DEFAULT 중요도 적용)
    */
@@ -256,6 +268,14 @@ export const TimetableNowBarService = {
    * Ongoing 알림 취소 및 제거 (iOS Dynamic Island 종료 & Android LiveUpdate/Notifee 종료 포함)
    */
   async cancel(): Promise<void> {
+    cancelListeners.forEach((listener) => {
+      try {
+        listener();
+      } catch (e) {
+        console.warn('[TimetableNowBarService] onCancel listener error:', e);
+      }
+    });
+
     try {
       if (Platform.OS === 'ios') {
         lastLiveActivityPropsJson = null;

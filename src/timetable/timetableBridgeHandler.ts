@@ -154,6 +154,7 @@ export async function handleTimetableBridgeMessage(
         };
         await TimetableStorage.saveTestActivity(testState);
         await TimetableNowBarService.renderActivity(testState);
+        TimetableScheduler.startProgressTicker();
         reply({
           type: 'testTimetableNowBarResult',
           success: true,
@@ -172,6 +173,7 @@ export async function handleTimetableBridgeMessage(
     case 'cancelTimetableNowBar': {
       try {
         await TimetableStorage.clearTestActivity();
+        TimetableScheduler.stopProgressTicker();
         await TimetableNowBarService.cancel();
         reply({
           type: 'cancelTimetableNowBarResult',

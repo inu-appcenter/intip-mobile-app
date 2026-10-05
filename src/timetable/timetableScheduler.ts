@@ -27,6 +27,8 @@ export const TIMETABLE_TRIGGER_NOTIFICATION_ID = 'timetable_nowbar_trigger';
 
 // iOS 전용 상태 전이 타이머 (scheduleNextAlarm 참고)
 let iosTransitionTimer: ReturnType<typeof setTimeout> | null = null;
+// 실시간 진행률(Progress Bar) 1분 주기 자동 갱신 타이머
+let progressTickerTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Date 객체에서 TimetableDay 추출
@@ -164,6 +166,40 @@ export function getNextTransitionTimestamp(
 
 export const TimetableScheduler = {
   /**
+   * 실시간 진행률(Progress Bar) 1분 주기 자동 갱신 타이머 중지
+   */
+  stopProgressTicker(): void {
+    if (progressTickerTimer) {
+      clearTimeout(progressTickerTimer);
+      progressTickerTimer = null;
+    }
+  },
+
+  /**
+   * 실시간 진행률(Progress Bar) 1분 주기 자동 갱신 타이머 시작
+   * - 매 분 00초 정각 주기에 맞춰 다음 갱신 시간을 예약함으로써 부드럽게 1분 단위로 진행 바 갱신
+   */
+  startProgressTicker(): void {
+    this.stopProgressTicker();
+
+    const now = new Date();
+    const seconds = now.getSeconds();
+    const msToNextMinute = Math.max(1000, (60 - seconds) * 1000);
+
+    progressTickerTimer = setTimeout(async () => {
+      try {
+        const state = await this.syncSchedule();
+        if (state.phase !== 'NONE') {
+          this.startProgressTicker();
+        }
+      } catch (e) {
+        console.warn('[TimetableScheduler] 진행률 주기 갱신 에러:', e);
+        this.startProgressTicker();
+      }
+    }, msToNextMinute);
+  },
+
+  /**
    * 현재 시각 기준 시간표 상태를 평가하여 Notifee Ongoing Notification을 갱신하고
    * 다음 상태 전이 시점에 정확한 알람(Trigger)을 예약
    */
@@ -171,19 +207,39 @@ export const TimetableScheduler = {
     const settings = await TimetableStorage.getSettings();
     if (!settings.enabled) {
       await TimetableNowBarService.cancel();
+      this.stopProgressTicker();
       return { phase: 'NONE' };
     }
 
     // 1. 진행 중인 테스트 액티비티가 있으면 우선 유지 및 렌더링
     const testActivity = await TimetableStorage.getTestActivity();
     if (testActivity && testActivity.phase !== 'NONE') {
+      const now = targetDate.getTime();
+      // 종료 시점 도달 시 자동 종료
+      if (testActivity.endTimestamp && now >= testActivity.endTimestamp) {
+        await TimetableStorage.clearTestActivity();
+        await TimetableNowBarService.cancel();
+        this.stopProgressTicker();
+        return { phase: 'NONE' };
+      }
+      // 수업 전(UPCOMING) 상태에서 수업 시작 시각 도달 시 수업 중(ONGOING)으로 자연스럽게 전환
+      if (
+        testActivity.phase === 'UPCOMING' &&
+        testActivity.startTimestamp &&
+        now >= testActivity.startTimestamp
+      ) {
+        testActivity.phase = 'ONGOING';
+        await TimetableStorage.saveTestActivity(testActivity);
+      }
       await TimetableNowBarService.renderActivity(testActivity);
+      this.startProgressTicker();
       return testActivity;
     }
 
     const data = await TimetableStorage.getTimetableData();
     if (!data || !data.courses || data.courses.length === 0) {
       await TimetableNowBarService.cancel();
+      this.stopProgressTicker();
       return { phase: 'NONE' };
     }
 
@@ -195,11 +251,13 @@ export const TimetableScheduler = {
     const serverManaged = await isLiveActivityPushToStartRegistered();
     if (state.phase === 'NONE') {
       if (!serverManaged) await TimetableNowBarService.cancel();
+      this.stopProgressTicker();
     } else {
       await TimetableNowBarService.renderActivity(state, {
         startUpcoming: !serverManaged,
         leaveExisting: serverManaged,
       });
+      this.startProgressTicker();
     }
 
     // 다음 전환 시점 계산 및 알람 등록
@@ -261,3 +319,9 @@ export const TimetableScheduler = {
     }
   },
 };
+
+// 알림이 취소되거나 닫힐 때 1분 주기 진행률 타이머도 함께 정리
+TimetableNowBarService.onCancel(() => {
+  TimetableScheduler.stopProgressTicker();
+});
+
