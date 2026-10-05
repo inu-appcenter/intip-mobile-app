@@ -30,6 +30,7 @@ declare class IntipAndroidLiveUpdateModule extends NativeModule {
   canPostPromoted(): boolean;
   startOrUpdateLiveUpdate(options: LiveUpdateOptions): LiveUpdateResult;
   stopLiveUpdate(id: number): boolean;
+  openPromotionSettings(): boolean;
 }
 
 export default requireOptionalNativeModule<IntipAndroidLiveUpdateModule>(

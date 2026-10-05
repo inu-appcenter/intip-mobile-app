@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -136,6 +138,38 @@ class IntipAndroidLiveUpdateModule : Module() {
       } catch (e: Exception) {
         Log.w(TAG, "Failed to cancel LiveUpdate notification id=$id", e)
         false
+      }
+    }
+
+    /**
+     * 시스템의 실시간 알림(Live Update / Promotion) 설정 화면으로 직접 이동
+     */
+    Function("openPromotionSettings") {
+      try {
+        val intent = if (Build.VERSION.SDK_INT >= 36) {
+          Intent("android.settings.APP_NOTIFICATION_PROMOTION_SETTINGS").apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+          }
+        } else {
+          Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+          }
+        }
+        context.startActivity(intent)
+        true
+      } catch (e: Exception) {
+        try {
+          val fallbackIntent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+          }
+          context.startActivity(fallbackIntent)
+          true
+        } catch (_: Exception) {
+          false
+        }
       }
     }
   }

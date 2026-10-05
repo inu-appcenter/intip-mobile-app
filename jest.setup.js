@@ -35,6 +35,7 @@ jest.mock('./modules/intip-android-live-update', () => ({
     canPostPromoted: jest.fn(() => false),
     startOrUpdateLiveUpdate: jest.fn(() => ({ success: true, promotable: true })),
     stopLiveUpdate: jest.fn(() => true),
+    openPromotionSettings: jest.fn(() => true),
   },
 }));
 

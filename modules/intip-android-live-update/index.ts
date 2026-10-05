@@ -63,4 +63,18 @@ export const IntipAndroidLiveUpdate = {
       return false;
     }
   },
+
+  /**
+   * 시스템의 실시간 알림(Live Update / Now Bar) 설정 화면으로 직접 이동
+   */
+  openPromotionSettings(): boolean {
+    if (Platform.OS !== 'android' || !IntipAndroidLiveUpdateModule) {
+      return false;
+    }
+    try {
+      return IntipAndroidLiveUpdateModule.openPromotionSettings();
+    } catch {
+      return false;
+    }
+  },
 };
