@@ -70,12 +70,13 @@ export const TimetableNowBarService = {
 
     const isUpcoming = state.phase === 'UPCOMING';
     const targetTimestamp = isUpcoming ? state.startTimestamp : state.endTimestamp;
+    const settings = await TimetableStorage.getSettings().catch(() => ({ leadTimeMinutes: 15 }));
+    const leadTimeMinutes = settings?.leadTimeMinutes || 15;
 
     // --- iOS: Dynamic Island & Live Activity (ActivityKit) ---
     if (Platform.OS === 'ios') {
       try {
         const startTimestamp = state.startTimestamp || Date.now();
-        const { leadTimeMinutes } = await TimetableStorage.getSettings();
         const liveProps: TimetableLiveActivityProps = {
           phase: state.phase,
           courseTitle: state.courseTitle || '강의',
@@ -128,11 +129,25 @@ export const TimetableNowBarService = {
       ? Math.max(0, Math.round((Date.now() - state.startTimestamp) / (60 * 1000)))
       : (state.elapsedMinutes || 0);
 
+    // 수업 전 진행률 계산 (수업 전 대기 시간 100% 기준)
+    const totalLeadMinutes = Math.max(leadTimeMinutes, 1);
+    let upcomingProgress = 0;
+    if (isUpcoming) {
+      if (state.elapsedMinutes !== undefined && state.elapsedMinutes > 0) {
+        upcomingProgress = Math.min(100, Math.max(0, Math.round((state.elapsedMinutes / totalLeadMinutes) * 100)));
+      } else if (state.startTimestamp) {
+        const remainingMs = Math.max(0, state.startTimestamp - Date.now());
+        const totalLeadMs = Math.max(totalLeadMinutes * 60 * 1000, remainingMs);
+        const elapsedLeadMs = Math.max(0, totalLeadMs - remainingMs);
+        upcomingProgress = Math.min(100, Math.max(0, Math.round((elapsedLeadMs / totalLeadMs) * 100)));
+      }
+    }
+
     // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
       try {
         if (isUpcoming) {
-          // [수업 전]: 불필요한 빈 진행 바 없이, 카운트다운 타이머(시작 시간)와 강의실 위치에 온전히 집중
+          // [수업 전]: 카운트다운 타이머(시작 시간) + 수업 전 전용 100% 진행 바 함께 표시
           IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
             id: TIMETABLE_NOTIFICATION_INT_ID,
             channelId: TIMETABLE_CHANNEL_ID,
@@ -142,7 +157,9 @@ export const TimetableNowBarService = {
             shortCriticalText: '곧 시작',
             targetTimestamp: targetTimestamp || undefined,
             showChronometer: true,
-            // progress와 segments를 비워두어 빈 진행 바 노출 없이 카운트다운 타이머에 집중
+            progress: upcomingProgress,
+            // 수업 전 대기 구간 전용 100% 단일 세그먼트 (끊김 없는 매끄러운 바)
+            segments: [{ length: 100, color: '#5B8DEF' }],
             ongoing: true,
           });
           return;
@@ -204,7 +221,13 @@ export const TimetableNowBarService = {
           showChronometer: !!targetTimestamp,
           chronometerDirection: 'down',
           timestamp: targetTimestamp,
-          progress: !isUpcoming && durationMinutes
+          progress: isUpcoming
+            ? {
+                max: 100,
+                current: upcomingProgress,
+                indeterminate: false,
+              }
+            : durationMinutes
             ? {
                 max: Math.max(1, durationMinutes),
                 current: Math.min(durationMinutes, elapsedMinutes),

@@ -48,7 +48,7 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       mockLiveUpdate.isSupported.mockReturnValue(true);
     });
 
-    it('renders LiveUpdate with timer and without progress bar for UPCOMING phase', async () => {
+    it('renders LiveUpdate with timer and independent progress bar for UPCOMING phase', async () => {
       const state: TimetableActivityState = {
         phase: 'UPCOMING',
         courseTitle: '알고리즘',
@@ -68,8 +68,10 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       expect(call.shortCriticalText).toBe('곧 시작');
       expect(call.showChronometer).toBe(true);
       expect(call.targetTimestamp).toBe(state.startTimestamp);
-      expect(call.progress).toBeUndefined();
-      expect(call.segments).toBeUndefined();
+      expect(typeof call.progress).toBe('number');
+      expect(call.progress).toBeGreaterThanOrEqual(0);
+      expect(call.progress).toBeLessThanOrEqual(100);
+      expect(call.segments).toEqual([{ length: 100, color: '#5B8DEF' }]);
       expect(call.ongoing).toBe(true);
       // Notifee는 폴백이므로 호출되지 않아야 함
       expect(mockNotifee.displayNotification).not.toHaveBeenCalled();
