@@ -21,6 +21,14 @@ let lastLiveActivityPropsJson: string | null = null;
 type CancelListener = () => void;
 const cancelListeners: Set<CancelListener> = new Set();
 
+function formatTimeRange(startTimestamp?: number, endTimestamp?: number): string {
+  if (!startTimestamp || !endTimestamp) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const startD = new Date(startTimestamp);
+  const endD = new Date(endTimestamp);
+  return `${pad(startD.getHours())}:${pad(startD.getMinutes())} ~ ${pad(endD.getHours())}:${pad(endD.getMinutes())}`;
+}
+
 export const TimetableNowBarService = {
   /**
    * 알림 취소 이벤트 리스너 등록
@@ -124,12 +132,20 @@ export const TimetableNowBarService = {
     }
 
     // --- Android: Samsung Now Bar / Rich Ongoing Notification ---
-    const title = state.courseTitle || '강의';
-    const subtitle = isUpcoming ? '다음 수업' : '수업 중';
-
+    const courseTitle = state.courseTitle || '강의';
     const locationText = state.location || '강의실 미지정';
     const profText = state.professor ? ` · ${state.professor}` : '';
-    const body = `${locationText}${profText}`;
+    const locationAndProf = `${locationText}${profText}`;
+    const timeRange = formatTimeRange(state.startTimestamp, state.endTimestamp);
+
+    // [수업 전 본문]: 강의실/교수명 + 아랫줄에 수업 시간대 (예: 09:00 ~ 10:15)
+    const upcomingBody = timeRange ? `${locationAndProf}\n${timeRange}` : locationAndProf;
+
+    // [수업 중 본문]: 나우바가 접혀있을 때 깔끔하게 '수업 중'만 노출되도록 제목을 '수업 중'으로 두고,
+    // 펼쳐진 카드에 과목명, 강의실/교수명, 수업 시간대(09:00 ~ 10:15)를 순서대로 배치
+    const inClassBodyLines = [courseTitle, locationAndProf];
+    if (timeRange) inClassBodyLines.push(timeRange);
+    const inClassBody = inClassBodyLines.join('\n');
 
     const durationMinutes =
       state.durationMinutes ||
@@ -164,8 +180,8 @@ export const TimetableNowBarService = {
             id: TIMETABLE_NOTIFICATION_INT_ID,
             channelId: TIMETABLE_CHANNEL_ID,
             channelName: '실시간 시간표 (나우 바)',
-            title: `[다음 수업] ${title}`,
-            text: body,
+            title: `[다음 수업] ${courseTitle}`,
+            text: upcomingBody,
             shortCriticalText: '곧 시작',
             targetTimestamp: targetTimestamp || undefined,
             showChronometer: true,
@@ -177,7 +193,7 @@ export const TimetableNowBarService = {
           return;
         }
 
-        // [수업 중]: 오직 해당 수업 100%만을 위한 단일 진행 바 + '수업 중' 상태 캡슐
+        // [수업 중]: 접혀있을 때 깔끔하게 '수업 중'만 노출 + 오직 해당 수업 100%만을 위한 단일 진행 바
         const progressPercent = Math.min(
           100,
           Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100))
@@ -187,8 +203,8 @@ export const TimetableNowBarService = {
           id: TIMETABLE_NOTIFICATION_INT_ID,
           channelId: TIMETABLE_CHANNEL_ID,
           channelName: '실시간 시간표 (나우 바)',
-          title: `[수업 중] ${title}`,
-          text: body,
+          title: '수업 중',
+          text: inClassBody,
           shortCriticalText: '수업 중',
           progress: progressPercent,
           // 오직 이 수업만을 나타내는 100% 단일 진행 바 (0% ~ 100% 매끄럽게 차오름)
@@ -207,9 +223,9 @@ export const TimetableNowBarService = {
       await this.ensureChannel();
       await notifee.displayNotification({
         id: TIMETABLE_ONGOING_NOTIFICATION_ID,
-        title,
-        subtitle,
-        body,
+        title: isUpcoming ? courseTitle : '수업 중',
+        subtitle: isUpcoming ? '다음 수업' : courseTitle,
+        body: isUpcoming ? upcomingBody : inClassBody,
         data: {
           type: 'timetable_nowbar',
           path: '/timetable',
@@ -228,7 +244,7 @@ export const TimetableNowBarService = {
           visibility: AndroidVisibility.PUBLIC,
           style: {
             type: AndroidStyle.BIGTEXT,
-            text: body,
+            text: isUpcoming ? upcomingBody : inClassBody,
           },
           showChronometer: !!targetTimestamp,
           chronometerDirection: 'down',
