@@ -73,26 +73,22 @@ class IntipAndroidLiveUpdateModule : Module() {
           .setAutoCancel(false)
 
         // 앱 로고 아이콘 설정:
-        // 접혔을 때(상태바/Now Bar 캡슐)는 SmallIcon이, 펼쳐졌을 때(Now Bar 확장 카드 위젯)는 LargeIcon이 노출됩니다.
+        // 상태바, 나우바 캡슐 및 알림 헤더에 SmallIcon이 표시됩니다.
+        // setLargeIcon을 설정할 경우 알림 카드 우측에 동일한 앱 로고가 중복 썸네일로 노출되므로 설정하지 않습니다.
         try {
           val appDrawable = context.packageManager.getApplicationIcon(context.packageName)
           val appBitmap = drawableToBitmap(appDrawable)
           if (appBitmap != null) {
             val appIcon = Icon.createWithBitmap(appBitmap)
             builder.setSmallIcon(appIcon)
-            builder.setLargeIcon(appIcon)
           } else {
             val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
             builder.setSmallIcon(iconRes)
-            builder.setLargeIcon(Icon.createWithResource(context, iconRes))
           }
         } catch (e: Exception) {
           Log.w(TAG, "Failed to load app icon for Now Bar", e)
           val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
           builder.setSmallIcon(iconRes)
-          try {
-            builder.setLargeIcon(Icon.createWithResource(context, iconRes))
-          } catch (_: Exception) {}
         }
 
         // 클릭 시 앱 실행 펜딩 인텐트 연결
