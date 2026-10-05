@@ -16,6 +16,7 @@ export interface LiveUpdateOptions {
   segments?: LiveUpdateSegment[];
   targetTimestamp?: number; // ms
   showChronometer?: boolean;
+  showWhen?: boolean;
   ongoing?: boolean;
 }
 

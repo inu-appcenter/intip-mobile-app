@@ -103,8 +103,13 @@ class IntipAndroidLiveUpdateModule : Module() {
           builder.setContentIntent(pendingIntent)
         }
 
-        // 3. Status Bar Chip 및 Now Bar 캡슐용 7자 이내 핵심 상태 텍스트
-        if (!shortCriticalText.isNullOrEmpty()) {
+        // 3. 카운트다운 타이머 및 상태 텍스트 분기 처리
+        val showChronometer = options["showChronometer"] as? Boolean ?: (targetTimestamp != null && targetTimestamp > 0)
+        val showWhen = options["showWhen"] as? Boolean ?: false
+
+        // showChronometer가 true인 경우(수업 전 등), One UI 나우바 캡슐에 텍스트 대신 카운트다운 타이머가 표시되어야 하므로
+        // shortCriticalText 및 com.samsung.android.shortText는 주입하지 않습니다. (주입 시 One UI가 타이머 대신 텍스트를 우선 표시함)
+        if (!showChronometer && !shortCriticalText.isNullOrEmpty()) {
           applyShortCriticalText(builder, shortCriticalText)
           // 주의: builder.setSubText()를 호출하면 펼쳐진 알림 카드의 제목 밑에 텍스트가 표시되므로,
           // 카드를 깔끔하게 유지하기 위해 subText는 지정하지 않고 칩/캡슐 전용 extras만 전달합니다.
@@ -120,8 +125,7 @@ class IntipAndroidLiveUpdateModule : Module() {
         // 4. Android 16 setRequestPromotedOngoing(true) 적용
         applyRequestPromotedOngoing(builder, true)
 
-        // 5. 카운트다운 타이머 연동 (showChronometer가 true일 때만 타이머 노출, false일 때는 shortCriticalText 우선)
-        val showChronometer = options["showChronometer"] as? Boolean ?: (targetTimestamp != null && targetTimestamp > 0)
+        // 5. 카운트다운 타이머 연동 (showChronometer가 true일 때만 타이머 노출)
         if (showChronometer && targetTimestamp != null && targetTimestamp > 0) {
           builder.setWhen(targetTimestamp)
           builder.setUsesChronometer(true)
@@ -131,6 +135,8 @@ class IntipAndroidLiveUpdateModule : Module() {
               .getMethod("setChronometerCountDown", Boolean::class.javaPrimitiveType)
               .invoke(builder, true)
           } catch (_: Exception) {}
+          // 펼쳐진 알림 카드의 제목(Title) 바로 옆에 타이머가 붙어 표시되는 것을 방지하기 위해 setShowWhen(showWhen) 적용
+          builder.setShowWhen(showWhen)
         } else {
           builder.setUsesChronometer(false)
           builder.setShowWhen(false)

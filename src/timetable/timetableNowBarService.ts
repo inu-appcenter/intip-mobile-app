@@ -169,16 +169,17 @@ export const TimetableNowBarService = {
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
       try {
         if (isUpcoming) {
-          // [수업 전]: 접혀있을 때는 깔끔하게 '수업 전' 텍스트 + 전용 100% 진행 바
+          // [수업 전]: 잠금화면 하단 나우바 캡슐에는 실시간 카운트다운 타이머가 표시되고,
+          // 펼쳐진 카드에서는 제목 옆에 타이머가 붙지 않도록(showWhen: false) 깔끔하게 표기
           IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
             id: TIMETABLE_NOTIFICATION_INT_ID,
             channelId: TIMETABLE_CHANNEL_ID,
             channelName: '실시간 시간표 (나우 바)',
             title: `[다음 수업] ${courseTitle}`,
             text: cardBody,
-            shortCriticalText: '수업 전',
             targetTimestamp: targetTimestamp || undefined,
-            showChronometer: false,
+            showChronometer: true,
+            showWhen: false,
             progress: upcomingProgress,
             // 수업 전 대기 구간 전용 100% 단일 세그먼트 (끊김 없는 매끄러운 바)
             segments: [{ length: 100, color: '#5B8DEF' }],
