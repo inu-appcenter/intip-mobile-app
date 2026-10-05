@@ -16,11 +16,11 @@ jest.mock('expo-secure-store', () => ({
 jest.mock('@notifee/react-native', () => ({
   __esModule: true,
   default: {
-    createChannel: jest.fn().mockResolvedValue(undefined),
-    displayNotification: jest.fn().mockResolvedValue(undefined),
-    cancelNotification: jest.fn().mockResolvedValue(undefined),
-    createTriggerNotification: jest.fn().mockResolvedValue(undefined),
-    stopForegroundService: jest.fn().mockResolvedValue(undefined),
+    createChannel: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    displayNotification: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    cancelNotification: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    createTriggerNotification: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    stopForegroundService: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   },
   AndroidCategory: { EVENT: 'event', PROGRESS: 'progress' },
   AndroidImportance: { DEFAULT: 3, LOW: 2, MIN: 1 },

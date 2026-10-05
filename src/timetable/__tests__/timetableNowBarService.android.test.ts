@@ -80,10 +80,10 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       expect(mockNotifee.displayNotification).not.toHaveBeenCalled();
     });
 
-    it('renders LiveUpdate with "N분 남음" Status Chip and white text in body for IN_CLASS phase', async () => {
+    it('renders LiveUpdate with "N분 남음" Status Chip and white text in body for ONGOING phase', async () => {
       const now = Date.now();
       const state: TimetableActivityState = {
-        phase: 'IN_CLASS',
+        phase: 'ONGOING',
         courseTitle: '데이터베이스',
         location: '자연대 101호',
         startTimestamp: now - 30 * 60 * 1000, // 30분 경과
