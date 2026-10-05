@@ -302,7 +302,33 @@ class IntipAndroidLiveUpdateModule : Module() {
     val notification = builder.build()
     val promotable = checkPromotableCharacteristics(notification)
     notificationManager.notify(id, notification)
+    dismissDuplicateFCMNotificationIfNeeded()
     return promotable
+  }
+
+  private fun dismissDuplicateFCMNotificationIfNeeded() {
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val active = notificationManager.activeNotifications
+        for (sbn in active) {
+          if (sbn.id == 1001) continue // Skip our own LiveUpdate notification
+          val notif = sbn.notification ?: continue
+          val notifTitle = notif.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+          val notifText = notif.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+          if (notifTitle.contains("수업이 시작돼요") || notifText.contains("수업이 시작돼요") ||
+              notifTitle.contains("수업 시작") || notifText.contains("수업 시작")) {
+            Log.i(TAG, "Dismissing duplicate FCM notification: id=${sbn.id}, tag=${sbn.tag}, title=$notifTitle")
+            if (sbn.tag != null) {
+              notificationManager.cancel(sbn.tag, sbn.id)
+            } else {
+              notificationManager.cancel(sbn.id)
+            }
+          }
+        }
+      }
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to dismiss duplicate FCM notification", e)
+    }
   }
 
   @Synchronized

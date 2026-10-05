@@ -158,6 +158,22 @@ async function handleDisplayNotification(remoteMessage: any): Promise<void> {
   await pruneOrphanSummaries();
 
   const data = remoteMessage.data as Record<string, unknown> | undefined;
+
+  // 시간표 알림(수업 시작 전 안내)인 경우:
+  // 사용자가 시간표 나우바(Live Update)를 켜둔 상태라면 일반 알림을 트레이에 중복으로 띄우지 않고,
+  // 시간표 실시간 나우바만 최신 상태로 동기화합니다.
+  if (data?.type === 'DAILY_BRIEF_TIMETABLE') {
+    try {
+      const settings = await TimetableStorage.getSettings();
+      if (settings.enabled) {
+        await TimetableScheduler.syncSchedule();
+        return;
+      }
+    } catch (e) {
+      console.warn('[messaging] DAILY_BRIEF_TIMETABLE nowbar check error:', e);
+    }
+  }
+
   const chatRoomId = chatRoomIdOf(data);
   // Per-room mute: the server sends chat as data-only on Android, so the
   // quiet-vs-noisy choice it used to make by naming a channel arrives here.
@@ -426,6 +442,19 @@ export function registerBackgroundHandlers(): void {
   // payloads itself; nothing extra to do here, but the handler must exist.
   // We manually handle data-only notifications (i.e. remoteMessage.notification is undefined).
   messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+    const data = remoteMessage?.data as Record<string, unknown> | undefined;
+    if (data?.type === 'DAILY_BRIEF_TIMETABLE') {
+      try {
+        const settings = await TimetableStorage.getSettings();
+        if (settings.enabled) {
+          await TimetableScheduler.syncSchedule();
+          return;
+        }
+      } catch (e) {
+        console.warn('[messaging] background DAILY_BRIEF_TIMETABLE check error:', e);
+      }
+    }
+
     if (!remoteMessage.notification) {
       await handleDisplayNotification(remoteMessage);
     }
