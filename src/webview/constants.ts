@@ -1,3 +1,5 @@
+import Constants from "expo-constants";
+
 /**
  * Static configuration for the INTIP portal shell.
  *
@@ -79,9 +81,14 @@ export const DEEP_LINK_EXCLUDED_PREFIXES = ["/.well-known/"] as const;
  * Suffix appended to the WebView User-Agent so the web frontend detects the
  * official app and switches to the multi-WebView routing protocol (spec §2.A).
  * The WebView's `applicationNameForUserAgent` joins it with a single space,
- * reproducing the original `" INTIPApp/1.0.0"` suffix.
+ * producing `" INTIPApp/<version>"`.
+ *
+ * The version is the app's `version` from app.json. `runtimeVersion` uses the
+ * `appVersion` policy, so an OTA update only ever lands on a binary with the
+ * same version — `expoConfig.version` always matches the native app version.
+ * Falls back to the legacy hardcoded `1.0.0` if the config is unavailable.
  */
-export const APP_UA_SUFFIX = "INTIPApp/1.0.0";
+export const APP_UA_SUFFIX = `INTIPApp/${Constants.expoConfig?.version ?? "1.0.0"}`;
 
 /**
  * Feature names the native shell advertises to the web via `bridgeCapabilities`
