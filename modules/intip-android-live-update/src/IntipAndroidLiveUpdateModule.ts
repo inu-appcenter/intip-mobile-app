@@ -23,6 +23,8 @@ export interface LiveUpdateOptions {
   phase?: 'UPCOMING' | 'ONGOING' | 'NONE';
   courseTitle?: string;
   details?: string;
+  timeRange?: string;
+  locationAndProf?: string;
   showChronometer?: boolean;
   showWhen?: boolean;
   ongoing?: boolean;

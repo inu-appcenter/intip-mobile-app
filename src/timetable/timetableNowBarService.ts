@@ -184,10 +184,13 @@ export const TimetableNowBarService = {
     const currentRemainingText = isUpcoming ? upcomingRemainingText : ongoingRemainingText;
 
     // [카드 본문]:
-    // subText(안드로이드 부제)는 삼성 One UI 잠금화면 테마 버그로 검은색(dark gray)으로 렌더링되므로,
-    // 본문(contentText) 첫 줄에 남은 시간을 넣어 선명한 고대비 순백색(White)으로 렌더링합니다.
-    const details = timeRange ? `${locationAndProf}\n${timeRange}` : locationAndProf;
-    const cardBody = `${currentRemainingText}\n${details}`;
+    // 안드로이드 ProgressStyle 알림 카드는 contentText를 최대 2줄만 노출합니다.
+    // 3줄을 넘길 경우 마지막 3번째 줄(시간대)이 잘리고 2번째 줄 끝에 '...' 말줄임표가 붙으므로,
+    // 1줄: 시간 정보(남은 시간 · 수업 시간대), 2줄: 장소/교수명(강의실 · 교수명) 2줄 완결형으로 구성합니다.
+    const timeText = timeRange ? ` · ${timeRange}` : '';
+    const line1 = `${currentRemainingText}${timeText}`;
+    const line2 = locationAndProf;
+    const cardBody = `${line1}\n${line2}`;
 
     // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
@@ -197,14 +200,16 @@ export const TimetableNowBarService = {
           (state.startTimestamp ? state.startTimestamp + durationMinutes * 60 * 1000 : Date.now() + durationMinutes * 60 * 1000);
 
         if (isUpcoming) {
-          // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 및 펼친 카드 본문에 실시간 남은 시간(예: "14분 남음") 표시
+          // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 및 펼친 카드 본문에 실시간 남은 시간(예: "14분 전") 표시
           IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
             id: TIMETABLE_NOTIFICATION_INT_ID,
             channelId: TIMETABLE_CHANNEL_ID,
             channelName: '실시간 시간표 (나우 바)',
             title: `[다음 수업] ${courseTitle}`,
             courseTitle,
-            details,
+            details: cardBody,
+            timeRange: timeRange || undefined,
+            locationAndProf: locationAndProf || undefined,
             phase: 'UPCOMING',
             startTimestamp: state.startTimestamp || undefined,
             endTimestamp: computedEndTimestamp,
@@ -235,7 +240,9 @@ export const TimetableNowBarService = {
           channelName: '실시간 시간표 (나우 바)',
           title: `[수업 중] ${courseTitle}`,
           courseTitle,
-          details,
+          details: cardBody,
+          timeRange: timeRange || undefined,
+          locationAndProf: locationAndProf || undefined,
           phase: 'ONGOING',
           startTimestamp: state.startTimestamp || undefined,
           endTimestamp: computedEndTimestamp,

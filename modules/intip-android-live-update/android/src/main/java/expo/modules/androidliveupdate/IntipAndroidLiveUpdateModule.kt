@@ -30,6 +30,8 @@ data class LiveUpdateSession(
   val title: String,
   val courseTitle: String?,
   val details: String?,
+  val timeRange: String?,
+  val locationAndProf: String?,
   val phase: String, // "UPCOMING" or "ONGOING"
   val startTimestamp: Long?,
   val endTimestamp: Long?,
@@ -112,6 +114,8 @@ class IntipAndroidLiveUpdateModule : Module() {
         val phase = (options["phase"] as? String) ?: (if (title.contains("[다음 수업]")) "UPCOMING" else "ONGOING")
         val courseTitle = options["courseTitle"] as? String
         val details = options["details"] as? String
+        val timeRange = options["timeRange"] as? String
+        val locationAndProf = options["locationAndProf"] as? String
         val subText = options["subText"] as? String
         val showChronometer = options["showChronometer"] as? Boolean ?: false
         val showWhen = options["showWhen"] as? Boolean ?: false
@@ -143,6 +147,8 @@ class IntipAndroidLiveUpdateModule : Module() {
             title = title,
             courseTitle = courseTitle,
             details = details,
+            timeRange = timeRange,
+            locationAndProf = locationAndProf,
             phase = phase,
             startTimestamp = startTimestamp,
             endTimestamp = endTimestamp,
@@ -323,8 +329,10 @@ class IntipAndroidLiveUpdateModule : Module() {
 
       val courseName = session.courseTitle ?: session.title.removePrefix("[수업 중] ").trim()
       val fullTitle = "[수업 중] $courseName"
-      val detailsText = session.details ?: ""
-      val cardBody = if (detailsText.isNotEmpty()) "$remainingText\n$detailsText" else remainingText
+      val timePart = if (!session.timeRange.isNullOrEmpty()) " · ${session.timeRange}" else ""
+      val line1 = "$remainingText$timePart"
+      val line2 = session.locationAndProf ?: session.details ?: ""
+      val cardBody = if (line2.isNotEmpty()) "$line1\n$line2" else line1
 
       buildAndPostNotification(
         id = session.id,
@@ -365,8 +373,10 @@ class IntipAndroidLiveUpdateModule : Module() {
 
       val courseName = session.courseTitle ?: session.title.removePrefix("[다음 수업] ").trim()
       val fullTitle = "[다음 수업] $courseName"
-      val detailsText = session.details ?: ""
-      val cardBody = if (detailsText.isNotEmpty()) "$remainingText\n$detailsText" else remainingText
+      val timePart = if (!session.timeRange.isNullOrEmpty()) " · ${session.timeRange}" else ""
+      val line1 = "$remainingText$timePart"
+      val line2 = session.locationAndProf ?: session.details ?: ""
+      val cardBody = if (line2.isNotEmpty()) "$line1\n$line2" else line1
 
       buildAndPostNotification(
         id = session.id,
