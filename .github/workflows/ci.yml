@@ -20,7 +20,7 @@ name: CI
 # 바뀌었다면 스토어 릴리스 빌드를 돌려야 한다.
 #
 # 네이티브를 바꿨을 때의 순서:
-#   1. app.json의 version(+ android.versionCode)을 올린다
+#   1. app.json의 version을 올린다 (android.versionCode는 릴리스 잡이 자동으로 +1)
 #   2. 수동 실행 → "Android only release" / "iOS only release"
 #   3. 스토어 배포가 끝난 뒤부터 그 버전 대상 OTA가 다시 의미를 갖는다
 #
@@ -227,7 +227,7 @@ jobs:
               echo "### 다음에 할 일"
               echo
               echo "**네이티브가 실제로 바뀐 경우** — 스토어 배포가 필요합니다."
-              echo "1. \`app.json\`의 \`version\`(과 \`android.versionCode\`)을 올려 커밋"
+              echo "1. \`app.json\`의 \`version\`을 올려 커밋 (versionCode는 릴리스 잡이 자동으로 +1)"
               echo "2. **Run workflow → 실행할 작업: \`Android only release\` / \`iOS only release\`**"
               echo
               echo "**JS만 바뀌었는데 경로에 걸린 경우**(예: \`modules/\` 안의 .ts만 수정)"
@@ -333,6 +333,9 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'Android')
     runs-on: self-hosted
+    # 아래 "Bump android.versionCode"가 bump 커밋을 push한다.
+    permissions:
+      contents: write
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -356,6 +359,29 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+
+      # Play는 이미 올라간 versionCode의 AAB를 거부한다. 손으로 올리던 시절엔
+      # bump를 잊어 31이 릴리스 4번에 걸쳐 그대로 빌드됐다. 그래서 빌드 *전에*
+      # app.json의 android.versionCode를 +1 해서 커밋·push 해 번호를 먼저
+      # 확보한다 — 빌드가 실패해도 번호 하나를 건너뛸 뿐, 같은 번호가 두 번
+      # 나가지 않는다. [skip ci]는 이 커밋이 main push로 CI/OTA를 다시 띄우지
+      # 않게 한다.
+      - name: Bump android.versionCode
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          NEXT=$(node -e '
+            const fs = require("fs");
+            const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            app.expo.android.versionCode += 1;
+            fs.writeFileSync("app.json", JSON.stringify(app, null, 2) + "\n");
+            console.log(app.expo.android.versionCode);
+          ')
+          git commit -am "chore: bump android versionCode to ${NEXT} [skip ci]"
+          git push origin HEAD:"$GITHUB_REF_NAME"
+          echo "### Android versionCode: \`${NEXT}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
