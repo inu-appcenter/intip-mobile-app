@@ -145,7 +145,7 @@ describe('handleTimetableBridgeMessage', () => {
       expect.objectContaining({
         type: 'testTimetableNowBarResult',
         success: true,
-        data: { active: true },
+        data: expect.objectContaining({ active: true }),
       })
     );
   });

@@ -82,13 +82,13 @@ class IntipAndroidLiveUpdateModule : Module() {
             builder.setSmallIcon(appIcon)
             builder.setLargeIcon(appIcon)
           } else {
-            val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else context.applicationInfo.roundIcon
+            val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
             builder.setSmallIcon(iconRes)
             builder.setLargeIcon(Icon.createWithResource(context, iconRes))
           }
         } catch (e: Exception) {
           Log.w(TAG, "Failed to load app icon for Now Bar", e)
-          val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else context.applicationInfo.roundIcon
+          val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
           builder.setSmallIcon(iconRes)
           try {
             builder.setLargeIcon(Icon.createWithResource(context, iconRes))
