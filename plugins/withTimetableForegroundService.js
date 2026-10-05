@@ -51,6 +51,28 @@ module.exports = function withTimetableForegroundService(config) {
       'true',
     );
 
+    // 4. LiveUpdateAlarmReceiver 등록 (화면 꺼짐 및 백그라운드 1분 주기 갱신용)
+    mainApplication.receiver = mainApplication.receiver || [];
+    const existingReceiverIndex = mainApplication.receiver.findIndex(
+      (r) => r.$['android:name'] === 'expo.modules.androidliveupdate.LiveUpdateAlarmReceiver',
+    );
+    const receiverDefinition = {
+      $: {
+        'android:name': 'expo.modules.androidliveupdate.LiveUpdateAlarmReceiver',
+        'android:exported': 'false',
+      },
+      'intent-filter': [
+        {
+          action: [{ $: { 'android:name': 'expo.modules.androidliveupdate.ACTION_TICK' } }],
+        },
+      ],
+    };
+    if (existingReceiverIndex >= 0) {
+      mainApplication.receiver[existingReceiverIndex] = receiverDefinition;
+    } else {
+      mainApplication.receiver.push(receiverDefinition);
+    }
+
     return cfg;
   });
 };
