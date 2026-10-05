@@ -15,6 +15,7 @@ export interface LiveUpdateOptions {
   progress?: number; // 0 ~ 100
   segments?: LiveUpdateSegment[];
   targetTimestamp?: number; // ms
+  showChronometer?: boolean;
   ongoing?: boolean;
 }
 

@@ -68,10 +68,10 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
           title: '알고리즘',
           text: '정보기술대학 208호 · 김교수',
           shortCriticalText: '곧 시작',
+          showChronometer: true,
           progress: 0,
           segments: [
-            { length: 15, color: '#5B8DEF' },
-            { length: 75, color: '#043799' },
+            { length: 100, color: '#5B8DEF' },
           ],
           ongoing: true,
         }),
@@ -98,7 +98,10 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       const call = mockLiveUpdate.startOrUpdateLiveUpdate.mock.calls[0][0] as any;
       expect(call.title).toBe('데이터베이스');
       expect(call.shortCriticalText).toBe('수업 중');
+      expect(call.showChronometer).toBe(false);
+      expect(call.targetTimestamp).toBeUndefined();
       expect(call.progress).toBe(40); // 30 / 75 = 40%
+      expect(call.segments).toEqual([{ length: 100, color: '#043799' }]);
       expect(mockNotifee.displayNotification).not.toHaveBeenCalled();
     });
 

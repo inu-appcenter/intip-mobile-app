@@ -88,8 +88,9 @@ class IntipAndroidLiveUpdateModule : Module() {
         // 4. Android 16 setRequestPromotedOngoing(true) 적용
         applyRequestPromotedOngoing(builder, true)
 
-        // 5. 카운트다운 타이머 연동
-        if (targetTimestamp != null && targetTimestamp > 0) {
+        // 5. 카운트다운 타이머 연동 (showChronometer가 true일 때만 타이머 노출, false일 때는 shortCriticalText 우선)
+        val showChronometer = options["showChronometer"] as? Boolean ?: (targetTimestamp != null && targetTimestamp > 0)
+        if (showChronometer && targetTimestamp != null && targetTimestamp > 0) {
           builder.setWhen(targetTimestamp)
           builder.setUsesChronometer(true)
           try {
@@ -98,6 +99,9 @@ class IntipAndroidLiveUpdateModule : Module() {
               .getMethod("setChronometerCountDown", Boolean::class.javaPrimitiveType)
               .invoke(builder, true)
           } catch (_: Exception) {}
+        } else {
+          builder.setUsesChronometer(false)
+          builder.setShowWhen(false)
         }
 
         // 6. Notification.ProgressStyle 적용

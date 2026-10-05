@@ -131,10 +131,13 @@ export const TimetableNowBarService = {
     // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
       try {
-        const leadMinutes = 15;
         const progressPercent = isUpcoming
           ? 0
           : Math.min(100, Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100)));
+
+        // 수업 전: 타이머 카운트다운 우선
+        // 수업 중: 타이머를 끄고 "수업 중" 텍스트를 상태 칩/캡슐에 직접 노출
+        const showChronometer = isUpcoming;
         const shortCriticalText = isUpcoming ? '곧 시작' : '수업 중';
 
         IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
@@ -145,11 +148,12 @@ export const TimetableNowBarService = {
           text: body,
           shortCriticalText,
           progress: progressPercent,
+          // 단일 세그먼트로 구성하여 초반에 어색하게 끊겨 보이던 갭(divider) 제거
           segments: [
-            { length: leadMinutes, color: '#5B8DEF' },
-            { length: durationMinutes, color: '#043799' },
+            { length: 100, color: isUpcoming ? '#5B8DEF' : '#043799' },
           ],
-          targetTimestamp: targetTimestamp || undefined,
+          targetTimestamp: isUpcoming ? targetTimestamp : undefined,
+          showChronometer,
           ongoing: true,
         });
         return;
