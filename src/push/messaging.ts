@@ -140,6 +140,84 @@ function hasDisplayableContent(remoteMessage: any): boolean {
   );
 }
 
+/**
+ * 시간표(나우바), 도서관 좌석/감시, LMS 과제 마감 등 Ongoing Activity로 처리되어야 하는
+ * 푸시 페이로드인지 검사하고 해당 Ongoing 서비스를 즉시 갱신/승격합니다.
+ *
+ * @returns true면 실시간 Ongoing으로 성공적으로 승격/처리되었으므로 일반 정적 알림 카드를 트레이에 띄우지 않습니다.
+ */
+async function dispatchOngoingActivityIfMatched(data?: Record<string, unknown>): Promise<boolean> {
+  if (!data?.type) return false;
+
+  // 1. 시간표 실시간 나우바(Live Update)
+  if (data.type === 'DAILY_BRIEF_TIMETABLE') {
+    try {
+      const settings = await TimetableStorage.getSettings();
+      if (settings.enabled) {
+        await TimetableScheduler.syncSchedule();
+        return true;
+      }
+    } catch (e) {
+      console.warn('[messaging] DAILY_BRIEF_TIMETABLE ongoing check error:', e);
+    }
+    return false;
+  }
+
+  // 2. 캠퍼스 빈자리 감시 결과 도착 시 활성 감시 Ongoing 바 정리 (결과 알림은 일반 배너로 노출)
+  if (data.type === 'CAMPUS_WATCH') {
+    try {
+      await LibraryOngoingService.cancelWatchActivity();
+    } catch (e) {
+      console.warn('[messaging] CAMPUS_WATCH ongoing check error:', e);
+    }
+    return false;
+  }
+
+  // 3. 도서관 좌석 이용 세션 알림 수신 시 실시간 카운트다운/원클릭 반납 Ongoing 바로 승격
+  if (data.type === 'LIBRARY_SEAT_SESSION') {
+    try {
+      if (data.seatNo && data.endTime) {
+        await LibraryOngoingService.renderActiveSeatSession({
+          seatId: data.seatId ? Number(data.seatId) : undefined,
+          seatNo: String(data.seatNo),
+          roomName: String(data.roomName || '열람실'),
+          roomId: data.roomId ? Number(data.roomId) : undefined,
+          startTime: data.startTime ? Number(data.startTime) : Date.now(),
+          endTime: Number(data.endTime),
+          totalMinutes: data.totalMinutes ? Number(data.totalMinutes) : undefined,
+        });
+        return true;
+      }
+    } catch (e) {
+      console.warn('[messaging] LIBRARY_SEAT_SESSION ongoing check error:', e);
+    }
+    return false;
+  }
+
+  // 4. LMS 과제 마감 임박 알림 수신 시 실시간 마감 타이머 Ongoing 바로 승격
+  if (data.type === 'LMS_DEADLINE') {
+    try {
+      if (data.itemName && data.dueTime) {
+        await LmsOngoingService.renderUrgentDeadline({
+          id: (data.id as string) || Date.now(),
+          courseName: String(data.courseName || '강의'),
+          itemName: String(data.itemName),
+          type: (data.itemType as any) || 'ASSIGNMENT',
+          dueTime: Number(data.dueTime),
+          courseId: data.courseId ? Number(data.courseId) : undefined,
+          cmid: data.cmid ? Number(data.cmid) : undefined,
+        });
+        return true;
+      }
+    } catch (e) {
+      console.warn('[messaging] LMS_DEADLINE ongoing check error:', e);
+    }
+    return false;
+  }
+
+  return false;
+}
+
 /** Helper to display a notification with grouping support. */
 async function handleDisplayNotification(remoteMessage: any): Promise<void> {
   // Not every RECEIVE broadcast is a message. When the user opens or dismisses
@@ -159,19 +237,9 @@ async function handleDisplayNotification(remoteMessage: any): Promise<void> {
 
   const data = remoteMessage.data as Record<string, unknown> | undefined;
 
-  // 시간표 알림(수업 시작 전 안내)인 경우:
-  // 사용자가 시간표 나우바(Live Update)를 켜둔 상태라면 일반 알림을 트레이에 중복으로 띄우지 않고,
-  // 시간표 실시간 나우바만 최신 상태로 동기화합니다.
-  if (data?.type === 'DAILY_BRIEF_TIMETABLE') {
-    try {
-      const settings = await TimetableStorage.getSettings();
-      if (settings.enabled) {
-        await TimetableScheduler.syncSchedule();
-        return;
-      }
-    } catch (e) {
-      console.warn('[messaging] DAILY_BRIEF_TIMETABLE nowbar check error:', e);
-    }
+  // Ongoing Activity(시간표 나우바, 도서관 좌석/감시, LMS) 대상 푸시인지 확인하여 승격 처리
+  if (await dispatchOngoingActivityIfMatched(data)) {
+    return;
   }
 
   const chatRoomId = chatRoomIdOf(data);
@@ -443,16 +511,8 @@ export function registerBackgroundHandlers(): void {
   // We manually handle data-only notifications (i.e. remoteMessage.notification is undefined).
   messaging().setBackgroundMessageHandler(async (remoteMessage) => {
     const data = remoteMessage?.data as Record<string, unknown> | undefined;
-    if (data?.type === 'DAILY_BRIEF_TIMETABLE') {
-      try {
-        const settings = await TimetableStorage.getSettings();
-        if (settings.enabled) {
-          await TimetableScheduler.syncSchedule();
-          return;
-        }
-      } catch (e) {
-        console.warn('[messaging] background DAILY_BRIEF_TIMETABLE check error:', e);
-      }
+    if (await dispatchOngoingActivityIfMatched(data)) {
+      return;
     }
 
     if (!remoteMessage.notification) {
