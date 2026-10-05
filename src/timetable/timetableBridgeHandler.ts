@@ -125,7 +125,9 @@ export async function handleTimetableBridgeMessage(
     case 'testTimetableNowBar': {
       // 즉시 테스트용 진행 중 액티비티 노출 및 상태 보존 (UPCOMING, IN_CLASS 등 다양한 상황 지원)
       try {
-        const now = Date.now();
+        const nowDate = new Date();
+        nowDate.setSeconds(0, 0);
+        const now = nowDate.getTime();
         const phase = payload?.phase || 'ONGOING';
         const durationMinutes = payload?.minutes || 75;
         const elapsedMinutes = payload?.elapsedMinutes !== undefined ? payload.elapsedMinutes : 0;
