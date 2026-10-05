@@ -179,12 +179,16 @@ export const TimetableScheduler = {
    * 실시간 진행률(Progress Bar) 1분 주기 자동 갱신 타이머 시작
    * - 매 분 00초 정각 주기에 맞춰 다음 갱신 시간을 예약함으로써 부드럽게 1분 단위로 진행 바 갱신
    */
-  startProgressTicker(): void {
+  startProgressTicker(customDelayMs?: number): void {
     this.stopProgressTicker();
 
     const now = new Date();
     const seconds = now.getSeconds();
     const msToNextMinute = Math.max(1000, (60 - seconds) * 1000);
+    const delay =
+      customDelayMs !== undefined && customDelayMs > 0 && customDelayMs < msToNextMinute
+        ? Math.max(500, customDelayMs)
+        : msToNextMinute;
 
     progressTickerTimer = setTimeout(async () => {
       try {
@@ -196,7 +200,7 @@ export const TimetableScheduler = {
         console.warn('[TimetableScheduler] 진행률 주기 갱신 에러:', e);
         this.startProgressTicker();
       }
-    }, msToNextMinute);
+    }, delay);
   },
 
   /**
@@ -232,7 +236,17 @@ export const TimetableScheduler = {
         await TimetableStorage.saveTestActivity(testActivity);
       }
       await TimetableNowBarService.renderActivity(testActivity);
-      this.startProgressTicker();
+
+      // 다음 상태 전환 시점이 1분보다 가까우면 그 시점에 바로 맞춰서 깨어남
+      let nextTransitionDelay: number | undefined;
+      const nowMs = Date.now();
+      if (testActivity.phase === 'UPCOMING' && testActivity.startTimestamp && testActivity.startTimestamp > nowMs) {
+        nextTransitionDelay = testActivity.startTimestamp - nowMs + 100;
+      } else if (testActivity.endTimestamp && testActivity.endTimestamp > nowMs) {
+        nextTransitionDelay = testActivity.endTimestamp - nowMs + 100;
+      }
+
+      this.startProgressTicker(nextTransitionDelay);
       return testActivity;
     }
 
