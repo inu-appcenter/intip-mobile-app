@@ -6,7 +6,7 @@ import notifee, {
   AndroidVisibility,
 } from '@notifee/react-native';
 
-export const LMS_DEADLINE_CHANNEL_ID = 'lms_deadline_nowbar';
+export const LMS_DEADLINE_CHANNEL_ID = 'live_update_nowbar';
 export const LMS_DEADLINE_NOTIFICATION_ID = 'lms_deadline_ongoing';
 
 export interface LmsUrgentItem {
@@ -26,10 +26,13 @@ export const LmsOngoingService = {
   async ensureChannel(): Promise<void> {
     if (Platform.OS !== 'android') return;
     try {
+      // 구 채널 정리
+      await notifee.deleteChannel('lms_deadline_nowbar').catch(() => {});
+
       await notifee.createChannel({
         id: LMS_DEADLINE_CHANNEL_ID,
-        name: 'LMS 마감 임박 알림 (나우 바/잠금화면)',
-        description: '당일 마감 임박 과제 및 강의 진도 실시간 카운트다운',
+        name: '실시간 알림 (나우 바)',
+        description: '실시간 현황 및 진행 상황 (시간표, 도서관, LMS 등)',
         importance: AndroidImportance.DEFAULT,
         visibility: AndroidVisibility.PUBLIC,
         sound: undefined,

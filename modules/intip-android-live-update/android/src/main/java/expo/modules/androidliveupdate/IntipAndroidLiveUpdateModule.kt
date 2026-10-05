@@ -50,8 +50,8 @@ class IntipAndroidLiveUpdateModule : Module() {
     Function("startOrUpdateLiveUpdate") { options: Map<String, Any?> ->
       try {
         val id = (options["id"] as? Number)?.toInt() ?: 1001
-        val channelId = options["channelId"] as? String ?: "timetable_nowbar_v3"
-        val channelName = options["channelName"] as? String ?: "실시간 시간표 (나우 바)"
+        val channelId = options["channelId"] as? String ?: "live_update_nowbar"
+        val channelName = options["channelName"] as? String ?: "실시간 알림 (나우 바)"
         val title = options["title"] as? String ?: ""
         val text = options["text"] as? String ?: ""
         val shortCriticalText = (options["shortCriticalText"] as? String)?.take(7)
