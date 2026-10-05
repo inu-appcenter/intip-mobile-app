@@ -169,7 +169,7 @@ export const TimetableNowBarService = {
     const upcomingRemainingText =
       upcomingRemainingMinutes <= 0 || (remainingUpcomingMs > 0 && remainingUpcomingMs <= 30 * 1000)
         ? '곧 시작'
-        : `${upcomingRemainingMinutes}분 남음`;
+        : `${upcomingRemainingMinutes}분 전`;
 
     // 수업 중 남은 시간(분) 계산
     let classRemainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);

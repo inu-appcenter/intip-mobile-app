@@ -357,7 +357,7 @@ class IntipAndroidLiveUpdateModule : Module() {
 
       val remainingMs = maxOf(0L, startMs - now)
       val remainingMinutes = kotlin.math.ceil(remainingMs / 60000.0).toInt()
-      val remainingText = if (remainingMinutes <= 0 || remainingMs <= 30_000L) "곧 시작" else "${remainingMinutes}분 남음"
+      val remainingText = if (remainingMinutes <= 0 || remainingMs <= 30_000L) "곧 시작" else "${remainingMinutes}분 전"
 
       val totalLeadMs = maxOf(60_000L, session.leadTimeMinutes * 60_000L)
       val elapsedLeadMs = maxOf(0L, totalLeadMs - remainingMs)
