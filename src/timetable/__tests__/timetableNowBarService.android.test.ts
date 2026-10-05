@@ -93,8 +93,7 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
 
       expect(mockLiveUpdate.startOrUpdateLiveUpdate).toHaveBeenCalledTimes(1);
       const call = mockLiveUpdate.startOrUpdateLiveUpdate.mock.calls[0][0] as any;
-      expect(call.title).toBe('수업 중');
-      expect(call.text).toContain('데이터베이스');
+      expect(call.title).toBe('[수업 중] 데이터베이스');
       expect(call.text).toContain('자연대 101호');
       expect(call.shortCriticalText).toBe('수업 중');
       expect(call.showChronometer).toBe(false);

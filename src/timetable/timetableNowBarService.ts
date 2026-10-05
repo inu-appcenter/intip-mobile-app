@@ -138,14 +138,8 @@ export const TimetableNowBarService = {
     const locationAndProf = `${locationText}${profText}`;
     const timeRange = formatTimeRange(state.startTimestamp, state.endTimestamp);
 
-    // [수업 전 본문]: 강의실/교수명 + 아랫줄에 수업 시간대 (예: 09:00 ~ 10:15)
-    const upcomingBody = timeRange ? `${locationAndProf}\n${timeRange}` : locationAndProf;
-
-    // [수업 중 본문]: 나우바가 접혀있을 때 깔끔하게 '수업 중'만 노출되도록 제목을 '수업 중'으로 두고,
-    // 펼쳐진 카드에 과목명, 강의실/교수명, 수업 시간대(09:00 ~ 10:15)를 순서대로 배치
-    const inClassBodyLines = [courseTitle, locationAndProf];
-    if (timeRange) inClassBodyLines.push(timeRange);
-    const inClassBody = inClassBodyLines.join('\n');
+    // [카드 본문]: 강의실/교수명 + 아랫줄에 수업 시간대 (스타일 A: 예: 09:00 ~ 10:15)
+    const cardBody = timeRange ? `${locationAndProf}\n${timeRange}` : locationAndProf;
 
     const durationMinutes =
       state.durationMinutes ||
@@ -181,7 +175,7 @@ export const TimetableNowBarService = {
             channelId: TIMETABLE_CHANNEL_ID,
             channelName: '실시간 시간표 (나우 바)',
             title: `[다음 수업] ${courseTitle}`,
-            text: upcomingBody,
+            text: cardBody,
             shortCriticalText: '곧 시작',
             targetTimestamp: targetTimestamp || undefined,
             showChronometer: true,
@@ -193,7 +187,8 @@ export const TimetableNowBarService = {
           return;
         }
 
-        // [수업 중]: 접혀있을 때 깔끔하게 '수업 중'만 노출 + 오직 해당 수업 100%만을 위한 단일 진행 바
+        // [수업 중]: 접혀있을 때는 shortCriticalText('수업 중')로 표시되고,
+        // 펼쳤을 때는 제목에 '[수업 중] 과목명'으로 표시
         const progressPercent = Math.min(
           100,
           Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100))
@@ -203,8 +198,8 @@ export const TimetableNowBarService = {
           id: TIMETABLE_NOTIFICATION_INT_ID,
           channelId: TIMETABLE_CHANNEL_ID,
           channelName: '실시간 시간표 (나우 바)',
-          title: '수업 중',
-          text: inClassBody,
+          title: `[수업 중] ${courseTitle}`,
+          text: cardBody,
           shortCriticalText: '수업 중',
           progress: progressPercent,
           // 오직 이 수업만을 나타내는 100% 단일 진행 바 (0% ~ 100% 매끄럽게 차오름)
@@ -223,9 +218,9 @@ export const TimetableNowBarService = {
       await this.ensureChannel();
       await notifee.displayNotification({
         id: TIMETABLE_ONGOING_NOTIFICATION_ID,
-        title: isUpcoming ? courseTitle : '수업 중',
-        subtitle: isUpcoming ? '다음 수업' : courseTitle,
-        body: isUpcoming ? upcomingBody : inClassBody,
+        title: isUpcoming ? courseTitle : `[수업 중] ${courseTitle}`,
+        subtitle: isUpcoming ? '다음 수업' : '수업 중',
+        body: cardBody,
         data: {
           type: 'timetable_nowbar',
           path: '/timetable',
@@ -244,7 +239,7 @@ export const TimetableNowBarService = {
           visibility: AndroidVisibility.PUBLIC,
           style: {
             type: AndroidStyle.BIGTEXT,
-            text: isUpcoming ? upcomingBody : inClassBody,
+            text: cardBody,
           },
           showChronometer: !!targetTimestamp,
           chronometerDirection: 'down',

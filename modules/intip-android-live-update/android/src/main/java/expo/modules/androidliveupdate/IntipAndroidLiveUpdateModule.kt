@@ -106,6 +106,14 @@ class IntipAndroidLiveUpdateModule : Module() {
         // 3. Status Bar Chip 및 Now Bar 캡슐용 7자 이내 핵심 상태 텍스트
         if (!shortCriticalText.isNullOrEmpty()) {
           applyShortCriticalText(builder, shortCriticalText)
+          builder.setSubText(shortCriticalText)
+          val extras = android.os.Bundle().apply {
+            putCharSequence("android.shortCriticalText", shortCriticalText)
+            putString("android.shortCriticalText", shortCriticalText)
+            putCharSequence("com.samsung.android.shortText", shortCriticalText)
+            putCharSequence("com.samsung.android.extra.ONGOING_TEXT", shortCriticalText)
+          }
+          builder.addExtras(extras)
         }
 
         // 4. Android 16 setRequestPromotedOngoing(true) 적용
@@ -242,11 +250,19 @@ class IntipAndroidLiveUpdateModule : Module() {
   }
 
   private fun applyShortCriticalText(builder: Notification.Builder, text: String) {
+    var applied = false
     try {
       val method = Notification.Builder::class.java.getMethod("setShortCriticalText", CharSequence::class.java)
       method.invoke(builder, text)
-    } catch (e: Exception) {
-      Log.d(TAG, "setShortCriticalText not available on this API level")
+      applied = true
+    } catch (_: Exception) {}
+
+    if (!applied) {
+      try {
+        val method = Notification.Builder::class.java.getMethod("setShortCriticalText", String::class.java)
+        method.invoke(builder, text)
+        applied = true
+      } catch (_: Exception) {}
     }
   }
 
