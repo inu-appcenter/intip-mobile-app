@@ -317,16 +317,20 @@ export const TimetableScheduler = {
         timestamp: targetTimestamp,
       };
 
-      // silent trigger notification: 도래 시 백그라운드 이벤트에서 syncSchedule 호출
+      // silent trigger notification: 도래 시 백그라운드 이벤트에서 syncSchedule 호출 후 즉시 자동 소멸
       await notifee.createTriggerNotification(
         {
           id: TIMETABLE_TRIGGER_NOTIFICATION_ID,
-          title: '시간표 상태 갱신',
+          title: '',
           body: '',
           android: {
-            channelId: TIMETABLE_CHANNEL_ID,
+            channelId: 'silent_background_trigger',
             importance: AndroidImportance.MIN,
             autoCancel: true,
+            sound: undefined,
+            vibrationPattern: [],
+            lights: [],
+            badgeCount: 0,
           },
         },
         trigger

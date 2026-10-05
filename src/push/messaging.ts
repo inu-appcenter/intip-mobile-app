@@ -87,6 +87,15 @@ async function ensureAndroidChannels(): Promise<void> {
     // what "이 채팅방 알림 끄기" means for a per-room mute.
     importance: AndroidImportance.LOW,
   });
+  await notifee.createChannel({
+    id: 'silent_background_trigger',
+    name: '시스템 백그라운드 동기화',
+    importance: AndroidImportance.MIN,
+    sound: undefined,
+    vibration: false,
+    lights: false,
+    badge: false,
+  });
 }
 
 /** Ask for notification permission (alert + badge + sound) and register APNs. */
@@ -472,6 +481,8 @@ export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () =
       type === EventType.DELIVERED &&
       detail.notification?.id === TIMETABLE_TRIGGER_NOTIFICATION_ID
     ) {
+      // 즉시 트레이에서 제거하여 사용자에게 배너/트레이가 노출되지 않도록 함
+      void notifee.cancelNotification(TIMETABLE_TRIGGER_NOTIFICATION_ID).catch(() => {});
       void TimetableScheduler.syncSchedule();
     }
   });
@@ -657,6 +668,8 @@ export function registerBackgroundHandlers(): void {
       type === EventType.DELIVERED &&
       detail.notification?.id === TIMETABLE_TRIGGER_NOTIFICATION_ID
     ) {
+      // 즉시 트레이에서 제거하여 사용자에게 배너/트레이가 노출되지 않도록 함
+      await notifee.cancelNotification(TIMETABLE_TRIGGER_NOTIFICATION_ID).catch(() => {});
       await TimetableScheduler.syncSchedule();
       return;
     }
