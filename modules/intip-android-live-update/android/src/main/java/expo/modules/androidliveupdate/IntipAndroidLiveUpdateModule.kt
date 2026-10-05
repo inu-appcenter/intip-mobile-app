@@ -106,7 +106,8 @@ class IntipAndroidLiveUpdateModule : Module() {
         // 3. Status Bar Chip 및 Now Bar 캡슐용 7자 이내 핵심 상태 텍스트
         if (!shortCriticalText.isNullOrEmpty()) {
           applyShortCriticalText(builder, shortCriticalText)
-          builder.setSubText(shortCriticalText)
+          // 주의: builder.setSubText()를 호출하면 펼쳐진 알림 카드의 제목 밑에 텍스트가 표시되므로,
+          // 카드를 깔끔하게 유지하기 위해 subText는 지정하지 않고 칩/캡슐 전용 extras만 전달합니다.
           val extras = android.os.Bundle().apply {
             putCharSequence("android.shortCriticalText", shortCriticalText)
             putString("android.shortCriticalText", shortCriticalText)

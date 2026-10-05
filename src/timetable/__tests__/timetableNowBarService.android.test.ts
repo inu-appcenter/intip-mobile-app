@@ -65,8 +65,8 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       const call = mockLiveUpdate.startOrUpdateLiveUpdate.mock.calls[0][0] as any;
       expect(call.title).toBe('[다음 수업] 알고리즘');
       expect(call.text).toContain('정보기술대학 208호 · 김교수');
-      expect(call.shortCriticalText).toBe('곧 시작');
-      expect(call.showChronometer).toBe(true);
+      expect(call.shortCriticalText).toBe('수업 전');
+      expect(call.showChronometer).toBe(false);
       expect(call.targetTimestamp).toBe(state.startTimestamp);
       expect(typeof call.progress).toBe('number');
       expect(call.progress).toBeGreaterThanOrEqual(0);
