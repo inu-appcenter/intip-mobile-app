@@ -53,7 +53,7 @@ export const TimetableNowBarService = {
       await notifee.createChannel({
         id: TIMETABLE_CHANNEL_ID,
         name: '실시간 알림 (나우 바)',
-        description: '실시간 현황 및 진행 상황 (시간표, 타이머 등)',
+        description: '실시간 현황 및 진행 상황 (시간표, 도서관, LMS 등)',
         importance: AndroidImportance.DEFAULT, // DEFAULT 중요도여야 잠금화면 실시간 카드 및 상단 상태표시줄 칩으로 승격됨
         visibility: AndroidVisibility.PUBLIC, // 잠금화면 및 AOD에 내용 전체 표시
         vibration: true,
