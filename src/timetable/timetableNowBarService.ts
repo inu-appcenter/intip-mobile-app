@@ -138,9 +138,6 @@ export const TimetableNowBarService = {
     const locationAndProf = `${locationText}${profText}`;
     const timeRange = formatTimeRange(state.startTimestamp, state.endTimestamp);
 
-    // [카드 본문]: 강의실/교수명 + 아랫줄에 수업 시간대 (스타일 A: 예: 09:00 ~ 10:15)
-    const cardBody = timeRange ? `${locationAndProf}\n${timeRange}` : locationAndProf;
-
     const durationMinutes =
       state.durationMinutes ||
       (state.endTimestamp && state.startTimestamp
@@ -174,17 +171,34 @@ export const TimetableNowBarService = {
         ? '곧 시작'
         : `${upcomingRemainingMinutes}분 남음`;
 
+    // 수업 중 남은 시간(분) 계산
+    let classRemainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);
+    if (state.endTimestamp) {
+      const remainingEndMs = Math.max(0, state.endTimestamp - Date.now());
+      classRemainingMinutes = Math.max(0, Math.ceil(remainingEndMs / (60 * 1000)));
+    }
+    const ongoingRemainingText =
+      classRemainingMinutes <= 0 ? '곧 종료' : `${classRemainingMinutes}분 남음`;
+
+    // 현재 상태에 맞는 남은 시간 텍스트 (수업 전: 시작까지 N분 남음, 수업 중: 종료까지 N분 남음)
+    const currentRemainingText = isUpcoming ? upcomingRemainingText : ongoingRemainingText;
+
+    // [카드 본문]:
+    // subText(안드로이드 부제)는 삼성 One UI 잠금화면 테마 버그로 검은색(dark gray)으로 렌더링되므로,
+    // 본문(contentText) 첫 줄에 남은 시간을 넣어 선명한 고대비 순백색(White)으로 렌더링합니다.
+    const details = timeRange ? `${locationAndProf}\n${timeRange}` : locationAndProf;
+    const cardBody = `${currentRemainingText}\n${details}`;
+
     // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
       try {
         if (isUpcoming) {
-          // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 및 펼친 카드 subtitle 자리에 실시간 남은 시간(예: "14분 남음") 표시
+          // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 및 펼친 카드 본문에 실시간 남은 시간(예: "14분 남음") 표시
           IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
             id: TIMETABLE_NOTIFICATION_INT_ID,
             channelId: TIMETABLE_CHANNEL_ID,
             channelName: '실시간 시간표 (나우 바)',
             title: `[다음 수업] ${courseTitle}`,
-            subText: upcomingRemainingText,
             text: cardBody,
             shortCriticalText: upcomingRemainingText,
             targetTimestamp: targetTimestamp || undefined,
@@ -198,19 +212,7 @@ export const TimetableNowBarService = {
           return;
         }
 
-        // 수업 중 남은 시간(분) 계산
-        let classRemainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);
-        if (state.endTimestamp) {
-          const remainingEndMs = Math.max(0, state.endTimestamp - Date.now());
-          classRemainingMinutes = Math.max(0, Math.ceil(remainingEndMs / (60 * 1000)));
-        }
-
-        const ongoingRemainingText =
-          classRemainingMinutes <= 0
-            ? '곧 종료'
-            : `${classRemainingMinutes}분 남음`;
-
-        // [수업 중]: 잠금화면 나우바 및 펼친 카드 subtitle 자리에 수업 종료까지 남은 시간(예: "45분 남음") 표시
+        // [수업 중]: 잠금화면 나우바 및 펼친 카드 본문에 수업 종료까지 남은 시간(예: "45분 남음") 표시
         const progressPercent = Math.min(
           100,
           Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100))
@@ -221,7 +223,6 @@ export const TimetableNowBarService = {
           channelId: TIMETABLE_CHANNEL_ID,
           channelName: '실시간 시간표 (나우 바)',
           title: `[수업 중] ${courseTitle}`,
-          subText: ongoingRemainingText,
           text: cardBody,
           shortCriticalText: ongoingRemainingText,
           progress: progressPercent,
