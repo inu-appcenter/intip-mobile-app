@@ -151,25 +151,33 @@ export const TimetableNowBarService = {
       ? Math.max(0, Math.round((Date.now() - state.startTimestamp) / (60 * 1000)))
       : (state.elapsedMinutes || 0);
 
-    // 수업 전 진행률 계산 (수업 전 대기 시간 100% 기준)
+    // 수업 전 진행률 및 남은 시간(분) 계산 (수업 전 대기 시간 100% 기준)
     const totalLeadMinutes = Math.max(leadTimeMinutes, 1);
     let upcomingProgress = 0;
+    let upcomingRemainingMinutes = totalLeadMinutes;
     if (isUpcoming) {
       if (state.elapsedMinutes !== undefined && state.elapsedMinutes > 0) {
         upcomingProgress = Math.min(100, Math.max(0, Math.round((state.elapsedMinutes / totalLeadMinutes) * 100)));
+        upcomingRemainingMinutes = Math.max(0, totalLeadMinutes - state.elapsedMinutes);
       } else if (state.startTimestamp) {
         const remainingMs = Math.max(0, state.startTimestamp - Date.now());
         const totalLeadMs = Math.max(totalLeadMinutes * 60 * 1000, remainingMs);
         const elapsedLeadMs = Math.max(0, totalLeadMs - remainingMs);
         upcomingProgress = Math.min(100, Math.max(0, Math.round((elapsedLeadMs / totalLeadMs) * 100)));
+        upcomingRemainingMinutes = Math.ceil(remainingMs / (60 * 1000));
       }
     }
+
+    const upcomingShortText =
+      upcomingRemainingMinutes <= 0
+        ? '곧 시작'
+        : `${upcomingRemainingMinutes}분 남음`;
 
     // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
       try {
         if (isUpcoming) {
-          // [수업 전]: 잠금화면 하단 나우바 캡슐에는 실시간 카운트다운 타이머가 표시되고,
+          // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 text 부분에 실시간 남은 시간(예: "14분 남음") 표시,
           // 펼쳐진 카드에서는 제목 옆에 타이머가 붙지 않도록(showWhen: false) 깔끔하게 표기
           IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
             id: TIMETABLE_NOTIFICATION_INT_ID,
@@ -177,8 +185,9 @@ export const TimetableNowBarService = {
             channelName: '실시간 시간표 (나우 바)',
             title: `[다음 수업] ${courseTitle}`,
             text: cardBody,
+            shortCriticalText: upcomingShortText,
             targetTimestamp: targetTimestamp || undefined,
-            showChronometer: true,
+            showChronometer: false,
             showWhen: false,
             progress: upcomingProgress,
             // 수업 전 대기 구간 전용 100% 단일 세그먼트 (끊김 없는 매끄러운 바)
