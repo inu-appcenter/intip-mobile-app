@@ -329,7 +329,6 @@ export const TimetableScheduler = {
             autoCancel: true,
             sound: undefined,
             vibrationPattern: [],
-            lights: [],
             badgeCount: 0,
           },
         },
