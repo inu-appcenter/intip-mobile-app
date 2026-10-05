@@ -8,23 +8,46 @@ import notifee, {
 import { TimetableActivityState } from './types';
 import { TimetableStorage } from './timetableStorage';
 import { TimetableLiveActivity, TimetableLiveActivityProps } from '../widgets/TimetableLiveActivity';
+import { IntipAndroidLiveUpdate } from '../../modules/intip-android-live-update';
 
-export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar_v2';
+export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar_v3';
 export const TIMETABLE_ONGOING_NOTIFICATION_ID = 'timetable_ongoing_activity';
+export const TIMETABLE_NOTIFICATION_INT_ID = 1001;
 
 // 마지막으로 Live Activity에 반영한 props. AppState 전환마다 syncSchedule이 돌기 때문에
 // 같은 내용이면 업데이트를 건너뛴다 (HIG: 새 내용이 있을 때만 업데이트).
 let lastLiveActivityPropsJson: string | null = null;
 
+type CancelListener = () => void;
+const cancelListeners: Set<CancelListener> = new Set();
+
+function formatTimeRange(startTimestamp?: number, endTimestamp?: number): string {
+  if (!startTimestamp || !endTimestamp) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const startD = new Date(startTimestamp);
+  const endD = new Date(endTimestamp);
+  return `${pad(startD.getHours())}:${pad(startD.getMinutes())} ~ ${pad(endD.getHours())}:${pad(endD.getMinutes())}`;
+}
+
 export const TimetableNowBarService = {
   /**
-   * 알림 채널 생성 (Android 전용: 소리/진동 없이 잠금화면 및 상태바에 당당히 상주하도록 DEFAULT 중요도 적용)
+   * 알림 취소 이벤트 리스너 등록
+   */
+  onCancel(listener: CancelListener): () => void {
+    cancelListeners.add(listener);
+    return () => {
+      cancelListeners.delete(listener);
+    };
+  },
+  /**
+   * 알림 채널 생성 (휴대폰 소리/진동/무음 모드에 맞추어 최초 1회 알림 후, 갱신 시에는 무음 유지)
    */
   async ensureChannel(): Promise<void> {
     if (Platform.OS !== 'android') return;
     try {
       // 구 채널 정리
       await notifee.deleteChannel('timetable_nowbar').catch(() => {});
+      await notifee.deleteChannel('timetable_nowbar_v2').catch(() => {});
 
       await notifee.createChannel({
         id: TIMETABLE_CHANNEL_ID,
@@ -32,8 +55,7 @@ export const TimetableNowBarService = {
         description: '수업 전후 및 진행 중 실시간 시간표 및 남은 시간 표시',
         importance: AndroidImportance.DEFAULT, // DEFAULT 중요도여야 잠금화면 실시간 카드 및 상단 상태표시줄 칩으로 승격됨
         visibility: AndroidVisibility.PUBLIC, // 잠금화면 및 AOD에 내용 전체 표시
-        sound: undefined,
-        vibration: false,
+        vibration: true,
         lights: false,
         badge: false,
       });
@@ -68,12 +90,13 @@ export const TimetableNowBarService = {
 
     const isUpcoming = state.phase === 'UPCOMING';
     const targetTimestamp = isUpcoming ? state.startTimestamp : state.endTimestamp;
+    const settings = await TimetableStorage.getSettings().catch(() => ({ leadTimeMinutes: 15 }));
+    const leadTimeMinutes = settings?.leadTimeMinutes || 15;
 
     // --- iOS: Dynamic Island & Live Activity (ActivityKit) ---
     if (Platform.OS === 'ios') {
       try {
         const startTimestamp = state.startTimestamp || Date.now();
-        const { leadTimeMinutes } = await TimetableStorage.getSettings();
         const liveProps: TimetableLiveActivityProps = {
           phase: state.phase,
           courseTitle: state.courseTitle || '강의',
@@ -109,12 +132,11 @@ export const TimetableNowBarService = {
     }
 
     // --- Android: Samsung Now Bar / Rich Ongoing Notification ---
-    const title = state.courseTitle || '강의';
-    const subtitle = isUpcoming ? '다음 수업' : '수업 중';
-
+    const courseTitle = state.courseTitle || '강의';
     const locationText = state.location || '강의실 미지정';
     const profText = state.professor ? ` · ${state.professor}` : '';
-    const body = `${locationText}${profText}`;
+    const locationAndProf = `${locationText}${profText}`;
+    const timeRange = formatTimeRange(state.startTimestamp, state.endTimestamp);
 
     const durationMinutes =
       state.durationMinutes ||
@@ -126,39 +148,168 @@ export const TimetableNowBarService = {
       ? Math.max(0, Math.round((Date.now() - state.startTimestamp) / (60 * 1000)))
       : (state.elapsedMinutes || 0);
 
+    // 수업 전 진행률 및 남은 시간(분) 계산 (수업 전 대기 시간 100% 기준)
+    const totalLeadMinutes = Math.max(leadTimeMinutes, 1);
+    let upcomingProgress = 0;
+    let upcomingRemainingMinutes = totalLeadMinutes;
+    if (isUpcoming) {
+      if (state.elapsedMinutes !== undefined && state.elapsedMinutes > 0) {
+        upcomingProgress = Math.min(100, Math.max(0, Math.round((state.elapsedMinutes / totalLeadMinutes) * 100)));
+        upcomingRemainingMinutes = Math.max(0, totalLeadMinutes - state.elapsedMinutes);
+      } else if (state.startTimestamp) {
+        const remainingMs = Math.max(0, state.startTimestamp - Date.now());
+        const totalLeadMs = Math.max(totalLeadMinutes * 60 * 1000, remainingMs);
+        const elapsedLeadMs = Math.max(0, totalLeadMs - remainingMs);
+        upcomingProgress = Math.min(100, Math.max(0, Math.round((elapsedLeadMs / totalLeadMs) * 100)));
+        upcomingRemainingMinutes = Math.ceil(remainingMs / (60 * 1000));
+      }
+    }
+
+    const remainingUpcomingMs = state.startTimestamp ? Math.max(0, state.startTimestamp - Date.now()) : 0;
+    const upcomingRemainingText =
+      upcomingRemainingMinutes <= 0 || (remainingUpcomingMs > 0 && remainingUpcomingMs <= 30 * 1000)
+        ? '곧 시작'
+        : `${upcomingRemainingMinutes}분 전`;
+
+    // 수업 중 남은 시간(분) 계산
+    let classRemainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);
+    if (state.endTimestamp) {
+      const remainingEndMs = Math.max(0, state.endTimestamp - Date.now());
+      classRemainingMinutes = Math.max(0, Math.ceil(remainingEndMs / (60 * 1000)));
+    }
+    const ongoingRemainingText =
+      classRemainingMinutes <= 0 ? '곧 종료' : `${classRemainingMinutes}분 남음`;
+
+    // 현재 상태에 맞는 남은 시간 텍스트 (수업 전: 시작까지 N분 남음, 수업 중: 종료까지 N분 남음)
+    const currentRemainingText = isUpcoming ? upcomingRemainingText : ongoingRemainingText;
+
+    // [카드 본문]:
+    // 안드로이드 ProgressStyle 알림 카드는 contentText를 최대 2줄만 노출합니다.
+    // 3줄을 넘길 경우 마지막 3번째 줄(시간대)이 잘리고 2번째 줄 끝에 '...' 말줄임표가 붙으므로,
+    // 1줄: 시간 정보(남은 시간 · 수업 시간대), 2줄: 장소/교수명(강의실 · 교수명) 2줄 완결형으로 구성합니다.
+    const timeText = timeRange ? ` · ${timeRange}` : '';
+    const line1 = `${currentRemainingText}${timeText}`;
+    const line2 = locationAndProf;
+    const cardBody = `${line1}\n${line2}`;
+
+    // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
+    if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
+      try {
+        const computedEndTimestamp =
+          state.endTimestamp ||
+          (state.startTimestamp ? state.startTimestamp + durationMinutes * 60 * 1000 : Date.now() + durationMinutes * 60 * 1000);
+
+        if (isUpcoming) {
+          // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 및 펼친 카드 본문에 실시간 남은 시간(예: "14분 전") 표시
+          IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
+            id: TIMETABLE_NOTIFICATION_INT_ID,
+            channelId: TIMETABLE_CHANNEL_ID,
+            channelName: '실시간 시간표 (나우 바)',
+            title: `[다음 수업] ${courseTitle}`,
+            courseTitle,
+            details: cardBody,
+            timeRange: timeRange || undefined,
+            locationAndProf: locationAndProf || undefined,
+            phase: 'UPCOMING',
+            startTimestamp: state.startTimestamp || undefined,
+            endTimestamp: computedEndTimestamp,
+            targetTimestamp: state.startTimestamp || targetTimestamp || undefined,
+            leadTimeMinutes: totalLeadMinutes,
+            durationMinutes,
+            text: cardBody,
+            shortCriticalText: upcomingRemainingText,
+            showChronometer: false,
+            showWhen: false,
+            progress: upcomingProgress,
+            // 수업 전 대기 구간 전용 100% 단일 세그먼트 (끊김 없는 매끄러운 바)
+            segments: [{ length: 100, color: '#5B8DEF' }],
+            ongoing: true,
+          });
+          return;
+        }
+
+        // [수업 중]: 잠금화면 나우바 및 펼친 카드 본문에 수업 종료까지 남은 시간(예: "45분 남음") 표시
+        const progressPercent = Math.min(
+          100,
+          Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100))
+        );
+
+        IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
+          id: TIMETABLE_NOTIFICATION_INT_ID,
+          channelId: TIMETABLE_CHANNEL_ID,
+          channelName: '실시간 시간표 (나우 바)',
+          title: `[수업 중] ${courseTitle}`,
+          courseTitle,
+          details: cardBody,
+          timeRange: timeRange || undefined,
+          locationAndProf: locationAndProf || undefined,
+          phase: 'ONGOING',
+          startTimestamp: state.startTimestamp || undefined,
+          endTimestamp: computedEndTimestamp,
+          targetTimestamp: computedEndTimestamp,
+          leadTimeMinutes: totalLeadMinutes,
+          durationMinutes,
+          text: cardBody,
+          shortCriticalText: ongoingRemainingText,
+          progress: progressPercent,
+          // 오직 이 수업만을 나타내는 100% 단일 진행 바 (0% ~ 100% 매끄럽게 차오름)
+          segments: [{ length: 100, color: '#043799' }],
+          showChronometer: false,
+          showWhen: false,
+          ongoing: true,
+        });
+        return;
+      } catch (e) {
+        console.warn('[TimetableNowBarService] Android LiveUpdate 실패, Notifee로 폴백:', e);
+      }
+    }
+
+    // --- Android 15 이하: 기존 Notifee Rich Ongoing Notification Fallback ---
     try {
+      let classRemainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);
+      if (state.endTimestamp) {
+        const remainingEndMs = Math.max(0, state.endTimestamp - Date.now());
+        classRemainingMinutes = Math.max(0, Math.ceil(remainingEndMs / (60 * 1000)));
+      }
+      const ongoingRemainingText =
+        classRemainingMinutes <= 0 ? '곧 종료' : `${classRemainingMinutes}분 남음`;
+
       await this.ensureChannel();
       await notifee.displayNotification({
         id: TIMETABLE_ONGOING_NOTIFICATION_ID,
-        title,
-        subtitle,
-        body,
+        title: isUpcoming ? courseTitle : `[수업 중] ${courseTitle}`,
+        subtitle: isUpcoming ? upcomingRemainingText : ongoingRemainingText,
+        body: cardBody,
         data: {
           type: 'timetable_nowbar',
           path: '/timetable',
           phase: state.phase,
           courseTitle: state.courseTitle || '',
           location: state.location || '',
-          'android.requestPromotedOngoing': 'true',
-          'com.samsung.android.support.ongoing_activity': 'true',
         },
         android: {
           channelId: TIMETABLE_CHANNEL_ID,
-          asForegroundService: true, // Android 16 / One UI 8 실시간 알림 섹션 고정 및 Now Bar 캡슐 승격 필수 속성
+          asForegroundService: true,
           category: isUpcoming ? AndroidCategory.EVENT : AndroidCategory.PROGRESS,
           importance: AndroidImportance.DEFAULT,
-          ongoing: true, // 사용자가 스와이프로 임의 종료 불가
+          ongoing: true,
           autoCancel: false,
           onlyAlertOnce: true,
           visibility: AndroidVisibility.PUBLIC,
           style: {
             type: AndroidStyle.BIGTEXT,
-            text: body,
+            text: cardBody,
           },
           showChronometer: !!targetTimestamp,
           chronometerDirection: 'down',
           timestamp: targetTimestamp,
-          progress: !isUpcoming && durationMinutes
+          progress: isUpcoming
+            ? {
+                max: 100,
+                current: upcomingProgress,
+                indeterminate: false,
+              }
+            : durationMinutes
             ? {
                 max: Math.max(1, durationMinutes),
                 current: Math.min(durationMinutes, elapsedMinutes),
@@ -184,9 +335,17 @@ export const TimetableNowBarService = {
   },
 
   /**
-   * Ongoing 알림 취소 및 제거 (iOS Dynamic Island 종료 & Android Foreground Service 종료 포함)
+   * Ongoing 알림 취소 및 제거 (iOS Dynamic Island 종료 & Android LiveUpdate/Notifee 종료 포함)
    */
   async cancel(): Promise<void> {
+    cancelListeners.forEach((listener) => {
+      try {
+        listener();
+      } catch (e) {
+        console.warn('[TimetableNowBarService] onCancel listener error:', e);
+      }
+    });
+
     try {
       if (Platform.OS === 'ios') {
         lastLiveActivityPropsJson = null;
@@ -200,6 +359,7 @@ export const TimetableNowBarService = {
       }
 
       if (Platform.OS === 'android') {
+        IntipAndroidLiveUpdate.stopLiveUpdate(TIMETABLE_NOTIFICATION_INT_ID);
         await notifee.stopForegroundService().catch(() => {});
       }
       await notifee.cancelNotification(TIMETABLE_ONGOING_NOTIFICATION_ID);

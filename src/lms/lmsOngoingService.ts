@@ -75,8 +75,6 @@ export const LmsOngoingService = {
           courseId: String(item.courseId || ''),
           cmid: String(item.cmid || ''),
           path: '/services/lms',
-          'android.requestPromotedOngoing': 'true',
-          'com.samsung.android.support.ongoing_activity': 'true',
         },
         android: {
           channelId: LMS_DEADLINE_CHANNEL_ID,

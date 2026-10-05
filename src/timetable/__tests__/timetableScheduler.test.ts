@@ -5,6 +5,7 @@ import {
   getMeetingsForDate,
   getCurrentActivityState,
   getNextTransitionTimestamp,
+  TimetableScheduler,
 } from '../timetableScheduler';
 import { TimetableCourseItem } from '../types';
 
@@ -201,6 +202,25 @@ describe('timetableScheduler unit tests', () => {
       now.setHours(16, 0, 0, 0);
       const nextMs = getNextTransitionTimestamp(sampleCourses, now, 15);
       expect(nextMs).toBeNull();
+    });
+  });
+
+  describe('progressTicker lifecycle', () => {
+    afterEach(() => {
+      TimetableScheduler.stopProgressTicker();
+      jest.useRealTimers();
+    });
+
+    it('starts and stops progress ticker cleanly without errors', async () => {
+      jest.useFakeTimers();
+      const syncSpy = jest.spyOn(TimetableScheduler, 'syncSchedule').mockResolvedValue({ phase: 'NONE' });
+
+      TimetableScheduler.startProgressTicker();
+      jest.advanceTimersByTime(65 * 1000);
+      expect(syncSpy).toHaveBeenCalled();
+
+      TimetableScheduler.stopProgressTicker();
+      syncSpy.mockRestore();
     });
   });
 });

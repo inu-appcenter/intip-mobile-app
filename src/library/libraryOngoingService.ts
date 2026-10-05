@@ -99,8 +99,6 @@ export const LibraryOngoingService = {
           roomId: String(targetRoomId),
           seatNo: String(job.seatNo || ''),
           path: libraryPath,
-          'android.requestPromotedOngoing': 'true',
-          'com.samsung.android.support.ongoing_activity': 'true',
         },
         android: {
           channelId: LIBRARY_WATCH_CHANNEL_ID,
@@ -200,8 +198,6 @@ export const LibraryOngoingService = {
           roomId: String(session.roomId || ''),
           roomName: session.roomName,
           path: '/services/library?tab=my',
-          'android.requestPromotedOngoing': 'true',
-          'com.samsung.android.support.ongoing_activity': 'true',
         },
         android: {
           channelId: LIBRARY_SEAT_SESSION_CHANNEL_ID,
