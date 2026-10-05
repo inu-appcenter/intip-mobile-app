@@ -85,3 +85,10 @@ jest.mock('expo-secure-store', () => ({
 // touches the push/agent graph loads react-native-webview — whose native
 // module lookup (`TurboModuleRegistry.getEnforcing`) throws under jest.
 jest.mock('react-native-webview', () => ({ WebView: 'WebView' }));
+
+// `src/webview/constants.ts` reads the app version for the User-Agent suffix;
+// expo-constants' native lookup (`NativeModules.EXDevLauncher`) throws under jest.
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: { expoConfig: { version: '0.0.0-test' } },
+}));
