@@ -73,8 +73,8 @@ object LiveUpdateManager {
 
     return LiveUpdateSession(
       id = id,
-      channelId = prefs.getString("channelId", "timetable_nowbar_v3") ?: "timetable_nowbar_v3",
-      channelName = prefs.getString("channelName", "실시간 시간표 (나우 바)") ?: "실시간 시간표 (나우 바)",
+      channelId = prefs.getString("channelId", "live_update_nowbar") ?: "live_update_nowbar",
+      channelName = prefs.getString("channelName", "실시간 알림 (나우 바)") ?: "실시간 알림 (나우 바)",
       title = prefs.getString("title", "") ?: "",
       courseTitle = prefs.getString("courseTitle", null),
       details = prefs.getString("details", null),
@@ -395,6 +395,7 @@ object LiveUpdateManager {
       try {
         notificationManager.deleteNotificationChannel("timetable_nowbar")
         notificationManager.deleteNotificationChannel("timetable_nowbar_v2")
+        notificationManager.deleteNotificationChannel("timetable_nowbar_v3")
       } catch (_: Exception) {}
 
       val existing = notificationManager.getNotificationChannel(channelId)
