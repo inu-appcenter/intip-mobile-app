@@ -131,29 +131,40 @@ export const TimetableNowBarService = {
     // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
       try {
-        const progressPercent = isUpcoming
-          ? 0
-          : Math.min(100, Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100)));
+        if (isUpcoming) {
+          // [수업 전]: 불필요한 빈 진행 바 없이, 카운트다운 타이머(시작 시간)와 강의실 위치에 온전히 집중
+          IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
+            id: TIMETABLE_NOTIFICATION_INT_ID,
+            channelId: TIMETABLE_CHANNEL_ID,
+            channelName: '실시간 시간표 (나우 바)',
+            title: `[다음 수업] ${title}`,
+            text: body,
+            shortCriticalText: '곧 시작',
+            targetTimestamp: targetTimestamp || undefined,
+            showChronometer: true,
+            // progress와 segments를 비워두어 빈 진행 바 노출 없이 카운트다운 타이머에 집중
+            ongoing: true,
+          });
+          return;
+        }
 
-        // 수업 전: 타이머 카운트다운 우선
-        // 수업 중: 타이머를 끄고 "수업 중" 텍스트를 상태 칩/캡슐에 직접 노출
-        const showChronometer = isUpcoming;
-        const shortCriticalText = isUpcoming ? '곧 시작' : '수업 중';
+        // [수업 중]: 오직 해당 수업 100%만을 위한 단일 진행 바 + '수업 중' 상태 캡슐
+        const progressPercent = Math.min(
+          100,
+          Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100))
+        );
 
         IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
           id: TIMETABLE_NOTIFICATION_INT_ID,
           channelId: TIMETABLE_CHANNEL_ID,
           channelName: '실시간 시간표 (나우 바)',
-          title,
+          title: `[수업 중] ${title}`,
           text: body,
-          shortCriticalText,
+          shortCriticalText: '수업 중',
           progress: progressPercent,
-          // 단일 세그먼트로 구성하여 초반에 어색하게 끊겨 보이던 갭(divider) 제거
-          segments: [
-            { length: 100, color: isUpcoming ? '#5B8DEF' : '#043799' },
-          ],
-          targetTimestamp: isUpcoming ? targetTimestamp : undefined,
-          showChronometer,
+          // 오직 이 수업만을 나타내는 100% 단일 진행 바 (0% ~ 100% 매끄럽게 차오름)
+          segments: [{ length: 100, color: '#043799' }],
+          showChronometer: false,
           ongoing: true,
         });
         return;

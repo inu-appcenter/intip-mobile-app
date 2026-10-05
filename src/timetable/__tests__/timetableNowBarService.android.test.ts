@@ -48,7 +48,7 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       mockLiveUpdate.isSupported.mockReturnValue(true);
     });
 
-    it('renders LiveUpdate with "곧 시작" Status Chip for UPCOMING phase', async () => {
+    it('renders LiveUpdate with timer and without progress bar for UPCOMING phase', async () => {
       const state: TimetableActivityState = {
         phase: 'UPCOMING',
         courseTitle: '알고리즘',
@@ -62,25 +62,20 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       await TimetableNowBarService.renderActivity(state);
 
       expect(mockLiveUpdate.startOrUpdateLiveUpdate).toHaveBeenCalledTimes(1);
-      expect(mockLiveUpdate.startOrUpdateLiveUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: TIMETABLE_NOTIFICATION_INT_ID,
-          title: '알고리즘',
-          text: '정보기술대학 208호 · 김교수',
-          shortCriticalText: '곧 시작',
-          showChronometer: true,
-          progress: 0,
-          segments: [
-            { length: 100, color: '#5B8DEF' },
-          ],
-          ongoing: true,
-        }),
-      );
+      const call = mockLiveUpdate.startOrUpdateLiveUpdate.mock.calls[0][0] as any;
+      expect(call.title).toBe('[다음 수업] 알고리즘');
+      expect(call.text).toBe('정보기술대학 208호 · 김교수');
+      expect(call.shortCriticalText).toBe('곧 시작');
+      expect(call.showChronometer).toBe(true);
+      expect(call.targetTimestamp).toBe(state.startTimestamp);
+      expect(call.progress).toBeUndefined();
+      expect(call.segments).toBeUndefined();
+      expect(call.ongoing).toBe(true);
       // Notifee는 폴백이므로 호출되지 않아야 함
       expect(mockNotifee.displayNotification).not.toHaveBeenCalled();
     });
 
-    it('renders LiveUpdate with "수업 중" Status Chip and elapsed progress for IN_CLASS phase', async () => {
+    it('renders LiveUpdate with "수업 중" Status Chip and independent class progress for IN_CLASS phase', async () => {
       const now = Date.now();
       const state: TimetableActivityState = {
         phase: 'IN_CLASS',
@@ -96,7 +91,7 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
 
       expect(mockLiveUpdate.startOrUpdateLiveUpdate).toHaveBeenCalledTimes(1);
       const call = mockLiveUpdate.startOrUpdateLiveUpdate.mock.calls[0][0] as any;
-      expect(call.title).toBe('데이터베이스');
+      expect(call.title).toBe('[수업 중] 데이터베이스');
       expect(call.shortCriticalText).toBe('수업 중');
       expect(call.showChronometer).toBe(false);
       expect(call.targetTimestamp).toBeUndefined();

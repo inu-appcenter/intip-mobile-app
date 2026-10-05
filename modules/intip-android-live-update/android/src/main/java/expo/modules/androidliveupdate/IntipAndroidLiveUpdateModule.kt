@@ -131,11 +131,15 @@ class IntipAndroidLiveUpdateModule : Module() {
           builder.setShowWhen(false)
         }
 
-        // 6. Notification.ProgressStyle 적용
+        // 6. Notification.ProgressStyle 적용 (진행률이 있는 경우에만 ProgressStyle 적용)
         val styled = applyProgressStyle(builder, progress, segmentsRaw)
-        if (!styled && progress != null) {
-          // ProgressStyle 실패 시 기본 프로그레스바 설정
-          builder.setProgress(100, progress.coerceIn(0, 100), false)
+        if (!styled) {
+          if (progress != null) {
+            builder.setProgress(100, progress.coerceIn(0, 100), false)
+          } else {
+            // 진행률이 없을 때(수업 전 등): 진행 바 없이 타이머/텍스트에 집중하는 BigTextStyle 적용 (Android 16 승격 허용 스타일)
+            builder.setStyle(Notification.BigTextStyle().bigText(text))
+          }
         }
 
         // 7. 알림 빌드 및 승격 조건 검증
@@ -267,6 +271,9 @@ class IntipAndroidLiveUpdateModule : Module() {
     progress: Int?,
     segmentsRaw: List<Map<String, Any?>>?
   ): Boolean {
+    if (progress == null && segmentsRaw.isNullOrEmpty()) {
+      return false
+    }
     try {
       val progressStyleClass = Class.forName("android.app.Notification\$ProgressStyle")
       val progressStyle = progressStyleClass.getConstructor().newInstance()
