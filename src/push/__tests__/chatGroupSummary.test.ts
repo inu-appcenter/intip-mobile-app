@@ -72,7 +72,7 @@ jest.mock('../../timetable/timetableScheduler', () => ({
 jest.mock('../../timetable/timetableNowBarService', () => ({
   TimetableNowBarService: { renderActivity: jest.fn(), cancel: jest.fn() },
   TIMETABLE_ONGOING_NOTIFICATION_ID: 'timetable_ongoing_activity',
-  TIMETABLE_CHANNEL_ID: 'timetable_nowbar_v2',
+  TIMETABLE_CHANNEL_ID: 'timetable_nowbar_v3',
 }));
 
 const ROOM = '42';

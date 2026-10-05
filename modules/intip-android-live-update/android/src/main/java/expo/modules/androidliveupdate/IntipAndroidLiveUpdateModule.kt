@@ -247,6 +247,11 @@ class IntipAndroidLiveUpdateModule : Module() {
 
   private fun ensureNotificationChannel(channelId: String, channelName: String) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      try {
+        notificationManager.deleteNotificationChannel("timetable_nowbar")
+        notificationManager.deleteNotificationChannel("timetable_nowbar_v2")
+      } catch (_: Exception) {}
+
       val existing = notificationManager.getNotificationChannel(channelId)
       if (existing == null) {
         val channel = NotificationChannel(
@@ -256,8 +261,7 @@ class IntipAndroidLiveUpdateModule : Module() {
         ).apply {
           description = "Now Bar 실시간 라이브 업데이트 알림"
           lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-          setSound(null, null)
-          enableVibration(false)
+          enableVibration(true)
           setShowBadge(false)
         }
         notificationManager.createNotificationChannel(channel)

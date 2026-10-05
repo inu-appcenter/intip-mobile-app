@@ -10,7 +10,7 @@ import { TimetableStorage } from './timetableStorage';
 import { TimetableLiveActivity, TimetableLiveActivityProps } from '../widgets/TimetableLiveActivity';
 import { IntipAndroidLiveUpdate } from '../../modules/intip-android-live-update';
 
-export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar_v2';
+export const TIMETABLE_CHANNEL_ID = 'timetable_nowbar_v3';
 export const TIMETABLE_ONGOING_NOTIFICATION_ID = 'timetable_ongoing_activity';
 export const TIMETABLE_NOTIFICATION_INT_ID = 1001;
 
@@ -40,13 +40,14 @@ export const TimetableNowBarService = {
     };
   },
   /**
-   * 알림 채널 생성 (Android 전용: 소리/진동 없이 잠금화면 및 상태바에 당당히 상주하도록 DEFAULT 중요도 적용)
+   * 알림 채널 생성 (휴대폰 소리/진동/무음 모드에 맞추어 최초 1회 알림 후, 갱신 시에는 무음 유지)
    */
   async ensureChannel(): Promise<void> {
     if (Platform.OS !== 'android') return;
     try {
       // 구 채널 정리
       await notifee.deleteChannel('timetable_nowbar').catch(() => {});
+      await notifee.deleteChannel('timetable_nowbar_v2').catch(() => {});
 
       await notifee.createChannel({
         id: TIMETABLE_CHANNEL_ID,
@@ -54,8 +55,7 @@ export const TimetableNowBarService = {
         description: '수업 전후 및 진행 중 실시간 시간표 및 남은 시간 표시',
         importance: AndroidImportance.DEFAULT, // DEFAULT 중요도여야 잠금화면 실시간 카드 및 상단 상태표시줄 칩으로 승격됨
         visibility: AndroidVisibility.PUBLIC, // 잠금화면 및 AOD에 내용 전체 표시
-        sound: undefined,
-        vibration: false,
+        vibration: true,
         lights: false,
         badge: false,
       });
