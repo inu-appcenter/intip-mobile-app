@@ -10,7 +10,7 @@ const STORAGE_KEY_SETTINGS = 'intip_timetable_nowbar_settings';
 
 export const DEFAULT_NOWBAR_SETTINGS: TimetableNowBarSettings = {
   enabled: true,
-  leadTimeMinutes: 15,
+  leadTimeMinutes: 10,
 };
 
 export const TimetableStorage = {

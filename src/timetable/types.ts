@@ -29,7 +29,7 @@ export interface TimetableData {
 
 export interface TimetableNowBarSettings {
   enabled: boolean;
-  leadTimeMinutes: number; // 수업 시작 몇 분 전에 노출할지 (기본 15분)
+  leadTimeMinutes: number; // 수업 시작 몇 분 전에 노출할지 (기본 10분)
 }
 
 export type TimetableActivityPhase = 'NONE' | 'UPCOMING' | 'ONGOING';

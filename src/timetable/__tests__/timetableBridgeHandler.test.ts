@@ -97,7 +97,7 @@ describe('handleTimetableBridgeMessage', () => {
         success: true,
         data: expect.objectContaining({
           enabled: true,
-          leadTimeMinutes: 15,
+          leadTimeMinutes: 10,
         }),
       })
     );

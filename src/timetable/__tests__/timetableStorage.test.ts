@@ -61,24 +61,24 @@ describe('TimetableStorage', () => {
     const settings = await TimetableStorage.getSettings();
     expect(settings).toEqual(DEFAULT_NOWBAR_SETTINGS);
     expect(settings.enabled).toBe(true);
-    expect(settings.leadTimeMinutes).toBe(15);
+    expect(settings.leadTimeMinutes).toBe(10);
   });
 
   it('merges and saves updated settings', async () => {
     const updated = await TimetableStorage.saveSettings({
-      leadTimeMinutes: 10,
+      leadTimeMinutes: 20,
     });
     expect(updated.enabled).toBe(true);
-    expect(updated.leadTimeMinutes).toBe(10);
+    expect(updated.leadTimeMinutes).toBe(20);
 
     const reloaded = await TimetableStorage.getSettings();
-    expect(reloaded.leadTimeMinutes).toBe(10);
+    expect(reloaded.leadTimeMinutes).toBe(20);
     expect(reloaded.enabled).toBe(true);
 
     const disabled = await TimetableStorage.saveSettings({
       enabled: false,
     });
     expect(disabled.enabled).toBe(false);
-    expect(disabled.leadTimeMinutes).toBe(10);
+    expect(disabled.leadTimeMinutes).toBe(20);
   });
 });
