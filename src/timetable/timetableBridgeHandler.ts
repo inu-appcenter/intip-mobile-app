@@ -153,8 +153,7 @@ export async function handleTimetableBridgeMessage(
           elapsedMinutes,
         };
         await TimetableStorage.saveTestActivity(testState);
-        await TimetableNowBarService.renderActivity(testState);
-        TimetableScheduler.startProgressTicker();
+        await TimetableScheduler.syncSchedule();
         reply({
           type: 'testTimetableNowBarResult',
           success: true,

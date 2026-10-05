@@ -168,8 +168,9 @@ export const TimetableNowBarService = {
       }
     }
 
-    const upcomingShortText =
-      upcomingRemainingMinutes <= 0
+    const remainingUpcomingMs = state.startTimestamp ? Math.max(0, state.startTimestamp - Date.now()) : 0;
+    const upcomingRemainingText =
+      upcomingRemainingMinutes <= 0 || (remainingUpcomingMs > 0 && remainingUpcomingMs <= 30 * 1000)
         ? '곧 시작'
         : `${upcomingRemainingMinutes}분 남음`;
 
@@ -177,15 +178,15 @@ export const TimetableNowBarService = {
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
       try {
         if (isUpcoming) {
-          // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 text 부분에 실시간 남은 시간(예: "14분 남음") 표시,
-          // 펼쳐진 카드에서는 제목 옆에 타이머가 붙지 않도록(showWhen: false) 깔끔하게 표기
+          // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 및 펼친 카드 subtitle 자리에 실시간 남은 시간(예: "14분 남음") 표시
           IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
             id: TIMETABLE_NOTIFICATION_INT_ID,
             channelId: TIMETABLE_CHANNEL_ID,
             channelName: '실시간 시간표 (나우 바)',
             title: `[다음 수업] ${courseTitle}`,
+            subText: upcomingRemainingText,
             text: cardBody,
-            shortCriticalText: upcomingShortText,
+            shortCriticalText: upcomingRemainingText,
             targetTimestamp: targetTimestamp || undefined,
             showChronometer: false,
             showWhen: false,
@@ -197,8 +198,19 @@ export const TimetableNowBarService = {
           return;
         }
 
-        // [수업 중]: 접혀있을 때는 shortCriticalText('수업 중')로 표시되고,
-        // 펼쳤을 때는 제목에 '[수업 중] 과목명'으로 표시
+        // 수업 중 남은 시간(분) 계산
+        let classRemainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);
+        if (state.endTimestamp) {
+          const remainingEndMs = Math.max(0, state.endTimestamp - Date.now());
+          classRemainingMinutes = Math.max(0, Math.ceil(remainingEndMs / (60 * 1000)));
+        }
+
+        const ongoingRemainingText =
+          classRemainingMinutes <= 0
+            ? '곧 종료'
+            : `${classRemainingMinutes}분 남음`;
+
+        // [수업 중]: 잠금화면 나우바 및 펼친 카드 subtitle 자리에 수업 종료까지 남은 시간(예: "45분 남음") 표시
         const progressPercent = Math.min(
           100,
           Math.max(0, Math.round((elapsedMinutes / durationMinutes) * 100))
@@ -209,8 +221,9 @@ export const TimetableNowBarService = {
           channelId: TIMETABLE_CHANNEL_ID,
           channelName: '실시간 시간표 (나우 바)',
           title: `[수업 중] ${courseTitle}`,
+          subText: ongoingRemainingText,
           text: cardBody,
-          shortCriticalText: '수업 중',
+          shortCriticalText: ongoingRemainingText,
           progress: progressPercent,
           // 오직 이 수업만을 나타내는 100% 단일 진행 바 (0% ~ 100% 매끄럽게 차오름)
           segments: [{ length: 100, color: '#043799' }],
@@ -225,11 +238,19 @@ export const TimetableNowBarService = {
 
     // --- Android 15 이하: 기존 Notifee Rich Ongoing Notification Fallback ---
     try {
+      let classRemainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);
+      if (state.endTimestamp) {
+        const remainingEndMs = Math.max(0, state.endTimestamp - Date.now());
+        classRemainingMinutes = Math.max(0, Math.ceil(remainingEndMs / (60 * 1000)));
+      }
+      const ongoingRemainingText =
+        classRemainingMinutes <= 0 ? '곧 종료' : `${classRemainingMinutes}분 남음`;
+
       await this.ensureChannel();
       await notifee.displayNotification({
         id: TIMETABLE_ONGOING_NOTIFICATION_ID,
         title: isUpcoming ? courseTitle : `[수업 중] ${courseTitle}`,
-        subtitle: isUpcoming ? '다음 수업' : '수업 중',
+        subtitle: isUpcoming ? upcomingRemainingText : ongoingRemainingText,
         body: cardBody,
         data: {
           type: 'timetable_nowbar',

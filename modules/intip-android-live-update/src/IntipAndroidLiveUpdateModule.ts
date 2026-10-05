@@ -11,6 +11,7 @@ export interface LiveUpdateOptions {
   channelName?: string;
   title: string;
   text: string;
+  subText?: string; // 타이틀 밑 / 헤더 서브텍스트 (예: "14분 남음", "45분 남음")
   shortCriticalText?: string; // 7자 이내 (상태 칩 / 캡슐 텍스트)
   progress?: number; // 0 ~ 100
   segments?: LiveUpdateSegment[];

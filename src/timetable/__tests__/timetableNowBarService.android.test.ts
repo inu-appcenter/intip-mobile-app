@@ -66,6 +66,7 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       expect(call.title).toBe('[다음 수업] 알고리즘');
       expect(call.text).toContain('정보기술대학 208호 · 김교수');
       expect(call.shortCriticalText).toMatch(/\d+분 남음|곧 시작/);
+      expect(call.subText).toMatch(/\d+분 남음|곧 시작/);
       expect(call.showChronometer).toBe(false);
       expect(call.showWhen).toBe(false);
       expect(call.targetTimestamp).toBe(state.startTimestamp);
@@ -78,14 +79,14 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       expect(mockNotifee.displayNotification).not.toHaveBeenCalled();
     });
 
-    it('renders LiveUpdate with "수업 중" Status Chip and independent class progress for IN_CLASS phase', async () => {
+    it('renders LiveUpdate with "N분 남음" Status Chip and subText for IN_CLASS phase', async () => {
       const now = Date.now();
       const state: TimetableActivityState = {
         phase: 'IN_CLASS',
         courseTitle: '데이터베이스',
         location: '자연대 101호',
         startTimestamp: now - 30 * 60 * 1000, // 30분 경과
-        endTimestamp: now + 45 * 60 * 1000, // 총 75분
+        endTimestamp: now + 45 * 60 * 1000, // 총 75분 (45분 남음)
         durationMinutes: 75,
         elapsedMinutes: 30,
       };
@@ -96,7 +97,8 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       const call = mockLiveUpdate.startOrUpdateLiveUpdate.mock.calls[0][0] as any;
       expect(call.title).toBe('[수업 중] 데이터베이스');
       expect(call.text).toContain('자연대 101호');
-      expect(call.shortCriticalText).toBe('수업 중');
+      expect(call.shortCriticalText).toBe('45분 남음');
+      expect(call.subText).toBe('45분 남음');
       expect(call.showChronometer).toBe(false);
       expect(call.targetTimestamp).toBeUndefined();
       expect(call.progress).toBe(40); // 30 / 75 = 40%

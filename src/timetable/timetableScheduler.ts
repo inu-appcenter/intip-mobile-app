@@ -186,8 +186,8 @@ export const TimetableScheduler = {
     const seconds = now.getSeconds();
     const msToNextMinute = Math.max(1000, (60 - seconds) * 1000);
     const delay =
-      customDelayMs !== undefined && customDelayMs > 0 && customDelayMs < msToNextMinute
-        ? Math.max(500, customDelayMs)
+      customDelayMs !== undefined && customDelayMs > 0
+        ? Math.min(msToNextMinute, Math.max(500, customDelayMs))
         : msToNextMinute;
 
     progressTickerTimer = setTimeout(async () => {
@@ -237,7 +237,7 @@ export const TimetableScheduler = {
       }
       await TimetableNowBarService.renderActivity(testActivity);
 
-      // 다음 상태 전환 시점이 1분보다 가까우면 그 시점에 바로 맞춰서 깨어남
+      // 다음 상태 전환 시점이 있으면 그 시점에 바로 맞춰서 스케줄링 (화면 꺼짐 시 AlarmManager도 함께 등록)
       let nextTransitionDelay: number | undefined;
       const nowMs = Date.now();
       if (testActivity.phase === 'UPCOMING' && testActivity.startTimestamp && testActivity.startTimestamp > nowMs) {
@@ -246,6 +246,9 @@ export const TimetableScheduler = {
         nextTransitionDelay = testActivity.endTimestamp - nowMs + 100;
       }
 
+      if (nextTransitionDelay && nextTransitionDelay > 0) {
+        await this.scheduleNextAlarm(nowMs + nextTransitionDelay).catch(() => {});
+      }
       this.startProgressTicker(nextTransitionDelay);
       return testActivity;
     }

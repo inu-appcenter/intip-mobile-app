@@ -106,12 +106,16 @@ class IntipAndroidLiveUpdateModule : Module() {
         // 카테고리 지정 (진행 바가 있으면 CATEGORY_PROGRESS, 없으면 CATEGORY_EVENT)
         builder.setCategory(if (progress != null) Notification.CATEGORY_PROGRESS else Notification.CATEGORY_EVENT)
 
+        // 타이틀 밑 / 헤더 서브텍스트 (예: "14분 남음", "45분 남음")
+        val subText = options["subText"] as? String
+        if (!subText.isNullOrEmpty()) {
+          builder.setSubText(subText)
+        }
+
         // 3. Status Bar Chip 및 Now Bar 캡슐용 7자 이내 핵심 상태 텍스트
         // shortCriticalText가 주입되어야 잠금화면 하단 나우바 캡슐 텍스트가 장소/교수명으로 폴백되지 않고 의도한 텍스트(예: "14분 남음", "수업 중")로 노출됩니다.
         if (!shortCriticalText.isNullOrEmpty()) {
           applyShortCriticalText(builder, shortCriticalText)
-          // 주의: builder.setSubText()를 호출하면 펼쳐진 알림 카드의 제목 밑에 텍스트가 표시되므로,
-          // 카드를 깔끔하게 유지하기 위해 subText는 지정하지 않고 칩/캡슐 전용 extras만 전달합니다.
           val extras = android.os.Bundle().apply {
             putCharSequence("android.shortCriticalText", shortCriticalText)
             putString("android.shortCriticalText", shortCriticalText)
