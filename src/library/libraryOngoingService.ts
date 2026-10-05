@@ -9,8 +9,9 @@ import { executeAgentAction } from '../agent/agentActionExecutor';
 import { LibraryAgentTools } from '../agent/libraryTools';
 import { LocalWatchJob } from '../agent/localWatchManager';
 
-export const LIBRARY_WATCH_CHANNEL_ID = 'library_watch_nowbar';
-export const LIBRARY_SEAT_SESSION_CHANNEL_ID = 'library_seat_session_nowbar';
+export const LIVE_UPDATE_NOWBAR_CHANNEL_ID = 'live_update_nowbar';
+export const LIBRARY_WATCH_CHANNEL_ID = LIVE_UPDATE_NOWBAR_CHANNEL_ID;
+export const LIBRARY_SEAT_SESSION_CHANNEL_ID = LIVE_UPDATE_NOWBAR_CHANNEL_ID;
 
 export const LIBRARY_WATCH_NOTIFICATION_ID = 'library_watch_ongoing';
 export const LIBRARY_SEAT_SESSION_NOTIFICATION_ID = 'library_seat_session_ongoing';
@@ -32,20 +33,14 @@ export const LibraryOngoingService = {
   async ensureChannels(): Promise<void> {
     if (Platform.OS !== 'android') return;
     try {
-      await notifee.createChannel({
-        id: LIBRARY_WATCH_CHANNEL_ID,
-        name: '도서관 빈자리 감시 (나우 바/잠금화면)',
-        description: '열람실 특정 좌석 및 스터디룸 취소표 실시간 감시 상태 표시',
-        importance: AndroidImportance.DEFAULT,
-        visibility: AndroidVisibility.PUBLIC,
-        sound: undefined,
-        vibration: false,
-      });
+      // 구 채널 정리
+      await notifee.deleteChannel('library_watch_nowbar').catch(() => {});
+      await notifee.deleteChannel('library_seat_session_nowbar').catch(() => {});
 
       await notifee.createChannel({
-        id: LIBRARY_SEAT_SESSION_CHANNEL_ID,
-        name: '도서관 좌석 이용 현황 (나우 바/잠금화면)',
-        description: '현재 이용 중인 열람실 좌석 잔여 시간 및 원클릭 연장/반납',
+        id: LIVE_UPDATE_NOWBAR_CHANNEL_ID,
+        name: '실시간 알림 (나우 바)',
+        description: '실시간 현황 및 진행 상황 (시간표, 도서관, LMS 등)',
         importance: AndroidImportance.DEFAULT,
         visibility: AndroidVisibility.PUBLIC,
         sound: undefined,
@@ -99,8 +94,6 @@ export const LibraryOngoingService = {
           roomId: String(targetRoomId),
           seatNo: String(job.seatNo || ''),
           path: libraryPath,
-          'android.requestPromotedOngoing': 'true',
-          'com.samsung.android.support.ongoing_activity': 'true',
         },
         android: {
           channelId: LIBRARY_WATCH_CHANNEL_ID,
@@ -200,8 +193,6 @@ export const LibraryOngoingService = {
           roomId: String(session.roomId || ''),
           roomName: session.roomName,
           path: '/services/library?tab=my',
-          'android.requestPromotedOngoing': 'true',
-          'com.samsung.android.support.ongoing_activity': 'true',
         },
         android: {
           channelId: LIBRARY_SEAT_SESSION_CHANNEL_ID,

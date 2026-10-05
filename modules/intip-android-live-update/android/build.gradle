@@ -1,0 +1,25 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.androidliveupdate'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.androidliveupdate"
+  compileSdk 36
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+    minSdkVersion 24
+    targetSdkVersion 36
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  implementation "androidx.core:core-ktx:1.15.0"
+}

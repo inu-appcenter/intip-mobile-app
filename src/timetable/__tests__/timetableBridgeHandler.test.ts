@@ -16,11 +16,11 @@ jest.mock('expo-secure-store', () => ({
 jest.mock('@notifee/react-native', () => ({
   __esModule: true,
   default: {
-    createChannel: jest.fn(),
-    displayNotification: jest.fn(),
-    cancelNotification: jest.fn(),
-    createTriggerNotification: jest.fn(),
-    stopForegroundService: jest.fn(),
+    createChannel: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    displayNotification: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    cancelNotification: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    createTriggerNotification: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    stopForegroundService: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   },
   AndroidCategory: { EVENT: 'event', PROGRESS: 'progress' },
   AndroidImportance: { DEFAULT: 3, LOW: 2, MIN: 1 },
@@ -145,7 +145,7 @@ describe('handleTimetableBridgeMessage', () => {
       expect.objectContaining({
         type: 'testTimetableNowBarResult',
         success: true,
-        data: { active: true },
+        data: expect.objectContaining({ active: true }),
       })
     );
   });

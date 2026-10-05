@@ -123,27 +123,43 @@ export async function handleTimetableBridgeMessage(
     }
 
     case 'testTimetableNowBar': {
-      // 즉시 테스트용 진행 중 액티비티 노출 및 상태 보존
+      // 즉시 테스트용 진행 중 액티비티 노출 및 상태 보존 (UPCOMING, IN_CLASS 등 다양한 상황 지원)
       try {
-        const now = Date.now();
+        const nowDate = new Date();
+        nowDate.setSeconds(0, 0);
+        const now = nowDate.getTime();
+        const phase = payload?.phase || 'ONGOING';
         const durationMinutes = payload?.minutes || 75;
-        const endTimestamp = now + durationMinutes * 60 * 1000;
+        const elapsedMinutes = payload?.elapsedMinutes !== undefined ? payload.elapsedMinutes : 0;
+
+        let startTimestamp: number;
+        let endTimestamp: number;
+
+        if (phase === 'UPCOMING') {
+          const waitMinutes = payload?.remainingMinutes !== undefined ? payload.remainingMinutes : 15;
+          startTimestamp = now + waitMinutes * 60 * 1000;
+          endTimestamp = startTimestamp + durationMinutes * 60 * 1000;
+        } else {
+          startTimestamp = now - elapsedMinutes * 60 * 1000;
+          endTimestamp = startTimestamp + durationMinutes * 60 * 1000;
+        }
+
         const testState = {
-          phase: 'ONGOING' as const,
-          courseTitle: payload?.title || '테스트 강의 (알고리즘)',
+          phase: phase as any,
+          courseTitle: payload?.title || (phase === 'UPCOMING' ? '테스트 강의 (수업 전)' : '테스트 강의 (수업 중)'),
           location: payload?.location || '정보기술대학 7호관 314호',
           professor: payload?.professor || '홍길동 교수님',
-          startTimestamp: now,
+          startTimestamp,
           endTimestamp,
           durationMinutes,
-          elapsedMinutes: 0,
+          elapsedMinutes,
         };
         await TimetableStorage.saveTestActivity(testState);
-        await TimetableNowBarService.renderActivity(testState);
+        await TimetableScheduler.syncSchedule();
         reply({
           type: 'testTimetableNowBarResult',
           success: true,
-          data: { active: true },
+          data: { active: true, testState },
         });
       } catch (err: any) {
         reply({
@@ -158,6 +174,7 @@ export async function handleTimetableBridgeMessage(
     case 'cancelTimetableNowBar': {
       try {
         await TimetableStorage.clearTestActivity();
+        TimetableScheduler.stopProgressTicker();
         await TimetableNowBarService.cancel();
         reply({
           type: 'cancelTimetableNowBarResult',

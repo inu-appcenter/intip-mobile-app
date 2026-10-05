@@ -28,6 +28,17 @@ jest.mock('./modules/intip-live-activity-tokens', () => ({
   finishBackgroundWork: jest.fn(),
 }));
 
+// Local Android 16 Live Update module (modules/intip-android-live-update).
+jest.mock('./modules/intip-android-live-update', () => ({
+  IntipAndroidLiveUpdate: {
+    isSupported: jest.fn(() => false),
+    canPostPromoted: jest.fn(() => false),
+    startOrUpdateLiveUpdate: jest.fn(() => ({ success: true, promotable: true })),
+    stopLiveUpdate: jest.fn(() => true),
+    openPromotionSettings: jest.fn(() => true),
+  },
+}));
+
 jest.mock('@expo/ui/swift-ui', () => ({
   HStack: 'HStack',
   VStack: 'VStack',
