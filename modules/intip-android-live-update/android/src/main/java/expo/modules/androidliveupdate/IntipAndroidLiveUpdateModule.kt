@@ -6,7 +6,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
@@ -63,10 +68,32 @@ class IntipAndroidLiveUpdateModule : Module() {
         val builder = Notification.Builder(context, channelId)
           .setContentTitle(title)
           .setContentText(text)
-          .setSmallIcon(context.applicationInfo.icon)
           .setOngoing(ongoing)
           .setOnlyAlertOnce(true)
           .setAutoCancel(false)
+
+        // 앱 로고 아이콘 설정:
+        // 접혔을 때(상태바/Now Bar 캡슐)는 SmallIcon이, 펼쳐졌을 때(Now Bar 확장 카드 위젯)는 LargeIcon이 노출됩니다.
+        try {
+          val appDrawable = context.packageManager.getApplicationIcon(context.packageName)
+          val appBitmap = drawableToBitmap(appDrawable)
+          if (appBitmap != null) {
+            val appIcon = Icon.createWithBitmap(appBitmap)
+            builder.setSmallIcon(appIcon)
+            builder.setLargeIcon(appIcon)
+          } else {
+            val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else context.applicationInfo.roundIcon
+            builder.setSmallIcon(iconRes)
+            builder.setLargeIcon(Icon.createWithResource(context, iconRes))
+          }
+        } catch (e: Exception) {
+          Log.w(TAG, "Failed to load app icon for Now Bar", e)
+          val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else context.applicationInfo.roundIcon
+          builder.setSmallIcon(iconRes)
+          try {
+            builder.setLargeIcon(Icon.createWithResource(context, iconRes))
+          } catch (_: Exception) {}
+        }
 
         // 클릭 시 앱 실행 펜딩 인텐트 연결
         val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -288,5 +315,18 @@ class IntipAndroidLiveUpdateModule : Module() {
     } catch (_: Exception) {
       null
     }
+  }
+
+  private fun drawableToBitmap(drawable: Drawable): Bitmap? {
+    if (drawable is BitmapDrawable && drawable.bitmap != null) {
+      return drawable.bitmap
+    }
+    val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 192
+    val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 192
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    drawable.setBounds(0, 0, canvas.width, canvas.height)
+    drawable.draw(canvas)
+    return bitmap
   }
 }
