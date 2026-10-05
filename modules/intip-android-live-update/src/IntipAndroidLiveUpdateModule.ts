@@ -16,6 +16,13 @@ export interface LiveUpdateOptions {
   progress?: number; // 0 ~ 100
   segments?: LiveUpdateSegment[];
   targetTimestamp?: number; // ms
+  startTimestamp?: number; // ms
+  endTimestamp?: number; // ms
+  durationMinutes?: number;
+  leadTimeMinutes?: number;
+  phase?: 'UPCOMING' | 'ONGOING' | 'NONE';
+  courseTitle?: string;
+  details?: string;
   showChronometer?: boolean;
   showWhen?: boolean;
   ongoing?: boolean;

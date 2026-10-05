@@ -102,7 +102,9 @@ describe('TimetableNowBarService (Android Live Update & Samsung Now Bar)', () =>
       expect(call.shortCriticalText).toBe('45분 남음');
       expect(call.subText).toBeUndefined();
       expect(call.showChronometer).toBe(false);
-      expect(call.targetTimestamp).toBeUndefined();
+      expect(call.targetTimestamp).toBe(state.endTimestamp);
+      expect(call.endTimestamp).toBe(state.endTimestamp);
+      expect(call.phase).toBe('ONGOING');
       expect(call.progress).toBe(40); // 30 / 75 = 40%
       expect(call.segments).toEqual([{ length: 100, color: '#043799' }]);
       expect(mockNotifee.displayNotification).not.toHaveBeenCalled();

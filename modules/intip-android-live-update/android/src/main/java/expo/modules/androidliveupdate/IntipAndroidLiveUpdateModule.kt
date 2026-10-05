@@ -4,21 +4,41 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 private const val TAG = "IntipLiveUpdate"
+
+data class LiveUpdateSession(
+  val id: Int,
+  val channelId: String,
+  val channelName: String,
+  val title: String,
+  val courseTitle: String?,
+  val details: String?,
+  val phase: String, // "UPCOMING" or "ONGOING"
+  val startTimestamp: Long?,
+  val endTimestamp: Long?,
+  val targetTimestamp: Long?,
+  val leadTimeMinutes: Int,
+  val durationMinutes: Int,
+  val segmentsRaw: List<Map<String, Any?>>?,
+  val ongoing: Boolean
+)
 
 class IntipAndroidLiveUpdateModule : Module() {
   private val context: Context
@@ -27,8 +47,34 @@ class IntipAndroidLiveUpdateModule : Module() {
   private val notificationManager: NotificationManager
     get() = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private var currentSession: LiveUpdateSession? = null
+  private var isReceiverRegistered = false
+
+  private val tickRunnable = Runnable {
+    updateNotificationFromTick()
+    scheduleNextMinuteTick()
+  }
+
+  private val screenAndTickReceiver = object : BroadcastReceiver() {
+    override fun onReceive(ctx: Context?, intent: Intent?) {
+      when (intent?.action) {
+        Intent.ACTION_SCREEN_ON,
+        Intent.ACTION_USER_PRESENT,
+        Intent.ACTION_TIME_TICK -> {
+          updateNotificationFromTick()
+          scheduleNextMinuteTick()
+        }
+      }
+    }
+  }
+
   override fun definition() = ModuleDefinition {
     Name("IntipAndroidLiveUpdate")
+
+    OnDestroy {
+      stopTicker()
+    }
 
     /**
      * 현재 기기가 Android 16 (API 36+) Live Update Notification 및
@@ -51,7 +97,7 @@ class IntipAndroidLiveUpdateModule : Module() {
     Function("startOrUpdateLiveUpdate") { options: Map<String, Any?> ->
       try {
         val id = (options["id"] as? Number)?.toInt() ?: 1001
-        val channelId = options["channelId"] as? String ?: "timetable_nowbar_v2"
+        val channelId = options["channelId"] as? String ?: "timetable_nowbar_v3"
         val channelName = options["channelName"] as? String ?: "실시간 시간표 (나우 바)"
         val title = options["title"] as? String ?: ""
         val text = options["text"] as? String ?: ""
@@ -59,98 +105,58 @@ class IntipAndroidLiveUpdateModule : Module() {
         val progress = (options["progress"] as? Number)?.toInt()
         val segmentsRaw = options["segments"] as? List<Map<String, Any?>>
         val targetTimestamp = (options["targetTimestamp"] as? Number)?.toLong()
-        val ongoing = options["ongoing"] as? Boolean ?: true
-
-        // 1. 알림 채널 보장 (IMPORTANCE_DEFAULT 이상 필수)
-        ensureNotificationChannel(channelId, channelName)
-
-        // 2. Notification.Builder 초기화
-        val builder = Notification.Builder(context, channelId)
-          .setContentTitle(title)
-          .setContentText(text)
-          .setOngoing(ongoing)
-          .setOnlyAlertOnce(true)
-          .setAutoCancel(false)
-
-        // 앱 로고 아이콘 설정:
-        // SmallIcon에 APK 패키지 리소스 ID를 설정하여 IPC 직렬화 누락 없이 항상 100% 안정적으로 좌측 뱃지 아이콘을 렌더링합니다.
-        // setLargeIcon을 호출하면 우측에 중복 아이콘(썸네일)이 생성되므로 설정하지 않습니다.
-        val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
-        builder.setSmallIcon(iconRes)
-
-        // 클릭 시 앱 실행 펜딩 인텐트 연결
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        if (launchIntent != null) {
-          val pendingIntent = PendingIntent.getActivity(
-            context,
-            id,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-          )
-          builder.setContentIntent(pendingIntent)
-        }
-
-        // 카테고리 지정 (진행 바가 있으면 CATEGORY_PROGRESS, 없으면 CATEGORY_EVENT)
-        builder.setCategory(if (progress != null) Notification.CATEGORY_PROGRESS else Notification.CATEGORY_EVENT)
-
-        // 타이틀 밑 / 헤더 서브텍스트 (예: "14분 남음", "45분 남음")
+        val startTimestamp = (options["startTimestamp"] as? Number)?.toLong()
+        val endTimestamp = (options["endTimestamp"] as? Number)?.toLong() ?: targetTimestamp
+        val durationMinutes = (options["durationMinutes"] as? Number)?.toInt() ?: 75
+        val leadTimeMinutes = (options["leadTimeMinutes"] as? Number)?.toInt() ?: 15
+        val phase = (options["phase"] as? String) ?: (if (title.contains("[다음 수업]")) "UPCOMING" else "ONGOING")
+        val courseTitle = options["courseTitle"] as? String
+        val details = options["details"] as? String
         val subText = options["subText"] as? String
-        if (!subText.isNullOrEmpty()) {
-          builder.setSubText(subText)
-        }
-
-        // 3. Status Bar Chip 및 Now Bar 캡슐용 7자 이내 핵심 상태 텍스트
-        // shortCriticalText가 주입되어야 잠금화면 하단 나우바 캡슐 텍스트가 장소/교수명으로 폴백되지 않고 의도한 텍스트(예: "14분 남음", "수업 중")로 노출됩니다.
-        if (!shortCriticalText.isNullOrEmpty()) {
-          applyShortCriticalText(builder, shortCriticalText)
-          val extras = android.os.Bundle().apply {
-            putCharSequence("android.shortCriticalText", shortCriticalText)
-            putString("android.shortCriticalText", shortCriticalText)
-            putCharSequence("com.samsung.android.shortText", shortCriticalText)
-            putCharSequence("com.samsung.android.extra.ONGOING_TEXT", shortCriticalText)
-          }
-          builder.addExtras(extras)
-        }
-
-        // 4. Android 16 setRequestPromotedOngoing(true) 적용
-        applyRequestPromotedOngoing(builder, true)
-
-        // 5. 카운트다운 타이머 연동 (showChronometer가 명시적으로 true일 때만 타이머 노출)
         val showChronometer = options["showChronometer"] as? Boolean ?: false
         val showWhen = options["showWhen"] as? Boolean ?: false
-        if (showChronometer && targetTimestamp != null && targetTimestamp > 0) {
-          builder.setWhen(targetTimestamp)
-          builder.setUsesChronometer(true)
-          try {
-            // Android 7.0+ setChronometerCountDown
-            Notification.Builder::class.java
-              .getMethod("setChronometerCountDown", Boolean::class.javaPrimitiveType)
-              .invoke(builder, true)
-          } catch (_: Exception) {}
-          // 펼쳐진 알림 카드의 제목(Title) 바로 옆에 타이머가 붙어 표시되는 것을 방지하기 위해 setShowWhen(showWhen) 적용
-          builder.setShowWhen(showWhen)
+        val ongoing = options["ongoing"] as? Boolean ?: true
+
+        // 1. 초기 알림 빌드 및 포스팅
+        val promotable = buildAndPostNotification(
+          id = id,
+          channelId = channelId,
+          channelName = channelName,
+          title = title,
+          text = text,
+          subText = subText,
+          shortCriticalText = shortCriticalText,
+          progress = progress,
+          segmentsRaw = segmentsRaw,
+          targetTimestamp = targetTimestamp,
+          showChronometer = showChronometer,
+          showWhen = showWhen,
+          ongoing = ongoing
+        )
+
+        // 2. 백그라운드 실시간 1분 타이머 세션 등록 및 가동
+        if (ongoing && (phase == "ONGOING" || phase == "UPCOMING")) {
+          currentSession = LiveUpdateSession(
+            id = id,
+            channelId = channelId,
+            channelName = channelName,
+            title = title,
+            courseTitle = courseTitle,
+            details = details,
+            phase = phase,
+            startTimestamp = startTimestamp,
+            endTimestamp = endTimestamp,
+            targetTimestamp = targetTimestamp,
+            leadTimeMinutes = leadTimeMinutes,
+            durationMinutes = durationMinutes,
+            segmentsRaw = segmentsRaw,
+            ongoing = ongoing
+          )
+          startTicker()
         } else {
-          builder.setUsesChronometer(false)
-          builder.setShowWhen(false)
+          stopTicker()
+          currentSession = null
         }
-
-        // 6. Notification.ProgressStyle 적용 (진행률이 있는 경우에만 ProgressStyle 적용)
-        val styled = applyProgressStyle(builder, progress, segmentsRaw)
-        if (!styled) {
-          if (progress != null) {
-            builder.setProgress(100, progress.coerceIn(0, 100), false)
-          } else {
-            // 진행률이 없을 때(수업 전 등): 진행 바 없이 타이머/텍스트에 집중하는 BigTextStyle 적용 (Android 16 승격 허용 스타일)
-            builder.setStyle(Notification.BigTextStyle().bigText(text))
-          }
-        }
-
-        // 7. 알림 빌드 및 승격 조건 검증
-        val notification = builder.build()
-        val promotable = checkPromotableCharacteristics(notification)
-
-        Log.i(TAG, "Posting LiveUpdate notification id=$id, promotable=$promotable, shortText=$shortCriticalText")
-        notificationManager.notify(id, notification)
 
         mapOf(
           "success" to true,
@@ -170,13 +176,7 @@ class IntipAndroidLiveUpdateModule : Module() {
      * Live Update 알림 취소/종료
      */
     Function("stopLiveUpdate") { id: Int ->
-      try {
-        notificationManager.cancel(id)
-        true
-      } catch (e: Exception) {
-        Log.w(TAG, "Failed to cancel LiveUpdate notification id=$id", e)
-        false
-      }
+      stopLiveUpdateInternal(id)
     }
 
     /**
@@ -212,8 +212,240 @@ class IntipAndroidLiveUpdateModule : Module() {
     }
   }
 
+  private fun buildAndPostNotification(
+    id: Int,
+    channelId: String,
+    channelName: String,
+    title: String,
+    text: String,
+    subText: String? = null,
+    shortCriticalText: String? = null,
+    progress: Int? = null,
+    segmentsRaw: List<Map<String, Any?>>? = null,
+    targetTimestamp: Long? = null,
+    showChronometer: Boolean = false,
+    showWhen: Boolean = false,
+    ongoing: Boolean = true
+  ): Boolean? {
+    ensureNotificationChannel(channelId, channelName)
+
+    val builder = Notification.Builder(context, channelId)
+      .setContentTitle(title)
+      .setContentText(text)
+      .setOngoing(ongoing)
+      .setOnlyAlertOnce(true)
+      .setAutoCancel(false)
+
+    val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
+    builder.setSmallIcon(iconRes)
+
+    val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+    if (launchIntent != null) {
+      val pendingIntent = PendingIntent.getActivity(
+        context,
+        id,
+        launchIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+      builder.setContentIntent(pendingIntent)
+    }
+
+    builder.setCategory(if (progress != null) Notification.CATEGORY_PROGRESS else Notification.CATEGORY_EVENT)
+
+    if (!subText.isNullOrEmpty()) {
+      builder.setSubText(subText)
+    }
+
+    val trimmedShortText = shortCriticalText?.take(7)
+    if (!trimmedShortText.isNullOrEmpty()) {
+      applyShortCriticalText(builder, trimmedShortText)
+      val extras = android.os.Bundle().apply {
+        putCharSequence("android.shortCriticalText", trimmedShortText)
+        putString("android.shortCriticalText", trimmedShortText)
+        putCharSequence("com.samsung.android.shortText", trimmedShortText)
+        putCharSequence("com.samsung.android.extra.ONGOING_TEXT", trimmedShortText)
+      }
+      builder.addExtras(extras)
+    }
+
+    applyRequestPromotedOngoing(builder, true)
+
+    if (showChronometer && targetTimestamp != null && targetTimestamp > 0) {
+      builder.setWhen(targetTimestamp)
+      builder.setUsesChronometer(true)
+      try {
+        Notification.Builder::class.java
+          .getMethod("setChronometerCountDown", Boolean::class.javaPrimitiveType)
+          .invoke(builder, true)
+      } catch (_: Exception) {}
+      builder.setShowWhen(showWhen)
+    } else {
+      builder.setUsesChronometer(false)
+      builder.setShowWhen(false)
+    }
+
+    val styled = applyProgressStyle(builder, progress, segmentsRaw)
+    if (!styled) {
+      if (progress != null) {
+        builder.setProgress(100, progress.coerceIn(0, 100), false)
+      } else {
+        builder.setStyle(Notification.BigTextStyle().bigText(text))
+      }
+    }
+
+    val notification = builder.build()
+    val promotable = checkPromotableCharacteristics(notification)
+    notificationManager.notify(id, notification)
+    return promotable
+  }
+
+  @Synchronized
+  private fun updateNotificationFromTick() {
+    val session = currentSession ?: return
+    val now = System.currentTimeMillis()
+
+    if (session.phase.equals("ONGOING", ignoreCase = true)) {
+      val endMs = session.endTimestamp ?: (now + session.durationMinutes * 60_000L)
+      if (now >= endMs) {
+        Log.i(TAG, "Class ended (now >= $endMs), stopping LiveUpdate")
+        stopLiveUpdateInternal(session.id)
+        return
+      }
+
+      val remainingMs = maxOf(0L, endMs - now)
+      val remainingMinutes = kotlin.math.ceil(remainingMs / 60000.0).toInt()
+      val remainingText = if (remainingMinutes <= 0) "곧 종료" else "${remainingMinutes}분 남음"
+
+      val startMs = session.startTimestamp ?: (endMs - session.durationMinutes * 60_000L)
+      val totalDurationMs = maxOf(60_000L, endMs - startMs)
+      val elapsedMs = maxOf(0L, now - startMs)
+      val progress = ((elapsedMs.toDouble() / totalDurationMs) * 100).toInt().coerceIn(0, 100)
+
+      val courseName = session.courseTitle ?: session.title.removePrefix("[수업 중] ").trim()
+      val fullTitle = "[수업 중] $courseName"
+      val detailsText = session.details ?: ""
+      val cardBody = if (detailsText.isNotEmpty()) "$remainingText\n$detailsText" else remainingText
+
+      buildAndPostNotification(
+        id = session.id,
+        channelId = session.channelId,
+        channelName = session.channelName,
+        title = fullTitle,
+        text = cardBody,
+        shortCriticalText = remainingText,
+        progress = progress,
+        segmentsRaw = session.segmentsRaw,
+        ongoing = session.ongoing
+      )
+    } else if (session.phase.equals("UPCOMING", ignoreCase = true)) {
+      val startMs = session.startTimestamp ?: return
+      if (now >= startMs) {
+        // Class begins! Transition session to ONGOING
+        val courseName = session.courseTitle ?: session.title.removePrefix("[다음 수업] ").trim()
+        val endMs = session.endTimestamp ?: (startMs + session.durationMinutes * 60_000L)
+        val ongoingSession = session.copy(
+          phase = "ONGOING",
+          title = "[수업 중] $courseName",
+          startTimestamp = startMs,
+          endTimestamp = endMs,
+          segmentsRaw = listOf(mapOf("length" to 100, "color" to "#043799"))
+        )
+        currentSession = ongoingSession
+        updateNotificationFromTick()
+        return
+      }
+
+      val remainingMs = maxOf(0L, startMs - now)
+      val remainingMinutes = kotlin.math.ceil(remainingMs / 60000.0).toInt()
+      val remainingText = if (remainingMinutes <= 0 || remainingMs <= 30_000L) "곧 시작" else "${remainingMinutes}분 남음"
+
+      val totalLeadMs = maxOf(60_000L, session.leadTimeMinutes * 60_000L)
+      val elapsedLeadMs = maxOf(0L, totalLeadMs - remainingMs)
+      val progress = ((elapsedLeadMs.toDouble() / totalLeadMs) * 100).toInt().coerceIn(0, 100)
+
+      val courseName = session.courseTitle ?: session.title.removePrefix("[다음 수업] ").trim()
+      val fullTitle = "[다음 수업] $courseName"
+      val detailsText = session.details ?: ""
+      val cardBody = if (detailsText.isNotEmpty()) "$remainingText\n$detailsText" else remainingText
+
+      buildAndPostNotification(
+        id = session.id,
+        channelId = session.channelId,
+        channelName = session.channelName,
+        title = fullTitle,
+        text = cardBody,
+        shortCriticalText = remainingText,
+        progress = progress,
+        segmentsRaw = session.segmentsRaw,
+        ongoing = session.ongoing
+      )
+    }
+  }
+
+  private fun startTicker() {
+    registerReceiverIfNeeded()
+    scheduleNextMinuteTick()
+  }
+
+  private fun stopTicker() {
+    mainHandler.removeCallbacks(tickRunnable)
+    unregisterReceiverIfNeeded()
+  }
+
+  private fun scheduleNextMinuteTick() {
+    mainHandler.removeCallbacks(tickRunnable)
+    if (currentSession == null) return
+    val now = System.currentTimeMillis()
+    val msToNextMinute = 60_000L - (now % 60_000L)
+    mainHandler.postDelayed(tickRunnable, maxOf(500L, msToNextMinute + 100L))
+  }
+
+  @Synchronized
+  private fun registerReceiverIfNeeded() {
+    if (isReceiverRegistered) return
+    try {
+      val filter = IntentFilter().apply {
+        addAction(Intent.ACTION_SCREEN_ON)
+        addAction(Intent.ACTION_USER_PRESENT)
+        addAction(Intent.ACTION_TIME_TICK)
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        context.registerReceiver(screenAndTickReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+      } else {
+        context.registerReceiver(screenAndTickReceiver, filter)
+      }
+      isReceiverRegistered = true
+      Log.d(TAG, "Screen & time tick receiver registered")
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to register screen/tick receiver", e)
+    }
+  }
+
+  @Synchronized
+  private fun unregisterReceiverIfNeeded() {
+    if (!isReceiverRegistered) return
+    try {
+      context.unregisterReceiver(screenAndTickReceiver)
+      isReceiverRegistered = false
+      Log.d(TAG, "Screen & time tick receiver unregistered")
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to unregister screen/tick receiver", e)
+    }
+  }
+
+  private fun stopLiveUpdateInternal(id: Int): Boolean {
+    stopTicker()
+    currentSession = null
+    return try {
+      notificationManager.cancel(id)
+      true
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to cancel LiveUpdate notification id=$id", e)
+      false
+    }
+  }
+
   private fun isLiveUpdateSupported(): Boolean {
-    // Android 16 (API 36) 또는 개발자 프리뷰(Baklava)
     val isApi36OrAbove = Build.VERSION.SDK_INT >= 36 || Build.VERSION.CODENAME == "Baklava"
     return isApi36OrAbove
   }

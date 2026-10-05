@@ -192,6 +192,10 @@ export const TimetableNowBarService = {
     // --- Android 16 (One UI 8+): Samsung Now Bar / Live Update Notification ---
     if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
       try {
+        const computedEndTimestamp =
+          state.endTimestamp ||
+          (state.startTimestamp ? state.startTimestamp + durationMinutes * 60 * 1000 : Date.now() + durationMinutes * 60 * 1000);
+
         if (isUpcoming) {
           // [수업 전]: 잠금화면 하단 접힌 나우바 캡슐 및 펼친 카드 본문에 실시간 남은 시간(예: "14분 남음") 표시
           IntipAndroidLiveUpdate.startOrUpdateLiveUpdate({
@@ -199,9 +203,16 @@ export const TimetableNowBarService = {
             channelId: TIMETABLE_CHANNEL_ID,
             channelName: '실시간 시간표 (나우 바)',
             title: `[다음 수업] ${courseTitle}`,
+            courseTitle,
+            details,
+            phase: 'UPCOMING',
+            startTimestamp: state.startTimestamp || undefined,
+            endTimestamp: computedEndTimestamp,
+            targetTimestamp: state.startTimestamp || targetTimestamp || undefined,
+            leadTimeMinutes: totalLeadMinutes,
+            durationMinutes,
             text: cardBody,
             shortCriticalText: upcomingRemainingText,
-            targetTimestamp: targetTimestamp || undefined,
             showChronometer: false,
             showWhen: false,
             progress: upcomingProgress,
@@ -223,12 +234,21 @@ export const TimetableNowBarService = {
           channelId: TIMETABLE_CHANNEL_ID,
           channelName: '실시간 시간표 (나우 바)',
           title: `[수업 중] ${courseTitle}`,
+          courseTitle,
+          details,
+          phase: 'ONGOING',
+          startTimestamp: state.startTimestamp || undefined,
+          endTimestamp: computedEndTimestamp,
+          targetTimestamp: computedEndTimestamp,
+          leadTimeMinutes: totalLeadMinutes,
+          durationMinutes,
           text: cardBody,
           shortCriticalText: ongoingRemainingText,
           progress: progressPercent,
           // 오직 이 수업만을 나타내는 100% 단일 진행 바 (0% ~ 100% 매끄럽게 차오름)
           segments: [{ length: 100, color: '#043799' }],
           showChronometer: false,
+          showWhen: false,
           ongoing: true,
         });
         return;
