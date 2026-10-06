@@ -12,6 +12,7 @@ import {
 import { TimetableStorage } from './timetableStorage';
 import { TimetableNowBarService, TIMETABLE_CHANNEL_ID } from './timetableNowBarService';
 import { isLiveActivityPushToStartRegistered } from './liveActivityPushToStart';
+import { IntipAndroidLiveUpdate } from '../../modules/intip-android-live-update';
 
 const DAYS_MAP: TimetableDay[] = [
   'SUNDAY',
@@ -181,6 +182,13 @@ export const TimetableScheduler = {
    */
   startProgressTicker(customDelayMs?: number): void {
     this.stopProgressTicker();
+
+    // Android 16+ One UI 8 LiveUpdate(나우 바)를 지원하는 기기에서는
+    // 네이티브 AlarmManager가 Doze/백그라운드에서도 정확하게 1분 단위 갱신을 전담하므로
+    // 백그라운드에서 지연 및 자원 낭비를 유발하는 JS setTimeout 중복 루프를 방지합니다.
+    if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
+      return;
+    }
 
     const now = new Date();
     const seconds = now.getSeconds();

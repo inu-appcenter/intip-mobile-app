@@ -8,6 +8,13 @@ import android.util.Log
 class LiveUpdateAlarmReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
     Log.d("IntipLiveUpdate", "LiveUpdateAlarmReceiver onReceive triggered: action=${intent?.action}")
-    LiveUpdateManager.onTick(context)
+    val pendingResult = goAsync()
+    try {
+      LiveUpdateManager.onTick(context)
+    } catch (e: Exception) {
+      Log.e("IntipLiveUpdate", "Error during LiveUpdateAlarmReceiver onTick", e)
+    } finally {
+      pendingResult.finish()
+    }
   }
 }
