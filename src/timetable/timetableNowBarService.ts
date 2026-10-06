@@ -162,7 +162,8 @@ export const TimetableNowBarService = {
         const totalLeadMs = Math.max(totalLeadMinutes * 60 * 1000, remainingMs);
         const elapsedLeadMs = Math.max(0, totalLeadMs - remainingMs);
         upcomingProgress = Math.min(100, Math.max(0, Math.round((elapsedLeadMs / totalLeadMs) * 100)));
-        upcomingRemainingMinutes = Math.ceil(remainingMs / (60 * 1000));
+        // 정각 00초 경계에서 ms 반올림 오차로 인해 이전 분으로 머무르지 않도록 500ms 버퍼 반영
+        upcomingRemainingMinutes = Math.max(0, Math.ceil((remainingMs - 500) / (60 * 1000)));
       }
     }
 
@@ -176,7 +177,8 @@ export const TimetableNowBarService = {
     let classRemainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);
     if (state.endTimestamp) {
       const remainingEndMs = Math.max(0, state.endTimestamp - Date.now());
-      classRemainingMinutes = Math.max(0, Math.ceil(remainingEndMs / (60 * 1000)));
+      // 정각 00초 경계에서 ms 반올림 오차로 인해 이전 분으로 머무르지 않도록 500ms 버퍼 반영
+      classRemainingMinutes = Math.max(0, Math.ceil((remainingEndMs - 500) / (60 * 1000)));
     }
     const ongoingRemainingText =
       classRemainingMinutes <= 0 ? '곧 종료' : `${classRemainingMinutes}분 남음`;

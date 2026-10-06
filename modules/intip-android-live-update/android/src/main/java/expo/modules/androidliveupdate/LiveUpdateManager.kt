@@ -100,8 +100,9 @@ object LiveUpdateManager {
   fun scheduleNextAlarm(context: Context, session: LiveUpdateSession) {
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
     val now = System.currentTimeMillis()
+    // 다음 분 00초 정각 + 50ms 시점에 깨어나도록 정확히 계산 (정각 직후 확실하게 다음 분으로 판정되도록 50ms 마진)
     val msToNextMinute = 60_000L - (now % 60_000L)
-    val triggerAtMillis = now + maxOf(500L, msToNextMinute + 100L)
+    val triggerAtMillis = now + maxOf(500L, msToNextMinute + 50L)
 
     val intent = Intent(context, LiveUpdateAlarmReceiver::class.java).apply {
       action = ACTION_TICK
@@ -169,7 +170,8 @@ object LiveUpdateManager {
       }
 
       val remainingMs = maxOf(0L, endMs - now)
-      val remainingMinutes = kotlin.math.ceil(remainingMs / 60000.0).toInt()
+      // 정각 00초 경계에서 ms 반올림 오차로 인해 이전 분으로 머무르지 않도록 500ms 버퍼 반영
+      val remainingMinutes = kotlin.math.max(0, kotlin.math.ceil((remainingMs - 500L) / 60000.0).toInt())
       val remainingText = if (remainingMinutes <= 0) "곧 종료" else "${remainingMinutes}분 남음"
 
       val startMs = session.startTimestamp ?: (endMs - session.durationMinutes * 60_000L)
@@ -217,7 +219,8 @@ object LiveUpdateManager {
       }
 
       val remainingMs = maxOf(0L, startMs - now)
-      val remainingMinutes = kotlin.math.ceil(remainingMs / 60000.0).toInt()
+      // 정각 00초 경계에서 ms 반올림 오차로 인해 이전 분으로 머무르지 않도록 500ms 버퍼 반영
+      val remainingMinutes = kotlin.math.max(0, kotlin.math.ceil((remainingMs - 500L) / 60000.0).toInt())
       val remainingText = if (remainingMinutes <= 0 || remainingMs <= 30_000L) "곧 시작" else "${remainingMinutes}분 전"
 
       val totalLeadMs = maxOf(60_000L, session.leadTimeMinutes * 60_000L)
