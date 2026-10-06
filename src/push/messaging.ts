@@ -39,6 +39,7 @@ import {
   TimetableNowBarService,
   TIMETABLE_ONGOING_NOTIFICATION_ID,
 } from '../timetable/timetableNowBarService';
+import type { TimetableActivityState } from '../timetable/types';
 import {
   LibraryOngoingService,
   LIBRARY_WATCH_NOTIFICATION_ID,
@@ -163,6 +164,29 @@ async function dispatchOngoingActivityIfMatched(data?: Record<string, unknown>):
     try {
       const settings = await TimetableStorage.getSettings();
       if (settings.enabled) {
+        // 서버에서 전달된 수업 상세 정보(liveProps)가 있으면 로컬 캐시 없이도 즉시 나우바로 렌더링
+        if (data.liveProps) {
+          try {
+            const liveProps =
+              typeof data.liveProps === 'string'
+                ? JSON.parse(data.liveProps)
+                : (data.liveProps as any);
+            if (liveProps && liveProps.courseTitle) {
+              const activityState: TimetableActivityState = {
+                phase: liveProps.phase || 'UPCOMING',
+                courseTitle: String(liveProps.courseTitle),
+                location: liveProps.location ? String(liveProps.location) : undefined,
+                startTimestamp: liveProps.startTimestamp ? Number(liveProps.startTimestamp) : undefined,
+                endTimestamp: liveProps.endTimestamp ? Number(liveProps.endTimestamp) : undefined,
+                durationMinutes: liveProps.durationMinutes ? Number(liveProps.durationMinutes) : undefined,
+              };
+              await TimetableNowBarService.renderActivity(activityState);
+              return true;
+            }
+          } catch (parseErr) {
+            console.warn('[messaging] liveProps parsing error:', parseErr);
+          }
+        }
         await TimetableScheduler.syncSchedule();
         return true;
       }
