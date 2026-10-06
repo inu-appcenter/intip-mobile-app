@@ -110,6 +110,7 @@ class IntipAndroidLiveUpdateModule : Module() {
         if (ongoing) {
           LiveUpdateManager.saveSession(context, session)
           LiveUpdateManager.scheduleNextAlarm(context, session)
+          LiveUpdateManager.startLiveUpdateService(context, session)
           registerScreenReceiverIfNeeded()
         } else {
           LiveUpdateManager.stopLiveUpdate(context, id)
