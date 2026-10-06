@@ -100,9 +100,9 @@ object LiveUpdateManager {
   fun scheduleNextAlarm(context: Context, session: LiveUpdateSession) {
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
     val now = System.currentTimeMillis()
-    // 다음 분 00초 정각 + 50ms 시점에 깨어나도록 정확히 계산 (정각 직후 확실하게 다음 분으로 판정되도록 50ms 마진)
+    // 다음 분 00초 정각 대비 OS 지연(1~3초)을 상쇄하기 위해 1.5초(-1500ms) 일찍 알람을 트리거
     val msToNextMinute = 60_000L - (now % 60_000L)
-    val triggerAtMillis = now + maxOf(500L, msToNextMinute + 50L)
+    val triggerAtMillis = now + maxOf(500L, msToNextMinute - 1500L)
 
     val intent = Intent(context, LiveUpdateAlarmReceiver::class.java).apply {
       action = ACTION_TICK

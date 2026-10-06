@@ -223,22 +223,15 @@ describe('timetableScheduler unit tests', () => {
       syncSpy.mockRestore();
     });
 
-    it('does not start progress ticker if Android LiveUpdate is supported', () => {
-      const { Platform } = require('react-native');
-      const { IntipAndroidLiveUpdate } = require('../../../modules/intip-android-live-update');
-      const origPlatform = Platform.OS;
-      Platform.OS = 'android';
-      const isSupportedSpy = jest.spyOn(IntipAndroidLiveUpdate, 'isSupported').mockReturnValue(true);
-
+    it('starts progress ticker with millisecond precision to next minute', () => {
       jest.useFakeTimers();
       const syncSpy = jest.spyOn(TimetableScheduler, 'syncSchedule').mockResolvedValue({ phase: 'NONE' });
 
       TimetableScheduler.startProgressTicker();
       jest.advanceTimersByTime(65 * 1000);
-      expect(syncSpy).not.toHaveBeenCalled();
+      expect(syncSpy).toHaveBeenCalled();
 
-      Platform.OS = origPlatform;
-      isSupportedSpy.mockRestore();
+      TimetableScheduler.stopProgressTicker();
       syncSpy.mockRestore();
     });
   });
