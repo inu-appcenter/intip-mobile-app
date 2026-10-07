@@ -183,19 +183,12 @@ export const TimetableScheduler = {
   startProgressTicker(customDelayMs?: number): void {
     this.stopProgressTicker();
 
-    // Android 16+ One UI 8 LiveUpdate(나우 바)를 지원하는 기기에서는
-    // 네이티브 AlarmManager가 Doze/백그라운드에서도 정확하게 1분 단위 갱신을 전담하므로
-    // 백그라운드에서 지연 및 자원 낭비를 유발하는 JS setTimeout 중복 루프를 방지합니다.
-    if (Platform.OS === 'android' && IntipAndroidLiveUpdate.isSupported()) {
-      return;
-    }
-
     const now = new Date();
-    const seconds = now.getSeconds();
-    const msToNextMinute = Math.max(1000, (60 - seconds) * 1000);
+    // 00.0초 정각을 정확하게 겨냥하기 위해 밀리초 단위 계산
+    const msToNextMinute = 60000 - (now.getTime() % 60000);
     const delay =
       customDelayMs !== undefined && customDelayMs > 0
-        ? Math.min(msToNextMinute, Math.max(500, customDelayMs))
+        ? Math.min(msToNextMinute, Math.max(100, customDelayMs))
         : msToNextMinute;
 
     progressTickerTimer = setTimeout(async () => {

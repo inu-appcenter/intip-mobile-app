@@ -100,8 +100,13 @@ object LiveUpdateManager {
   fun scheduleNextAlarm(context: Context, session: LiveUpdateSession) {
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
     val now = System.currentTimeMillis()
-    val msToNextMinute = 60_000L - (now % 60_000L)
-    val triggerAtMillis = now + maxOf(500L, msToNextMinute + 100L)
+    // 다음 분 00.0초 정각 대비 OS 지연을 상쇄하기 위해 1.5초(-1500ms) 일찍 알람을 트리거
+    var msToNextMinute = 60_000L - (now % 60_000L)
+    if (msToNextMinute <= 1500L) {
+      // 이미 정각 직전(1.5초 이내)이면 다음 분으로 넘겨서 스케줄링
+      msToNextMinute += 60_000L
+    }
+    val triggerAtMillis = now + (msToNextMinute - 1500L)
 
     val intent = Intent(context, LiveUpdateAlarmReceiver::class.java).apply {
       action = ACTION_TICK
@@ -169,7 +174,8 @@ object LiveUpdateManager {
       }
 
       val remainingMs = maxOf(0L, endMs - now)
-      val remainingMinutes = kotlin.math.ceil(remainingMs / 60000.0).toInt()
+      // 정각 00초 경계에서 ms 반올림 오차로 인해 이전 분으로 머무르지 않도록 500ms 버퍼 반영
+      val remainingMinutes = kotlin.math.max(0, kotlin.math.ceil((remainingMs - 500L) / 60000.0).toInt())
       val remainingText = if (remainingMinutes <= 0) "곧 종료" else "${remainingMinutes}분 남음"
 
       val startMs = session.startTimestamp ?: (endMs - session.durationMinutes * 60_000L)
@@ -217,7 +223,8 @@ object LiveUpdateManager {
       }
 
       val remainingMs = maxOf(0L, startMs - now)
-      val remainingMinutes = kotlin.math.ceil(remainingMs / 60000.0).toInt()
+      // 정각 00초 경계에서 ms 반올림 오차로 인해 이전 분으로 머무르지 않도록 500ms 버퍼 반영
+      val remainingMinutes = kotlin.math.max(0, kotlin.math.ceil((remainingMs - 500L) / 60000.0).toInt())
       val remainingText = if (remainingMinutes <= 0 || remainingMs <= 30_000L) "곧 시작" else "${remainingMinutes}분 전"
 
       val totalLeadMs = maxOf(60_000L, session.leadTimeMinutes * 60_000L)
@@ -247,9 +254,99 @@ object LiveUpdateManager {
     }
   }
 
+  fun startLiveUpdateService(context: Context, session: LiveUpdateSession) {
+    try {
+      val intent = Intent(context, LiveUpdateService::class.java).apply {
+        action = LiveUpdateService.ACTION_START
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        context.startForegroundService(intent)
+      } else {
+        context.startService(intent)
+      }
+      Log.i(TAG, "Requested LiveUpdateService start (adj 200 guard) for id=${session.id}")
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to start LiveUpdateService (background start may be restricted)", e)
+    }
+  }
+
+  fun stopLiveUpdateService(context: Context) {
+    try {
+      val intent = Intent(context, LiveUpdateService::class.java).apply {
+        action = LiveUpdateService.ACTION_STOP
+      }
+      context.startService(intent)
+      Log.i(TAG, "Requested LiveUpdateService stop")
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to stop LiveUpdateService", e)
+    }
+  }
+
+  fun createNotificationFromSession(context: Context, session: LiveUpdateSession): Notification {
+    val now = System.currentTimeMillis()
+    val isUpcoming = session.phase.equals("UPCOMING", ignoreCase = true)
+
+    val title: String
+    val cardBody: String
+    val shortCriticalText: String
+    val progress: Int
+
+    if (isUpcoming) {
+      val startMs = session.startTimestamp ?: (now + session.leadTimeMinutes * 60_000L)
+      val remainingMs = maxOf(0L, startMs - now)
+      val remainingMinutes = kotlin.math.max(0, kotlin.math.ceil((remainingMs - 500L) / 60000.0).toInt())
+      val remainingText = if (remainingMinutes <= 0 || remainingMs <= 30_000L) "곧 시작" else "${remainingMinutes}분 전"
+      val totalLeadMs = maxOf(60_000L, session.leadTimeMinutes * 60_000L)
+      val elapsedLeadMs = maxOf(0L, totalLeadMs - remainingMs)
+      progress = ((elapsedLeadMs.toDouble() / totalLeadMs) * 100).toInt().coerceIn(0, 100)
+
+      val courseName = session.courseTitle ?: session.title.removePrefix("[다음 수업] ").trim()
+      title = "[다음 수업] $courseName"
+      val timePart = if (!session.timeRange.isNullOrEmpty()) " · ${session.timeRange}" else ""
+      val line1 = "$remainingText$timePart"
+      val line2 = session.locationAndProf ?: session.details ?: ""
+      cardBody = if (line2.isNotEmpty()) "$line1\n$line2" else line1
+      shortCriticalText = remainingText
+    } else {
+      val endMs = session.endTimestamp ?: (now + session.durationMinutes * 60_000L)
+      val remainingMs = maxOf(0L, endMs - now)
+      val remainingMinutes = kotlin.math.max(0, kotlin.math.ceil((remainingMs - 500L) / 60000.0).toInt())
+      val remainingText = if (remainingMinutes <= 0) "곧 종료" else "${remainingMinutes}분 남음"
+      val startMs = session.startTimestamp ?: (endMs - session.durationMinutes * 60_000L)
+      val totalDurationMs = maxOf(60_000L, endMs - startMs)
+      val elapsedMs = maxOf(0L, now - startMs)
+      progress = ((elapsedMs.toDouble() / totalDurationMs) * 100).toInt().coerceIn(0, 100)
+
+      val courseName = session.courseTitle ?: session.title.removePrefix("[수업 중] ").trim()
+      title = "[수업 중] $courseName"
+      val timePart = if (!session.timeRange.isNullOrEmpty()) " · ${session.timeRange}" else ""
+      val line1 = "$remainingText$timePart"
+      val line2 = session.locationAndProf ?: session.details ?: ""
+      cardBody = if (line2.isNotEmpty()) "$line1\n$line2" else line1
+      shortCriticalText = remainingText
+    }
+
+    return buildNotification(
+      context = context,
+      id = session.id,
+      channelId = session.channelId,
+      channelName = session.channelName,
+      title = title,
+      text = cardBody,
+      shortCriticalText = shortCriticalText,
+      progress = progress,
+      segmentsRaw = session.segmentsRaw,
+      targetTimestamp = session.targetTimestamp,
+      showChronometer = false,
+      showWhen = false,
+      ongoing = session.ongoing
+    )
+  }
+
   fun stopLiveUpdate(context: Context, id: Int): Boolean {
     cancelAlarm(context, id)
     clearSession(context)
+    stopLiveUpdateService(context)
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     return try {
       notificationManager.cancel(id)
@@ -261,7 +358,7 @@ object LiveUpdateManager {
     }
   }
 
-  fun buildAndPostNotification(
+  fun buildNotification(
     context: Context,
     id: Int,
     channelId: String,
@@ -276,7 +373,7 @@ object LiveUpdateManager {
     showChronometer: Boolean = false,
     showWhen: Boolean = false,
     ongoing: Boolean = true
-  ): Boolean {
+  ): Notification {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     ensureNotificationChannel(notificationManager, channelId, channelName)
 
@@ -344,7 +441,42 @@ object LiveUpdateManager {
       }
     }
 
-    val notification = builder.build()
+    return builder.build()
+  }
+
+  fun buildAndPostNotification(
+    context: Context,
+    id: Int,
+    channelId: String,
+    channelName: String,
+    title: String,
+    text: String,
+    subText: String? = null,
+    shortCriticalText: String? = null,
+    progress: Int? = null,
+    segmentsRaw: List<Map<String, Any?>>? = null,
+    targetTimestamp: Long? = null,
+    showChronometer: Boolean = false,
+    showWhen: Boolean = false,
+    ongoing: Boolean = true
+  ): Boolean {
+    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val notification = buildNotification(
+      context = context,
+      id = id,
+      channelId = channelId,
+      channelName = channelName,
+      title = title,
+      text = text,
+      subText = subText,
+      shortCriticalText = shortCriticalText,
+      progress = progress,
+      segmentsRaw = segmentsRaw,
+      targetTimestamp = targetTimestamp,
+      showChronometer = showChronometer,
+      showWhen = showWhen,
+      ongoing = ongoing
+    )
     val promotable = checkPromotableCharacteristics(notification)
     notificationManager.notify(id, notification)
     dismissDuplicateFCMNotificationIfNeeded(notificationManager)

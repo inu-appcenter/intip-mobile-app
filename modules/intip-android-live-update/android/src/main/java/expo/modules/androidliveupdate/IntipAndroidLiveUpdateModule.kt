@@ -24,8 +24,9 @@ class IntipAndroidLiveUpdateModule : Module() {
     override fun onReceive(ctx: Context?, intent: Intent?) {
       when (intent?.action) {
         Intent.ACTION_SCREEN_ON,
-        Intent.ACTION_USER_PRESENT -> {
-          Log.d(TAG, "Screen on / user present received, refreshing LiveUpdate")
+        Intent.ACTION_USER_PRESENT,
+        Intent.ACTION_TIME_TICK -> {
+          Log.d(TAG, "Screen or time tick event received (${intent.action}), refreshing LiveUpdate")
           ctx?.let { LiveUpdateManager.onTick(it) }
         }
       }
@@ -109,6 +110,7 @@ class IntipAndroidLiveUpdateModule : Module() {
         if (ongoing) {
           LiveUpdateManager.saveSession(context, session)
           LiveUpdateManager.scheduleNextAlarm(context, session)
+          LiveUpdateManager.startLiveUpdateService(context, session)
           registerScreenReceiverIfNeeded()
         } else {
           LiveUpdateManager.stopLiveUpdate(context, id)
@@ -171,10 +173,11 @@ class IntipAndroidLiveUpdateModule : Module() {
       val filter = IntentFilter().apply {
         addAction(Intent.ACTION_SCREEN_ON)
         addAction(Intent.ACTION_USER_PRESENT)
+        addAction(Intent.ACTION_TIME_TICK)
       }
       context.registerReceiver(screenReceiver, filter)
       isReceiverRegistered = true
-      Log.d(TAG, "Screen receiver registered on applicationContext")
+      Log.d(TAG, "Screen & time tick receiver registered on applicationContext")
     } catch (e: Exception) {
       Log.w(TAG, "Failed to register screen receiver", e)
     }

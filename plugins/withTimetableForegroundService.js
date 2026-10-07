@@ -5,6 +5,7 @@ const PERMISSIONS = [
   'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
   'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
   'android.permission.POST_PROMOTED_NOTIFICATIONS',
+  'android.permission.WAKE_LOCK',
 ];
 
 module.exports = function withTimetableForegroundService(config) {
@@ -42,6 +43,33 @@ module.exports = function withTimetableForegroundService(config) {
       mainApplication.service[existingServiceIndex] = serviceDefinition;
     } else {
       mainApplication.service.push(serviceDefinition);
+    }
+
+    // 2-2. Android 16 LiveUpdateService 등록 (Now Bar Foreground Service)
+    const existingLiveUpdateIndex = mainApplication.service.findIndex(
+      (s) => s.$['android:name'] === 'expo.modules.androidliveupdate.LiveUpdateService',
+    );
+
+    const liveUpdateServiceDefinition = {
+      $: {
+        'android:name': 'expo.modules.androidliveupdate.LiveUpdateService',
+        'android:foregroundServiceType': 'specialUse|dataSync',
+        'android:exported': 'false',
+      },
+      property: [
+        {
+          $: {
+            'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
+            'android:value': 'Timetable live ongoing activity',
+          },
+        },
+      ],
+    };
+
+    if (existingLiveUpdateIndex >= 0) {
+      mainApplication.service[existingLiveUpdateIndex] = liveUpdateServiceDefinition;
+    } else {
+      mainApplication.service.push(liveUpdateServiceDefinition);
     }
 
     // 3. Samsung One UI Now Bar / Ongoing Activity 메타데이터 선언
