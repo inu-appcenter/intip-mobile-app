@@ -261,9 +261,16 @@ export const TimetableScheduler = {
       return testActivity;
     }
 
+    // iOS에서 push-to-start가 등록된 기기는 서버가 Live Activity의 시작(UPCOMING)·갱신·종료를 맡는다.
+    // 앱은 떠 있는 것이 없을 때 ONGOING만 시작하고, 떠 있는 것은 덮어쓰거나 끝내지 않는다 — 로컬
+    // 시간표를 근거로 끄지도 않는다. 로컬 시간표는 웹이 syncTimetable 브리지로 넘겨줄 때만 채워져서
+    // 비어 있을 수 있는데(운영 웹은 이 브리지를 아직 보내지 않는다), 그걸 근거로 끄면 서버가 방금
+    // 시작한 Activity를 앱이 깨어나자마자 지워 버린다.
+    const serverManaged = await isLiveActivityPushToStartRegistered();
+
     const data = await TimetableStorage.getTimetableData();
     if (!data || !data.courses || data.courses.length === 0) {
-      await TimetableNowBarService.cancel();
+      if (!serverManaged) await TimetableNowBarService.cancel();
       this.stopProgressTicker();
       return { phase: 'NONE' };
     }
@@ -271,9 +278,6 @@ export const TimetableScheduler = {
     const state = getCurrentActivityState(data.courses, targetDate, settings.leadTimeMinutes);
 
     // 알림 표시 또는 취소
-    // iOS에서 push-to-start가 등록된 기기는 서버가 Live Activity의 시작(UPCOMING)·갱신·종료를 맡는다.
-    // 앱은 떠 있는 것이 없을 때 ONGOING만 시작하고, 떠 있는 것은 덮어쓰거나 끝내지 않는다.
-    const serverManaged = await isLiveActivityPushToStartRegistered();
     if (state.phase === 'NONE') {
       if (!serverManaged) await TimetableNowBarService.cancel();
       this.stopProgressTicker();
