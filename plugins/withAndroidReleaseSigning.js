@@ -37,24 +37,25 @@ const RELEASE_SIGNING_CONFIG = `
             keyPassword System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
         }`;
 
-module.exports = function withAndroidReleaseSigning(config) {
-  return withAppBuildGradle(config, (cfg) => {
-    let contents = cfg.modResults.contents;
+const MINIFY_ANCHOR_REGEXES = [
+  /minifyEnabled\s+enableProguardInReleaseBuilds/,
+  /minifyEnabled\s+false/,
+];
 
-    // `expo prebuild` without `--clean` re-runs this mod over the *already
-    // patched* build.gradle, so bail out early instead of double-inserting the
-    // signingConfig block and then throwing on the (already replaced) anchor.
-    if (contents.includes('signingConfigs.release')) {
-      return cfg;
-    }
+const PROGUARD_FILE_REGEX =
+  /proguardFiles getDefaultProguardFile\((['"])proguard-android\.txt\1\), (['"])proguard-rules\.pro\2/;
 
-    if (!contents.includes('signingConfigs {')) {
+function applyReleaseBuildGradlePatches(contents) {
+  let nextContents = contents;
+
+  if (!nextContents.includes('signingConfigs.release')) {
+    if (!nextContents.includes('signingConfigs {')) {
       throw new Error(
         'withAndroidReleaseSigning: no `signingConfigs {` block found in ' +
           'app/build.gradle — the Expo-generated template must have changed.',
       );
     }
-    contents = contents.replace(
+    nextContents = nextContents.replace(
       'signingConfigs {',
       `signingConfigs {${RELEASE_SIGNING_CONFIG}`,
     );
@@ -62,17 +63,62 @@ module.exports = function withAndroidReleaseSigning(config) {
     // Anchored on RN's own scaffold comment (stable across Expo versions)
     // rather than surrounding whitespace, so this only ever touches the
     // `release` buildType's signingConfig line, not the `debug` one.
-    const anchor = /(\/\/ Caution! In production[\s\S]*?signingConfig )signingConfigs\.debug/;
-    if (!anchor.test(contents)) {
+    const signingAnchor = /(\/\/ Caution! In production[\s\S]*?signingConfig )signingConfigs\.debug/;
+    if (!signingAnchor.test(nextContents)) {
       throw new Error(
         'withAndroidReleaseSigning: could not find the release buildType\'s ' +
           '`signingConfig signingConfigs.debug` line to replace — the ' +
           'Expo-generated template must have changed.',
       );
     }
-    contents = contents.replace(anchor, '$1signingConfigs.release');
+    nextContents = nextContents.replace(signingAnchor, '$1signingConfigs.release');
+  }
+
+  const minifyAnchor = MINIFY_ANCHOR_REGEXES.find((regex) => regex.test(nextContents));
+  if (!minifyAnchor) {
+    throw new Error(
+      'withAndroidReleaseSigning: could not find release minifyEnabled line ' +
+        'to enforce R8 settings — the Expo-generated template must have changed.',
+    );
+  }
+  nextContents = nextContents.replace(
+    minifyAnchor,
+    'minifyEnabled true\n            shrinkResources true',
+  );
+
+  if (!PROGUARD_FILE_REGEX.test(nextContents)) {
+    throw new Error(
+      'withAndroidReleaseSigning: could not find release proguardFiles line ' +
+        'to enforce optimized defaults — the Expo-generated template must have changed.',
+    );
+  }
+  nextContents = nextContents.replace(
+    PROGUARD_FILE_REGEX,
+    'proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"',
+  );
+
+  return nextContents;
+}
+
+function withAndroidReleaseSigning(config) {
+  return withAppBuildGradle(config, (cfg) => {
+    let contents = cfg.modResults.contents;
+
+    try {
+      contents = applyReleaseBuildGradlePatches(contents);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(
+          `withAndroidReleaseSigning failed while patching app/build.gradle: ${error.message}`,
+        );
+      }
+      throw error;
+    }
 
     cfg.modResults.contents = contents;
     return cfg;
   });
-};
+}
+
+module.exports = withAndroidReleaseSigning;
+module.exports.applyReleaseBuildGradlePatches = applyReleaseBuildGradlePatches;
