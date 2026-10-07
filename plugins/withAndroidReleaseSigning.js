@@ -27,7 +27,9 @@
  *   - ANDROID_RELEASE_STORE_FILE (defaults to `../../intip.jks`, i.e. repo
  *     root, resolved relative to android/app/build.gradle)
  */
-const { withAppBuildGradle } = require('expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
+const { withAppBuildGradle, withDangerousMod } = require('expo/config-plugins');
 
 const RELEASE_SIGNING_CONFIG = `
         release {
@@ -46,6 +48,21 @@ const PROGUARD_FILE_REGEX =
   /proguardFiles getDefaultProguardFile\((['"])proguard-android\.txt\1\), (['"])proguard-rules\.pro\2/;
 const OPTIMIZED_PROGUARD_FILE_LINE =
   'proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"';
+const PROGUARD_RULES_BLOCK_START = '# @generated withAndroidReleaseSigning begin';
+const PROGUARD_RULES_BLOCK_END = '# @generated withAndroidReleaseSigning end';
+const PROGUARD_RULES_BLOCK = `${PROGUARD_RULES_BLOCK_START}
+# Baseline rules for release stability with R8 enabled.
+-keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,Signature,InnerClasses,EnclosingMethod
+-keepclassmembers class * {
+    native <methods>;
+}
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+# Add app-specific reflection/serialization keep rules below when needed.
+${PROGUARD_RULES_BLOCK_END}
+`;
 
 function applyReleaseBuildGradlePatches(contents) {
   let nextContents = contents;
@@ -110,6 +127,37 @@ function applyReleaseBuildGradlePatches(contents) {
   return nextContents;
 }
 
+function applyProguardRulesPatches(contents) {
+  const existing = contents.trimEnd();
+  const blockRegex = new RegExp(
+    `${PROGUARD_RULES_BLOCK_START}[\\s\\S]*?${PROGUARD_RULES_BLOCK_END}\\n?`,
+    'g',
+  );
+  const withoutGeneratedBlock = existing.replace(blockRegex, '').trimEnd();
+  if (!withoutGeneratedBlock) {
+    return `${PROGUARD_RULES_BLOCK}\n`;
+  }
+  return `${withoutGeneratedBlock}\n\n${PROGUARD_RULES_BLOCK}\n`;
+}
+
+function withAndroidProguardRules(config) {
+  return withDangerousMod(config, [
+    'android',
+    (cfg) => {
+      const proguardFilePath = path.join(
+        cfg.modRequest.platformProjectRoot,
+        'app',
+        'proguard-rules.pro',
+      );
+      const existing = fs.existsSync(proguardFilePath)
+        ? fs.readFileSync(proguardFilePath, 'utf8')
+        : '';
+      fs.writeFileSync(proguardFilePath, applyProguardRulesPatches(existing));
+      return cfg;
+    },
+  ]);
+}
+
 function withAndroidReleaseSigning(config) {
   return withAppBuildGradle(config, (cfg) => {
     let contents = cfg.modResults.contents;
@@ -130,5 +178,8 @@ function withAndroidReleaseSigning(config) {
   });
 }
 
-module.exports = withAndroidReleaseSigning;
+module.exports = function withAndroidReleaseBuildHardening(config) {
+  return withAndroidProguardRules(withAndroidReleaseSigning(config));
+};
 module.exports.applyReleaseBuildGradlePatches = applyReleaseBuildGradlePatches;
+module.exports.applyProguardRulesPatches = applyProguardRulesPatches;
