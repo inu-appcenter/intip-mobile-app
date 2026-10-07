@@ -34,7 +34,7 @@
     },
     "android": {
       "package": "inu.appcenter.intip_android",
-      "versionCode": 33,
+      "versionCode": 34,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
