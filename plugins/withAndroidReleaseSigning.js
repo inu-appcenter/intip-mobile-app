@@ -44,6 +44,8 @@ const MINIFY_ANCHOR_REGEXES = [
 
 const PROGUARD_FILE_REGEX =
   /proguardFiles getDefaultProguardFile\((['"])proguard-android\.txt\1\), (['"])proguard-rules\.pro\2/;
+const OPTIMIZED_PROGUARD_FILE_LINE =
+  'proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"';
 
 function applyReleaseBuildGradlePatches(contents) {
   let nextContents = contents;
@@ -74,28 +76,36 @@ function applyReleaseBuildGradlePatches(contents) {
     nextContents = nextContents.replace(signingAnchor, '$1signingConfigs.release');
   }
 
-  const minifyAnchor = MINIFY_ANCHOR_REGEXES.find((regex) => regex.test(nextContents));
-  if (!minifyAnchor) {
-    throw new Error(
-      'withAndroidReleaseSigning: could not find release minifyEnabled line ' +
-        'to enforce R8 settings — the Expo-generated template must have changed.',
+  if (nextContents.includes('minifyEnabled true')) {
+    if (!nextContents.includes('shrinkResources true')) {
+      nextContents = nextContents.replace(
+        'minifyEnabled true',
+        'minifyEnabled true\n            shrinkResources true',
+      );
+    }
+  } else {
+    const minifyAnchor = MINIFY_ANCHOR_REGEXES.find((regex) => regex.test(nextContents));
+    if (!minifyAnchor) {
+      throw new Error(
+        'withAndroidReleaseSigning: could not find release minifyEnabled line ' +
+          'to enforce R8 settings — the Expo-generated template must have changed.',
+      );
+    }
+    nextContents = nextContents.replace(
+      minifyAnchor,
+      'minifyEnabled true\n            shrinkResources true',
     );
   }
-  nextContents = nextContents.replace(
-    minifyAnchor,
-    'minifyEnabled true\n            shrinkResources true',
-  );
 
-  if (!PROGUARD_FILE_REGEX.test(nextContents)) {
-    throw new Error(
-      'withAndroidReleaseSigning: could not find release proguardFiles line ' +
-        'to enforce optimized defaults — the Expo-generated template must have changed.',
-    );
+  if (!nextContents.includes(OPTIMIZED_PROGUARD_FILE_LINE)) {
+    if (!PROGUARD_FILE_REGEX.test(nextContents)) {
+      throw new Error(
+        'withAndroidReleaseSigning: could not find release proguardFiles line ' +
+          'to enforce optimized defaults — the Expo-generated template must have changed.',
+      );
+    }
+    nextContents = nextContents.replace(PROGUARD_FILE_REGEX, OPTIMIZED_PROGUARD_FILE_LINE);
   }
-  nextContents = nextContents.replace(
-    PROGUARD_FILE_REGEX,
-    'proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"',
-  );
 
   return nextContents;
 }
