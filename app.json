@@ -34,6 +34,7 @@
     },
     "android": {
       "package": "inu.appcenter.intip_android",
+      "allowBackup": false,
       "versionCode": 31,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
