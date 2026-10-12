@@ -66,5 +66,6 @@ version range (`"^0.1.0"`) and drop the submodule — no reason to keep both.
   packages/expo-widgets-glance && git add packages/expo-widgets-glance` — and
   rebuild the plugin (`npm run widgets-glance:build`).
 - `src/widgets/*.tsx` files (`NextClassWidget`, `TodayClassesWidget`,
-  `BusArrivalWidget`, `CafeteriaMenuWidget`, `TimetableWidget`) stay in this
+  `BusArrivalWidget` — which also registers `BusStopWidget`, the same layout
+  with a stop the user picks — `CafeteriaMenuWidget`, `TimetableWidget`) stay in this
   app — they're INTIP-specific, unlike the renderer itself.

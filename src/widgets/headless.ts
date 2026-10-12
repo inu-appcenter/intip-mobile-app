@@ -21,6 +21,7 @@ import { registerGlanceRefreshTask } from 'expo-widgets-glance';
 
 import {
   refreshBusArrivalWidget,
+  refreshBusStopWidget,
   refreshCafeteriaMenuWidget,
   refreshScheduleWidgets,
 } from './refresh';
@@ -38,6 +39,7 @@ const REFRESHERS: Record<string, (now?: Date) => Promise<void>> = {
   TodayClassesWidget: refreshScheduleWidgets,
   TimetableWidget: refreshScheduleWidgets,
   BusArrivalWidget: refreshBusArrivalWidget,
+  BusStopWidget: refreshBusStopWidget,
   CafeteriaMenuWidget: refreshCafeteriaMenuWidget,
 };
 
