@@ -50,7 +50,7 @@ import {
   toBusArrivalProps,
   withObservedAt,
 } from './data/busArrival';
-import { hasSession } from './data/apiClient';
+import { sessionState } from './data/apiClient';
 import { getWidgetPosition } from './data/location';
 import {
   classBoundariesOf,
@@ -123,15 +123,18 @@ function push<P extends Record<string, unknown>>(
  *
  * Being logged out is a state worth showing — the widgets have their own
  * `loggedOut` for it, and a shared device shouldn't keep a previous account's
- * classes on screen. A failed *request* is not: `getJson` returns null for a
- * timeout, a 401 and a missing session alike (see `data/apiClient.ts`), so the
- * session is checked separately rather than inferred from an empty result.
- * Without that split, one flaky request or one expired token replaces a
- * perfectly good timetable with "로그인이 필요해요" — observed happening on a
- * device that was, in fact, logged in.
+ * classes on screen. Not knowing is not: `getJson` returns null for a timeout,
+ * a 401 and a missing session alike (see `data/apiClient.ts`), so the session
+ * is checked separately, and only a definite "no session" clears the widgets.
+ * `unknown` — the keychain is locked because iOS launched the app in the
+ * background on a locked phone, or the token refresh got no answer — leaves
+ * them alone. Treating it as logged out replaced a perfectly good timetable
+ * with "로그인이 필요해요" on devices that were, in fact, logged in.
  */
 export async function refreshScheduleWidgets(now: Date = new Date()): Promise<void> {
-  if (!(await hasSession())) {
+  const session = await sessionState();
+  if (session === 'unknown') return; // Keep the last good snapshot.
+  if (session === 'none') {
     push(NEXT_CLASS, [], () => ({ status: 'loggedOut' as const }), now);
     push(TODAY_CLASSES, [], () => ({ status: 'noTimetable' as const, dateLabel: '' }), now);
     push(TIMETABLE, [], () => ({ status: 'noTimetable' as const }), now);

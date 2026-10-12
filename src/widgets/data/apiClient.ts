@@ -21,7 +21,7 @@
  * previous snapshot on screen, not to surface an error the user can't act on.
  */
 import { API_BASE_URL } from '../../config/env';
-import { getValidAccessToken } from '../../native/authTokens';
+import { getSession, getValidAccessToken, type Session } from '../../native/authTokens';
 
 /**
  * The portal's envelope. Every endpoint the widgets use wraps its payload in
@@ -94,7 +94,11 @@ export async function getJson<T>(path: string, options: FetchOptions = {}): Prom
   }
 }
 
-/** True when this device has a usable portal session right now. */
-export async function hasSession(): Promise<boolean> {
-  return (await getValidAccessToken()) !== null;
+/**
+ * Whether this device has a portal session: `valid`, definitely `none`, or
+ * `unknown` when it couldn't be determined (locked keychain, refresh request
+ * that got no answer).
+ */
+export async function sessionState(): Promise<Session['state']> {
+  return (await getSession()).state;
 }
