@@ -315,20 +315,140 @@ export function toCafeteriaMenuProps(menus: Record<string, MenuSlots | null>, no
   return { cafeterias };
 }
 
+// --- Fetch ------------------------------------------------------------------
+
 /**
- * Today's menu for every cafeteria, keyed by API name, null for each request
- * that failed. One request per cafeteria, however many options share it.
+ * How many days of menus one refresh hands the widget, today included.
  *
- * `day` is `Date.getDay()` (Sunday = 0), which is the convention the portal's
- * own `getCafeterias(cafeteria, day)` uses.
+ * The server publishes a week at a time (Monday–Saturday, by weekday), so
+ * tomorrow's menu is already there to be read. Three days is a refresh's worth
+ * of requests kept reasonable — one per cafeteria per day — and covers a
+ * weekend the app isn't opened on.
  */
-export async function fetchCafeteriaMenus(now: Date): Promise<Record<string, MenuSlots | null>> {
+export const CAFETERIA_LOOKAHEAD_DAYS = 3;
+
+/** One calendar day's menus, keyed by API name; null for each request that failed. */
+export type CafeteriaDay = {
+  /** `now` for today, midnight for a later day. */
+  start: Date;
+  menus: Record<string, MenuSlots | null>;
+};
+
+function localDateKey(day: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
+}
+
+/**
+ * The days a refresh at `now` can fetch: today, then each following day that
+ * is still in the same published week.
+ *
+ * Stops before a Sunday or a Monday. `day` is a weekday, not a date, so asking
+ * for next Monday answers with *this* week's Monday; and `day=0`, tried on a
+ * Monday, answered with Monday's menu — not something to show as Sunday's.
+ */
+export function cafeteriaDaysFrom(now: Date, days: number = CAFETERIA_LOOKAHEAD_DAYS): Date[] {
+  const result = [now];
+  for (let offset = 1; offset < days; offset++) {
+    const day = new Date(now);
+    day.setDate(day.getDate() + offset);
+    day.setHours(0, 0, 0, 0);
+    if (day.getDay() <= 1) break;
+    result.push(day);
+  }
+  return result;
+}
+
+/**
+ * The last menu each request returned, by `date|cafeteria`.
+ *
+ * Two jobs. A later day's menu doesn't change once published, so it is asked
+ * for once per process rather than on every refresh. And a request that fails
+ * falls back to what it returned last time, instead of replacing a good menu
+ * with "메뉴를 불러오지 못했어요" because one of five requests timed out.
+ */
+const menuCache = new Map<string, MenuSlots>();
+
+async function fetchMenu(name: string, day: Date, refetch: boolean): Promise<MenuSlots | null> {
+  const key = `${localDateKey(day)}|${name}`;
+  const cached = menuCache.get(key);
+  if (cached && !refetch) return cached;
+
+  const fetched = await getJson<MenuSlots>('/api/cafeterias', { query: { cafeteria: name, day: day.getDay() } });
+  if (fetched) menuCache.set(key, fetched);
+  return fetched ?? cached ?? null;
+}
+
+/**
+ * Menus for today and the days after it that can be fetched, or null when
+ * nothing at all came back for today — a network failure, where the caller
+ * keeps the last good snapshot.
+ *
+ * One request per cafeteria per day, however many options share a cafeteria.
+ * `day` is `Date.getDay()` (Sunday = 0), the convention the portal's own
+ * `getCafeterias(cafeteria, day)` uses. Today is always refetched, since a
+ * menu can be published late; a later day that failed entirely ends the list
+ * there, so the widget says it needs a refresh rather than that every
+ * cafeteria is shut.
+ */
+export async function fetchCafeteriaDays(now: Date): Promise<CafeteriaDay[] | null> {
   const names = [...new Set(CAFETERIAS.map((option) => option.name))];
-  const entries = await Promise.all(
-    names.map(
-      async (name) =>
-        [name, await getJson<MenuSlots>('/api/cafeterias', { query: { cafeteria: name, day: now.getDay() } })] as const,
-    ),
+  const today = localDateKey(now);
+  for (const key of menuCache.keys()) {
+    if (key.slice(0, today.length) < today) menuCache.delete(key);
+  }
+
+  const fetched = await Promise.all(
+    cafeteriaDaysFrom(now).map(async (start, index) => {
+      const entries = await Promise.all(
+        names.map(async (name) => [name, await fetchMenu(name, start, index === 0)] as const),
+      );
+      return { start, menus: Object.fromEntries(entries) };
+    }),
   );
-  return Object.fromEntries(entries);
+
+  const failed = fetched.findIndex((day) => Object.values(day.menus).every((menu) => menu === null));
+  if (failed === 0) return null;
+  return failed === -1 ? fetched : fetched.slice(0, failed);
+}
+
+/**
+ * Every instant the widget changes over `days`: each day's meal switches, the
+ * midnights between days, and the midnight after the last one — where the
+ * menus run out and {@link cafeteriaPropsAt} says so.
+ */
+export function cafeteriaBoundariesOf(days: CafeteriaDay[]): Date[] {
+  const boundaries = days.flatMap((day, index) => [
+    ...(index > 0 ? [day.start] : []),
+    ...mealBoundariesOf(day.start),
+  ]);
+  const last = days[days.length - 1];
+  if (last) {
+    const end = new Date(last.start);
+    end.setDate(end.getDate() + 1);
+    end.setHours(0, 0, 0, 0);
+    boundaries.push(end);
+  }
+  return boundaries;
+}
+
+/**
+ * The widget props at `at`, from whichever fetched day `at` falls on.
+ *
+ * Past the last fetched day there is no menu to show, and yesterday's is not
+ * today's: every option says the app needs opening instead.
+ */
+export function cafeteriaPropsAt(days: CafeteriaDay[], at: Date): CafeteriaMenuWidgetProps {
+  const day = days.find((candidate) => localDateKey(candidate.start) === localDateKey(at));
+  if (day) return toCafeteriaMenuProps(day.menus, at);
+
+  const cafeterias: Record<string, CafeteriaSnapshot> = {};
+  for (const option of CAFETERIAS) {
+    cafeterias[option.id] = {
+      status: 'notOperating',
+      cafeteriaName: option.name,
+      message: '앱을 열면 오늘 메뉴를 불러와요',
+    };
+  }
+  return { cafeterias };
 }

@@ -6,8 +6,9 @@
 import { describe, it, expect } from '@jest/globals';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { patchBusArrivalWidgetSwift } = require('../withBusArrivalRefreshIntent') as {
+const { patchBusArrivalWidgetSwift, patchBusStopWidgetSwift } = require('../withBusArrivalRefreshIntent') as {
   patchBusArrivalWidgetSwift: (source: string) => string;
+  patchBusStopWidgetSwift: (source: string) => string;
 };
 
 // What expo-widgets 56 generates for BusArrivalWidget.
@@ -41,6 +42,42 @@ describe('patchBusArrivalWidgetSwift', () => {
 
   it('throws when the generated template no longer matches', () => {
     expect(() => patchBusArrivalWidgetSwift(GENERATED.replace('WidgetsEntryView', 'EntryView'))).toThrow(
+      /template has changed/,
+    );
+  });
+});
+
+// The part of what expo-widgets 56 generates for a widget with options that
+// the patch touches: its own entry view, and the one place it is used.
+const GENERATED_STOP = `struct BusStopWidgetEntryView: View {
+  var entry: BusStopWidgetTimelineProvider.Entry
+}
+
+@available(iOS 17.0, *)
+struct BusStopWidget: Widget {
+  let name: String = "BusStopWidget"
+
+  var body: some WidgetConfiguration {
+    return AppIntentConfiguration(kind: name, intent: BusStopWidgetConfigurationAppIntent.self, provider: BusStopWidgetTimelineProvider()) { entry in
+      BusStopWidgetEntryView(entry: entry)
+    }
+  }
+}`;
+
+describe('patchBusStopWidgetSwift', () => {
+  it('wraps the generated entry view instead of replacing it', () => {
+    const patched = patchBusStopWidgetSwift(GENERATED_STOP);
+    expect(patched).toContain('BusStopWidgetEntryView(entry: entry).busStopRefreshOverlay()');
+    expect(patched).toContain('struct BusStopWidgetEntryView: View');
+  });
+
+  it('is idempotent', () => {
+    const once = patchBusStopWidgetSwift(GENERATED_STOP);
+    expect(patchBusStopWidgetSwift(once)).toBe(once);
+  });
+
+  it('throws when the generated template no longer matches', () => {
+    expect(() => patchBusStopWidgetSwift(GENERATED_STOP.replace('(entry: entry)', '(entry)'))).toThrow(
       /template has changed/,
     );
   });
