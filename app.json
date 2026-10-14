@@ -2,7 +2,7 @@
   "expo": {
     "name": "INTIP",
     "slug": "intip-mobile-app",
-    "version": "3.0.14",
+    "version": "3.0.15",
     "orientation": "portrait",
     "scheme": "intipmobileapp",
     "userInterfaceStyle": "light",
