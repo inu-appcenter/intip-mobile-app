@@ -50,6 +50,8 @@ import {
   LMS_DEADLINE_NOTIFICATION_ID,
 } from '../lms/lmsOngoingService';
 import { LocalWatchManager } from '../agent/localWatchManager';
+import { refreshAllWidgetsIfStale } from '../widgets/refresh';
+import { PUSH_REFRESH_MIN_INTERVAL_MS } from '../widgets/refreshIntervals';
 
 export type { NavIntent };
 
@@ -546,13 +548,15 @@ export function registerBackgroundHandlers(): void {
   // We manually handle data-only notifications (i.e. remoteMessage.notification is undefined).
   messaging().setBackgroundMessageHandler(async (remoteMessage) => {
     const data = remoteMessage?.data as Record<string, unknown> | undefined;
-    if (await dispatchOngoingActivityIfMatched(data)) {
-      return;
-    }
-
-    if (!remoteMessage.notification) {
+    if (!(await dispatchOngoingActivityIfMatched(data)) && !remoteMessage.notification) {
       await handleDisplayNotification(remoteMessage);
     }
+
+    // A background push is the one time the app runs without being opened, so
+    // it doubles as the widgets' refresh — the only one an iOS widget gets on
+    // a phone the app stays closed on. Awaited: the OS keeps the process alive
+    // only until this handler settles. Never throws (see widgets/refresh.ts).
+    await refreshAllWidgetsIfStale(PUSH_REFRESH_MIN_INTERVAL_MS);
   });
 
   // Android 16 / One UI 8 Live Notification / Rich Ongoing Activity를 위한 Foreground Service 러너 등록

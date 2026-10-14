@@ -25,7 +25,7 @@
  * is still counting toward an estimate someone made minutes ago, and the
  * timestamp is the only thing on the widget that says when.
  */
-import type { BusArrivalWidgetProps } from '../BusArrivalWidget';
+import type { BusArrivalSnapshot } from '../BusArrivalWidget';
 import { getJson } from './apiClient';
 
 // --- API shape (subset of inu-portal-web's `busArrival.ts`) ----------------
@@ -185,19 +185,24 @@ export function toBusArrivalProps(
   items: BusArrivalApiItem[],
   stopLabel: string,
   now: Date,
-): BusArrivalWidgetProps {
-  const arrivals = items
+): BusArrivalSnapshot {
+  const known = items
     .map((item) => {
       const arrivesAt = arrivesAtOf(item, now);
       const route = item.routeNo?.trim();
       if (arrivesAt === null || !route) return null;
+      const observedAt = typeof item.observedAt === 'number' ? item.observedAt : now.getTime();
+      return { route, arrivesAt, observedAt };
+    })
+    .filter((a): a is NonNullable<typeof a> => a !== null);
 
+  const arrivals = known
+    .map(({ route, arrivesAt, observedAt }) => {
       const remainingSeconds = Math.round((arrivesAt - now.getTime()) / 1000);
       // Arrived by `now`: not a row any more. Leaving it in is what showed a
       // timer counting back up from zero the morning after.
       if (remainingSeconds <= 0) return null;
 
-      const observedAt = typeof item.observedAt === 'number' ? item.observedAt : now.getTime();
       return {
         route,
         eta: formatEta(remainingSeconds),
@@ -212,8 +217,35 @@ export function toBusArrivalProps(
     // Three rows is what the Figma frame has room for.
     .slice(0, 3);
 
-  if (arrivals.length === 0) return { status: 'noData' };
-  return { status: 'normal', stopLabel, arrivals };
+  if (arrivals.length > 0) return { status: 'normal', stopLabel, arrivals };
+
+  // Nothing left to show, but buses that were still on their way when this
+  // was read have since arrived: the reading has run out, which is not the
+  // same as there being no buses. Without the distinction a widget said
+  // "도착 정보 없음" twenty minutes after every refresh, at a stop with a bus
+  // every five.
+  const expired = known.filter((a) => a.arrivesAt > a.observedAt);
+  if (expired.length > 0) {
+    const observedAt = Math.max(...expired.map((a) => a.observedAt));
+    return { status: 'stale', stopLabel, observedLabel: formatObservedAt(observedAt) };
+  }
+  return { status: 'noData' };
+}
+
+/**
+ * The `count` buses due soonest after `now`, the rest dropped.
+ *
+ * For a snapshot that carries many stops at once: every bus kept costs two
+ * timeline entries, each holding every stop, and a bus an hour out is not
+ * worth that when the reading will be stale long before it arrives.
+ */
+export function earliestArrivals(items: BusArrivalApiItem[], now: Date, count: number): BusArrivalApiItem[] {
+  return items
+    .map((item) => ({ item, arrivesAt: arrivesAtOf(item, now) }))
+    .filter((a): a is { item: BusArrivalApiItem; arrivesAt: number } => a.arrivesAt !== null && a.arrivesAt > now.getTime())
+    .sort((a, b) => a.arrivesAt - b.arrivesAt)
+    .slice(0, count)
+    .map((a) => a.item);
 }
 
 // --- Which stop -----------------------------------------------------------
@@ -325,9 +357,56 @@ export function nearestStop(
 }
 
 /** Keeps only the arrivals for routes shown at the stop. An empty list means "don't filter". */
-export function arrivalsForStop(items: BusArrivalApiItem[], stop: BusStop): BusArrivalApiItem[] {
+export function arrivalsForStop(items: BusArrivalApiItem[], stop: Pick<BusStop, 'routeIds'>): BusArrivalApiItem[] {
   if (stop.routeIds.length === 0) return items;
   return items.filter((item) => item.routeId !== undefined && stop.routeIds.includes(item.routeId));
+}
+
+/**
+ * The stops the 정류장 선택 widget offers, in the portal's own order (등교 stops,
+ * then 하교).
+ *
+ * A fixed list, unlike everything else here: a widget's options are compiled
+ * into the widget extension (app.json's `configuration`), so they can't follow
+ * the routes API. `id` is the option's value there — a Swift enum case, hence
+ * an identifier rather than the `bstopId` itself. A stop the portal adds later
+ * needs a row here and in app.json; one it drops just shows no arrivals.
+ */
+export const BUS_STOP_OPTIONS = [
+  { id: 'exit2', bstopId: '164000395', label: '2번출구' },
+  { id: 'exit1', bstopId: '164000396', label: '1번출구' },
+  { id: 'lotte', bstopId: '164000648', label: '인천대입구역.롯데몰' },
+  { id: 'jisik', bstopId: '164000403', label: '지정단' },
+  { id: 'gateAcross', bstopId: '164000385', label: '정문(길 건너)' },
+  { id: 'gateFront', bstopId: '164000386', label: '정문(앞)' },
+  { id: 'science', bstopId: '164000378', label: '자연대' },
+  { id: 'engineering', bstopId: '164000377', label: '공대' },
+  { id: 'dorm', bstopId: '164000751', label: '기숙사' },
+] as const;
+
+/** One selectable stop, resolved against what the routes API currently says about it. */
+export type BusStopTarget = {
+  /** The option id — see {@link BUS_STOP_OPTIONS}. */
+  id: string;
+  bstopId: string;
+  stopLabel: string;
+  routeIds: string[];
+};
+
+/**
+ * {@link BUS_STOP_OPTIONS} with each stop's current label and routes. A stop
+ * the API no longer lists keeps its built-in label and filters nothing.
+ */
+export function busStopTargetsOf(stops: BusStop[]): BusStopTarget[] {
+  return BUS_STOP_OPTIONS.map((option) => {
+    const stop = stops.find((candidate) => candidate.bstopId === option.bstopId);
+    return {
+      id: option.id,
+      bstopId: option.bstopId,
+      stopLabel: stop?.label ?? option.label,
+      routeIds: stop?.routeIds ?? [],
+    };
+  });
 }
 
 /**

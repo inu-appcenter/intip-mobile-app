@@ -9,6 +9,9 @@
 import { describe, it, expect } from '@jest/globals';
 
 import {
+  cafeteriaBoundariesOf,
+  cafeteriaDaysFrom,
+  cafeteriaPropsAt,
   currentMealWindow,
   mealBoundariesOf,
   menuColumnsOf,
@@ -20,7 +23,10 @@ import {
   arrivalsForStop,
   arrivalRefreshMomentsOf,
   busStopsOf,
+  busStopTargetsOf,
+  BUS_STOP_OPTIONS,
   distanceMeters,
+  earliestArrivals,
   nearestStop,
   etaSecondsOf,
   formatEta,
@@ -29,7 +35,9 @@ import {
   withObservedAt,
 } from '../busArrival';
 import {
+  classBoundariesOf,
   colorFor,
+  dayBoundariesOf,
   currentSemesterOf,
   formatRoom,
   dayIndexOf,
@@ -182,11 +190,11 @@ describe('toTodayClassesProps', () => {
     expect(props.rows[0]).toMatchObject({ className: '디지털공학', highlighted: true });
   });
 
-  it('counts down to the next class in the header', () => {
-    const props = toTodayClassesProps(MEETINGS, TUESDAY(8));
-    expect(props).toMatchObject({ notice: '1시간 후 시작' });
-    expect(toTodayClassesProps(MEETINGS, TUESDAY(8, 30))).toMatchObject({ notice: '30분 후 시작' });
+  it('names when the next class starts, as a time that stays true until then', () => {
+    expect(toTodayClassesProps(MEETINGS, TUESDAY(8))).toMatchObject({ notice: '09:00 시작' });
+    expect(toTodayClassesProps(MEETINGS, TUESDAY(8, 30))).toMatchObject({ notice: '09:00 시작' });
     expect(toTodayClassesProps(MEETINGS, TUESDAY(9, 30))).toMatchObject({ notice: '수업 중' });
+    expect(toTodayClassesProps(MEETINGS, TUESDAY(11))).toMatchObject({ notice: '16:30 시작' });
   });
 
   it('becomes a day off once the last class has ended', () => {
@@ -642,8 +650,24 @@ describe('bus arrivals over time', () => {
     expect(props.arrivals[0].observedLabel).toBe('09:00 기준');
   });
 
-  it('reports no data once every known bus has arrived', () => {
-    expect(toBusArrivalProps(ITEMS, '정류장', at(2000)).status).toBe('noData');
+  it('says the reading has run out once every known bus has arrived', () => {
+    expect(toBusArrivalProps(ITEMS, '정류장', at(2000))).toEqual({
+      status: 'stale',
+      stopLabel: '정류장',
+      observedLabel: '09:00 기준',
+    });
+  });
+
+  it('keeps "no data" for a reading that never had a bus on its way', () => {
+    expect(toBusArrivalProps([], '정류장', at(2000)).status).toBe('noData');
+    const arrived = withObservedAt([{ routeNo: '8', estimatedArrivalSeconds: 0 }], FETCHED);
+    expect(toBusArrivalProps(arrived, '정류장', at(0)).status).toBe('noData');
+  });
+
+  it('keeps only the soonest buses for a many-stop snapshot', () => {
+    const kept = earliestArrivals(ITEMS, at(130), 2).map((item) => item.routeNo);
+    // 8 has already arrived at 130s.
+    expect(kept).toEqual(['16', '순환41']);
   });
 
   it('pins a missing observedAt to the fetch so future entries do not drift', () => {
@@ -681,5 +705,92 @@ describe('bus arrivals over time', () => {
     // The fourth bus (due 130) opens its window at 70s behind three buses still
     // to come, so its last check at 150s never appears.
     expect(moments.sort((a, b) => a - b)).toEqual([40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140]);
+  });
+});
+
+describe('schedule timeline', () => {
+  const stamp = (d: Date) => `${d.getMonth() + 1}/${d.getDate()} ${formatHhMm(d.getHours() * 60 + d.getMinutes())}`;
+
+  it('covers the rest of today, then midnight and the days after', () => {
+    // Tuesday 10:00, two days: Tuesday's remaining class, then Wednesday (no classes).
+    expect(classBoundariesOf(MEETINGS, TUESDAY(10), 2).map(stamp)).toEqual([
+      '9/1 10:15',
+      '9/1 16:30',
+      '9/1 17:45',
+      '9/2 00:00',
+    ]);
+  });
+
+  it('reaches the same weekday a week later', () => {
+    const boundaries = classBoundariesOf(MEETINGS, TUESDAY(18), 8).map(stamp);
+    // Thursday's class, and next Tuesday's first.
+    expect(boundaries).toContain('9/3 13:00');
+    expect(boundaries).toContain('9/8 09:00');
+    expect(boundaries.filter((b) => b.endsWith('00:00'))).toHaveLength(7);
+  });
+
+  it('rolls each widget over to the new day at midnight', () => {
+    const [midnight] = dayBoundariesOf(TUESDAY(18), 2);
+    expect(stamp(midnight)).toBe('9/2 00:00');
+    expect(toNextClassProps(MEETINGS, midnight).status).toBe('dayOff');
+    expect(toTodayClassesProps(MEETINGS, midnight)).toMatchObject({ dateLabel: '9월 2일 수요일' });
+    expect(toTimetableProps(MEETINGS, midnight)).toMatchObject({ todayIndex: 2 });
+  });
+});
+
+describe('cafeteria days', () => {
+  const day = (date: number, h = 0) => new Date(2026, 8, date, h, 0, 0, 0);
+  const MENUS = { 학생식당: ['-', '[1코너(백반)]\n제육볶음', '-'] };
+
+  it('fetches only as far as the published week goes', () => {
+    // 9/1 is a Tuesday.
+    expect(cafeteriaDaysFrom(day(1, 12)).map((d) => d.getDate())).toEqual([1, 2, 3]);
+    // Friday: Saturday, but not Sunday.
+    expect(cafeteriaDaysFrom(day(4, 12)).map((d) => d.getDate())).toEqual([4, 5]);
+    // Saturday and Sunday: nothing past today.
+    expect(cafeteriaDaysFrom(day(5, 12)).map((d) => d.getDate())).toEqual([5]);
+    expect(cafeteriaDaysFrom(day(6, 12)).map((d) => d.getDate())).toEqual([6]);
+  });
+
+  it('switches to each day\'s own menu, and says so when the menus run out', () => {
+    const days = [
+      { start: day(1, 12), menus: MENUS },
+      { start: day(2), menus: { 학생식당: ['-', '[1코너(백반)]\n카레라이스', '-'] } },
+    ];
+    const boundaries = cafeteriaBoundariesOf(days);
+    expect(boundaries[boundaries.length - 1]).toEqual(day(3));
+    expect(boundaries).toContainEqual(day(2));
+
+    const tomorrowLunch = cafeteriaPropsAt(days, day(2, 12)).cafeterias.student12;
+    if (tomorrowLunch.status !== 'normal') throw new Error('expected normal');
+    expect(tomorrowLunch.columns[0].items).toEqual(['카레라이스']);
+
+    expect(cafeteriaPropsAt(days, day(3)).cafeterias.student12).toMatchObject({
+      status: 'notOperating',
+      message: '앱을 열면 오늘 메뉴를 불러와요',
+    });
+  });
+});
+
+describe('selectable bus stops', () => {
+  it('uses the API\'s label and routes for a stop it lists, and the built-in label otherwise', () => {
+    const targets = busStopTargetsOf([
+      { bstopId: '164000395', label: '2번 출구', latitude: 37.38, longitude: 126.63, routeIds: ['r8'] },
+    ]);
+    expect(targets).toHaveLength(BUS_STOP_OPTIONS.length);
+    expect(targets[0]).toEqual({ id: 'exit2', bstopId: '164000395', stopLabel: '2번 출구', routeIds: ['r8'] });
+    expect(targets.find((t) => t.id === 'dorm')).toMatchObject({ stopLabel: '기숙사', routeIds: [] });
+  });
+
+  it('offers exactly the stops app.json declares as widget options', () => {
+    const plugins = require('../../../../app.json').expo.plugins as unknown[];
+    for (const pluginName of ['expo-widgets', 'expo-widgets-glance']) {
+      const plugin = plugins.find((p) => Array.isArray(p) && p[0] === pluginName) as [string, any];
+      const widget = plugin[1].widgets.find((w: any) => w.name === 'BusStopWidget');
+      const configuration = widget.ios?.configuration ?? widget.configuration;
+      expect(configuration.parameters.stop.values.map((v: any) => v.value)).toEqual(
+        BUS_STOP_OPTIONS.map((option) => option.id),
+      );
+    }
   });
 });

@@ -1,12 +1,23 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import { PortalCredentials } from './secureStore';
 
 const PORTAL_LOGIN_URL = 'https://portal.inu.ac.kr:444/enview/user/login.face';
 const ERP_SSO_URL = 'http://erp.inu.ac.kr:8881/com/SsoCtr/initPageWork.do?loginGbn=sso';
 const SCRAPE_TIMEOUT_MS = 35000;
 const MIN_SCRAPER_VIEW_SIZE = 1;
+
+/**
+ * 스크레이퍼 웹뷰가 접근 가능한 대학교 공식 호스트 화이트리스트.
+ * 포트 444, 7780, 8881, 8443 등 SSO 리다이렉트 체인 상의 모든 포트를 정상 수용하면서
+ * 외부 악성 피싱/오픈리다이렉트 도메인 이탈을 차단합니다.
+ */
+const ALLOWED_SCRAPER_HOSTS = new Set([
+  'portal.inu.ac.kr',
+  'erp.inu.ac.kr',
+]);
 /**
  * The idle (nothing-to-scrape) source.
  *
@@ -248,14 +259,39 @@ export const AcademicScraperWebView: React.FC = () => {
     }
   }, [finishScrapeError, finishScrapeSuccess]);
 
-  const handleLoadEnd = useCallback(() => {
+  const onShouldStartLoadWithRequest = useCallback((request: ShouldStartLoadRequest) => {
+    const target = request?.url || '';
+    if (!target || target.startsWith('about:') || target.startsWith('data:')) {
+      return true;
+    }
+
+    try {
+      const parsed = new URL(target);
+      if (ALLOWED_SCRAPER_HOSTS.has(parsed.hostname)) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+
+    console.warn('[AcademicScraper] Blocked navigation to unauthorized host:', target);
+    return false;
+  }, []);
+
+  const handleLoadEnd = useCallback((syntheticEvent?: any) => {
     if (stepRef.current === 'IDLE' || !credsRef.current) return;
 
     if (stepRef.current === 'LOGIN') {
+      const currentUrl = syntheticEvent?.nativeEvent?.url || targetUrl || '';
+      // 포털 로그인 페이지(portal.inu.ac.kr ... login.face)일 때만 계정 입력 스크립트 실행
+      if (!currentUrl.includes('portal.inu.ac.kr') || !currentUrl.includes('login.face')) {
+        return;
+      }
+
       if (loginScriptInjectedRef.current) return;
       loginScriptInjectedRef.current = true;
       const { studentId, password } = credsRef.current;
-      console.log('[AcademicScraper] Injecting login script at:', targetUrl);
+      console.log('[AcademicScraper] Injecting login script at:', currentUrl);
 
       const loginScript = `
         (function() {
@@ -570,6 +606,7 @@ export const AcademicScraperWebView: React.FC = () => {
         thirdPartyCookiesEnabled={true}
         cacheEnabled={true}
         onMessage={handleMessage}
+        onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         onLoadEnd={handleLoadEnd}
         onNavigationStateChange={handleNavigationStateChange}
         userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"

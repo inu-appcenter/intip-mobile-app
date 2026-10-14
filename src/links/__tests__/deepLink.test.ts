@@ -109,6 +109,30 @@ describe('resolveDeepLink', () => {
     });
   });
 
+  it('opens a schedule-poll join link as a sub-page, token intact', () => {
+    // The server mints `/schedule-polls/join/{token}` and people pass it around
+    // in chat and through the share sheet. The token is URL-safe Base64 (mixed
+    // case, `-`, `_`), so the path has to reach the web untouched.
+    const token = 'Q2x5_Xh0b2-Ic2VrVnJ0bQ';
+    expect(
+      resolveDeepLink(`https://intip.inuappcenter.kr/schedule-polls/join/${token}`),
+    ).toEqual({
+      kind: 'push',
+      path: `/schedule-polls/join/${token}`,
+      url: `${ROOT_URL}/schedule-polls/join/${token}`,
+    });
+  });
+
+  it('opens the schedule-poll path a final-result push carries', () => {
+    // The "final result" push carries `/schedule-polls/{pollId}`, which is the
+    // poll's status page on the web.
+    expect(resolveDeepLink('/schedule-polls/812')).toEqual({
+      kind: 'push',
+      path: '/schedule-polls/812',
+      url: `${ROOT_URL}/schedule-polls/812`,
+    });
+  });
+
   it('ignores other hosts, unrecognised schemes and invalid URLs', () => {
     expect(resolveDeepLink('https://inu.ac.kr/notice/1')).toBeNull();
     expect(resolveDeepLink('https://evil.example.com/home')).toBeNull();

@@ -48,3 +48,17 @@ export const BUS_REFRESH_MS = 10 * MINUTE;
  * budget. It stops the moment the app leaves the foreground.
  */
 export const BUS_FOREGROUND_POLL_MS = 30 * 1000;
+
+/**
+ * The least time between two full refreshes started by returning to the app.
+ * Nothing but the bus estimates changes faster than this, and those have their
+ * own poll.
+ */
+export const FULL_REFRESH_MIN_INTERVAL_MS = 15 * MINUTE;
+
+/**
+ * The same, for a refresh started by a background push. Longer: a push can
+ * arrive every few seconds in a busy chat, and each refresh is a dozen
+ * requests made while the app isn't even on screen.
+ */
+export const PUSH_REFRESH_MIN_INTERVAL_MS = HOUR;
