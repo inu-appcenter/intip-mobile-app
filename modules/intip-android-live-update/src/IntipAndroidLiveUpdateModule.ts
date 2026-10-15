@@ -29,6 +29,7 @@ export interface LiveUpdateOptions {
   showWhen?: boolean;
   ongoing?: boolean;
   ongoingEnabled?: boolean;
+  silent?: boolean;
 }
 
 export interface LiveUpdateResult {

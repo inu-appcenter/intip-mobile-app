@@ -16,6 +16,7 @@ export const DEFAULT_NOWBAR_SETTINGS: TimetableNowBarSettings = {
 
 const STORAGE_KEY_DISMISSED = 'intip_timetable_dismissed_session';
 let memoryDismissedSessionKey: string | null = null;
+let memoryVisitedWhileDismissed: boolean = false;
 
 export const TimetableStorage = {
   /**
@@ -117,6 +118,9 @@ export const TimetableStorage = {
    */
   async setDismissedSessionKey(key: string | null): Promise<void> {
     memoryDismissedSessionKey = key;
+    if (!key) {
+      memoryVisitedWhileDismissed = false;
+    }
     try {
       if (key) {
         await SecureStore.setItemAsync(STORAGE_KEY_DISMISSED, key);
@@ -126,6 +130,20 @@ export const TimetableStorage = {
     } catch (e) {
       console.error('[TimetableStorage] 지움 상태 저장 실패:', e);
     }
+  },
+
+  /**
+   * 알림을 지운 후 앱에 한 번 들어왔는지 여부 조회
+   */
+  getVisitedWhileDismissed(): boolean {
+    return memoryVisitedWhileDismissed;
+  },
+
+  /**
+   * 알림을 지운 후 앱 방문 여부 설정
+   */
+  setVisitedWhileDismissed(visited: boolean): void {
+    memoryVisitedWhileDismissed = visited;
   },
 
   /**

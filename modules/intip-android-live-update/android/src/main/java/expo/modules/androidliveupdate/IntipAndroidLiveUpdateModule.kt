@@ -72,6 +72,7 @@ class IntipAndroidLiveUpdateModule : Module() {
         val showWhen = options["showWhen"] as? Boolean ?: false
         val ongoing = options["ongoing"] as? Boolean ?: true
         val ongoingEnabled = options["ongoingEnabled"] as? Boolean ?: false
+        val silent = options["silent"] as? Boolean ?: false
 
         val session = LiveUpdateSession(
           id = id,
@@ -90,7 +91,8 @@ class IntipAndroidLiveUpdateModule : Module() {
           durationMinutes = durationMinutes,
           segmentsRaw = segmentsRaw,
           ongoing = ongoing,
-          ongoingEnabled = ongoingEnabled
+          ongoingEnabled = ongoingEnabled,
+          silent = silent
         )
 
         val promotable = LiveUpdateManager.buildAndPostNotification(
@@ -106,7 +108,8 @@ class IntipAndroidLiveUpdateModule : Module() {
           targetTimestamp = targetTimestamp,
           showChronometer = showChronometer,
           showWhen = showWhen,
-          ongoing = ongoing
+          ongoing = ongoing,
+          silent = silent
         )
 
         if (ongoing) {

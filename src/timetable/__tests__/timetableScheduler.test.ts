@@ -321,7 +321,7 @@ describe('timetableScheduler unit tests', () => {
       expect(renderSpy).not.toHaveBeenCalled();
     });
 
-    it('resets dismissed state and restores rendering when resumed from app (fromAppResume)', async () => {
+    it('does not re-render notification on app resume when dismissed, but sets visited flag', async () => {
       jest.spyOn(TimetableStorage, 'getSettings').mockResolvedValue({
         enabled: true,
         leadTimeMinutes: 15,
@@ -335,13 +335,54 @@ describe('timetableScheduler unit tests', () => {
 
       const preClass = new Date(monday);
       preClass.setHours(8, 50, 0, 0);
+      const classStartMs = new Date(monday);
+      classStartMs.setHours(9, 0, 0, 0);
+      const sessionKey = `운영체제_${classStartMs.getTime()}`;
 
-      const resetSpy = jest.spyOn(TimetableScheduler, 'resetDismissed');
+      // Mark session as dismissed
+      jest.spyOn(TimetableStorage, 'getDismissedSessionKey').mockResolvedValue(sessionKey);
+      const setVisitedSpy = jest.spyOn(TimetableStorage, 'setVisitedWhileDismissed');
       const renderSpy = jest.spyOn(TimetableNowBarService, 'renderActivity').mockResolvedValue(undefined as any);
 
       await TimetableScheduler.syncSchedule(preClass, { fromAppResume: true });
+
+      // Should mark visited while dismissed, but NOT render notification while user is inside app
+      expect(setVisitedSpy).toHaveBeenCalledWith(true);
+      expect(renderSpy).not.toHaveBeenCalled();
+    });
+
+    it('silently restores notification when exiting app (fromAppBackground) after visiting while dismissed', async () => {
+      jest.spyOn(TimetableStorage, 'getSettings').mockResolvedValue({
+        enabled: true,
+        leadTimeMinutes: 15,
+        ongoingEnabled: true,
+      });
+      jest.spyOn(TimetableStorage, 'getTestActivity').mockResolvedValue(null);
+      jest.spyOn(TimetableStorage, 'getTimetableData').mockResolvedValue({
+        updatedAt: Date.now(),
+        courses: sampleCourses,
+      });
+
+      const preClass = new Date(monday);
+      preClass.setHours(8, 50, 0, 0);
+      const classStartMs = new Date(monday);
+      classStartMs.setHours(9, 0, 0, 0);
+      const sessionKey = `운영체제_${classStartMs.getTime()}`;
+
+      // Was dismissed and user visited app
+      jest.spyOn(TimetableStorage, 'getDismissedSessionKey').mockResolvedValue(sessionKey);
+      jest.spyOn(TimetableStorage, 'getVisitedWhileDismissed').mockReturnValue(true);
+      const resetSpy = jest.spyOn(TimetableScheduler, 'resetDismissed');
+      const renderSpy = jest.spyOn(TimetableNowBarService, 'renderActivity').mockResolvedValue(undefined as any);
+
+      await TimetableScheduler.syncSchedule(preClass, { fromAppBackground: true });
+
+      // When app goes to background, reset dismissed state and render silently
       expect(resetSpy).toHaveBeenCalled();
-      expect(renderSpy).toHaveBeenCalled();
+      expect(renderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ phase: 'UPCOMING' }),
+        expect.objectContaining({ silent: true })
+      );
     });
   });
 });

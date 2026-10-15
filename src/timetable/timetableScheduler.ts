@@ -10,7 +10,7 @@ import {
   TimetableDay,
 } from './types';
 import { TimetableStorage } from './timetableStorage';
-import { TimetableNowBarService, TIMETABLE_CHANNEL_ID } from './timetableNowBarService';
+import { TimetableNowBarService } from './timetableNowBarService';
 import { isLiveActivityPushToStartRegistered } from './liveActivityPushToStart';
 import { IntipAndroidLiveUpdate } from '../../modules/intip-android-live-update';
 
@@ -248,12 +248,8 @@ export const TimetableScheduler = {
    */
   async syncSchedule(
     targetDate: Date = new Date(),
-    options?: { fromAppResume?: boolean }
+    options?: { fromAppResume?: boolean; fromAppBackground?: boolean; silent?: boolean }
   ): Promise<TimetableActivityState> {
-    if (options?.fromAppResume) {
-      await this.resetDismissed();
-    }
-
     const settings = await TimetableStorage.getSettings();
     if (!settings.enabled) {
       await TimetableNowBarService.cancel();
@@ -341,7 +337,31 @@ export const TimetableScheduler = {
     const currentSessionKey =
       state.courseTitle && state.startTimestamp ? `${state.courseTitle}_${state.startTimestamp}` : null;
     const dismissedKey = await TimetableStorage.getDismissedSessionKey();
-    const isDismissed = Boolean(currentSessionKey && dismissedKey && currentSessionKey === dismissedKey);
+
+    // 세션이 바뀌었다면 이전 세션의 삭제 상태는 자연스럽게 초기화
+    if (dismissedKey && (!currentSessionKey || currentSessionKey !== dismissedKey)) {
+      await this.resetDismissed();
+    }
+
+    let isDismissed = Boolean(currentSessionKey && dismissedKey && currentSessionKey === dismissedKey);
+    let shouldRenderSilent = Boolean(options?.silent);
+
+    if (options?.fromAppResume) {
+      if (isDismissed) {
+        // 사용자가 알림을 지운 상태에서 앱에 진입한 경우: 앱을 직접 보고 있으므로 소리/진동 및 알림 표시를 하지 않고 방문 플래그만 세팅
+        TimetableStorage.setVisitedWhileDismissed(true);
+      } else {
+        TimetableStorage.setVisitedWhileDismissed(false);
+      }
+    } else if (options?.fromAppBackground) {
+      // 앱에서 나갈 때: 이전에 알림을 지우고 앱에 방문했던 적이 있다면 비로소 삭제 상태를 해제하고 무음으로 조용히 복원!
+      if (TimetableStorage.getVisitedWhileDismissed()) {
+        TimetableStorage.setVisitedWhileDismissed(false);
+        await this.resetDismissed();
+        isDismissed = false;
+        shouldRenderSilent = true;
+      }
+    }
 
     // 알림 표시 또는 취소
     if (state.phase === 'NONE' || isDismissed) {
@@ -351,6 +371,7 @@ export const TimetableScheduler = {
       await TimetableNowBarService.renderActivity(state, {
         startUpcoming: !serverManaged,
         leaveExisting: serverManaged,
+        silent: shouldRenderSilent,
       });
       this.startProgressTicker();
     }

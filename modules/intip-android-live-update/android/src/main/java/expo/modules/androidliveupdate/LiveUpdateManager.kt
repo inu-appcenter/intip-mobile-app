@@ -33,7 +33,8 @@ data class LiveUpdateSession(
   val durationMinutes: Int,
   val segmentsRaw: List<Map<String, Any?>>?,
   val ongoing: Boolean,
-  val ongoingEnabled: Boolean = false
+  val ongoingEnabled: Boolean = false,
+  val silent: Boolean = false
 )
 
 object LiveUpdateManager {
@@ -58,6 +59,7 @@ object LiveUpdateManager {
       putInt("durationMinutes", session.durationMinutes)
       putBoolean("ongoing", session.ongoing)
       putBoolean("ongoingEnabled", session.ongoingEnabled)
+      putBoolean("silent", session.silent)
       apply()
     }
   }
@@ -91,7 +93,8 @@ object LiveUpdateManager {
       durationMinutes = prefs.getInt("durationMinutes", 75),
       segmentsRaw = segmentsRaw,
       ongoing = ongoing,
-      ongoingEnabled = prefs.getBoolean("ongoingEnabled", false)
+      ongoingEnabled = prefs.getBoolean("ongoingEnabled", false),
+      silent = prefs.getBoolean("silent", false)
     )
   }
 
@@ -246,7 +249,8 @@ object LiveUpdateManager {
         shortCriticalText = remainingText,
         progress = progress,
         segmentsRaw = session.segmentsRaw,
-        ongoing = session.ongoing
+        ongoing = session.ongoing,
+        silent = true
       )
       scheduleNextAlarm(context, session)
 
@@ -299,7 +303,8 @@ object LiveUpdateManager {
         shortCriticalText = remainingText,
         progress = progress,
         segmentsRaw = session.segmentsRaw,
-        ongoing = session.ongoing
+        ongoing = session.ongoing,
+        silent = true
       )
       scheduleNextAlarm(context, session)
     }
@@ -390,7 +395,8 @@ object LiveUpdateManager {
       targetTimestamp = session.targetTimestamp,
       showChronometer = false,
       showWhen = false,
-      ongoing = session.ongoing
+      ongoing = session.ongoing,
+      silent = session.silent
     )
   }
 
@@ -423,7 +429,8 @@ object LiveUpdateManager {
     targetTimestamp: Long? = null,
     showChronometer: Boolean = false,
     showWhen: Boolean = false,
-    ongoing: Boolean = true
+    ongoing: Boolean = true,
+    silent: Boolean = false
   ): Notification {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     ensureNotificationChannel(notificationManager, channelId, channelName)
@@ -434,6 +441,17 @@ object LiveUpdateManager {
       .setOngoing(ongoing)
       .setOnlyAlertOnce(true)
       .setAutoCancel(false)
+
+    if (silent) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        builder.setNotificationSilent()
+      } else {
+        @Suppress("DEPRECATION")
+        builder.setSound(null, null)
+        @Suppress("DEPRECATION")
+        builder.setDefaults(0)
+      }
+    }
 
     val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
     builder.setSmallIcon(iconRes)
@@ -521,7 +539,8 @@ object LiveUpdateManager {
     targetTimestamp: Long? = null,
     showChronometer: Boolean = false,
     showWhen: Boolean = false,
-    ongoing: Boolean = true
+    ongoing: Boolean = true,
+    silent: Boolean = false
   ): Boolean {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     val notification = buildNotification(
@@ -538,7 +557,8 @@ object LiveUpdateManager {
       targetTimestamp = targetTimestamp,
       showChronometer = showChronometer,
       showWhen = showWhen,
-      ongoing = ongoing
+      ongoing = ongoing,
+      silent = silent
     )
     val promotable = checkPromotableCharacteristics(notification)
     notificationManager.notify(id, notification)

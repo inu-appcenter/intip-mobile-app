@@ -75,7 +75,7 @@ export default function RootLayout() {
         void TimetableScheduler.syncSchedule(undefined, { fromAppResume: true });
         void syncLiveActivityStartToken();
       } else if (state === "background") {
-        void TimetableScheduler.syncSchedule();
+        void TimetableScheduler.syncSchedule(undefined, { fromAppBackground: true });
       }
     });
 
