@@ -205,10 +205,55 @@ export const TimetableScheduler = {
   },
 
   /**
+   * 사용자가 현재 실시간 알림을 상단바에서 지웠음을 기록하고 자동 갱신 중지
+   */
+  async markDismissed(sessionKey?: string): Promise<void> {
+    let key = sessionKey;
+    if (!key) {
+      const data = await TimetableStorage.getTimetableData();
+      if (data?.courses) {
+        const settings = await TimetableStorage.getSettings();
+        const state = getCurrentActivityState(data.courses, new Date(), settings.leadTimeMinutes);
+        if (state.courseTitle && state.startTimestamp) {
+          key = `${state.courseTitle}_${state.startTimestamp}`;
+        }
+      }
+    }
+    if (key) {
+      await TimetableStorage.setDismissedSessionKey(key);
+      if (Platform.OS === 'android') {
+        try {
+          IntipAndroidLiveUpdate.markDismissed(key);
+        } catch {}
+      }
+    }
+    this.stopProgressTicker();
+  },
+
+  /**
+   * 상단바 삭제 상태를 리셋하여 실시간 알림 복원 허용
+   */
+  async resetDismissed(): Promise<void> {
+    await TimetableStorage.setDismissedSessionKey(null);
+    if (Platform.OS === 'android') {
+      try {
+        IntipAndroidLiveUpdate.resetDismissed();
+      } catch {}
+    }
+  },
+
+  /**
    * 현재 시각 기준 시간표 상태를 평가하여 Notifee Ongoing Notification을 갱신하고
    * 다음 상태 전이 시점에 정확한 알람(Trigger)을 예약
    */
-  async syncSchedule(targetDate: Date = new Date()): Promise<TimetableActivityState> {
+  async syncSchedule(
+    targetDate: Date = new Date(),
+    options?: { fromAppResume?: boolean }
+  ): Promise<TimetableActivityState> {
+    if (options?.fromAppResume) {
+      await this.resetDismissed();
+    }
+
     const settings = await TimetableStorage.getSettings();
     if (!settings.enabled) {
       await TimetableNowBarService.cancel();
@@ -233,8 +278,19 @@ export const TimetableScheduler = {
         testActivity.startTimestamp &&
         now >= testActivity.startTimestamp
       ) {
+        if (!settings.ongoingEnabled) {
+          await TimetableStorage.clearTestActivity();
+          await TimetableNowBarService.cancel();
+          this.stopProgressTicker();
+          return { phase: 'NONE' };
+        }
         testActivity.phase = 'ONGOING';
         await TimetableStorage.saveTestActivity(testActivity);
+      } else if (testActivity.phase === 'ONGOING' && !settings.ongoingEnabled) {
+        await TimetableStorage.clearTestActivity();
+        await TimetableNowBarService.cancel();
+        this.stopProgressTicker();
+        return { phase: 'NONE' };
       }
       await TimetableNowBarService.renderActivity(testActivity);
 
@@ -270,9 +326,26 @@ export const TimetableScheduler = {
 
     const state = getCurrentActivityState(data.courses, targetDate, settings.leadTimeMinutes);
 
-    // 알림 표시 또는 취소
-    if (state.phase === 'NONE') {
+    // 1. 수업 중(ONGOING)인데 ongoingEnabled가 false인 경우: 알림 표시 안 하고 자동 종료
+    if (state.phase === 'ONGOING' && !settings.ongoingEnabled) {
       if (!serverManaged) await TimetableNowBarService.cancel();
+      this.stopProgressTicker();
+      const nextMs = getNextTransitionTimestamp(data.courses, targetDate, settings.leadTimeMinutes);
+      if (nextMs && nextMs > Date.now()) {
+        await this.scheduleNextAlarm(nextMs);
+      }
+      return { phase: 'NONE' };
+    }
+
+    // 2. 사용자가 상단바에서 지운(Dismissed) 세션인지 확인
+    const currentSessionKey =
+      state.courseTitle && state.startTimestamp ? `${state.courseTitle}_${state.startTimestamp}` : null;
+    const dismissedKey = await TimetableStorage.getDismissedSessionKey();
+    const isDismissed = Boolean(currentSessionKey && dismissedKey && currentSessionKey === dismissedKey);
+
+    // 알림 표시 또는 취소
+    if (state.phase === 'NONE' || isDismissed) {
+      if (!serverManaged && state.phase === 'NONE') await TimetableNowBarService.cancel();
       this.stopProgressTicker();
     } else {
       await TimetableNowBarService.renderActivity(state, {

@@ -91,8 +91,9 @@ export const TimetableNowBarService = {
 
     const isUpcoming = state.phase === 'UPCOMING';
     const targetTimestamp = isUpcoming ? state.startTimestamp : state.endTimestamp;
-    const settings = await TimetableStorage.getSettings().catch(() => ({ leadTimeMinutes: 15 }));
+    const settings = await TimetableStorage.getSettings().catch(() => ({ leadTimeMinutes: 15, ongoingEnabled: false }));
     const leadTimeMinutes = settings?.leadTimeMinutes || 15;
+    const ongoingEnabled = settings?.ongoingEnabled ?? false;
 
     // --- iOS: Dynamic Island & Live Activity (ActivityKit) ---
     if (Platform.OS === 'ios') {
@@ -227,6 +228,7 @@ export const TimetableNowBarService = {
             // 수업 전 대기 구간 전용 100% 단일 세그먼트 (끊김 없는 매끄러운 바)
             segments: [{ length: 100, color: '#5B8DEF' }],
             ongoing: true,
+            ongoingEnabled,
           });
           return;
         }
@@ -260,6 +262,7 @@ export const TimetableNowBarService = {
           showChronometer: false,
           showWhen: false,
           ongoing: true,
+          ongoingEnabled,
         });
         return;
       } catch (e) {

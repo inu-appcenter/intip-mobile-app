@@ -494,6 +494,13 @@ export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () =
   });
   const unsubNotifee = notifee.onForegroundEvent(({ type, detail }) => {
     if (type === EventType.DISMISSED) {
+      if (
+        detail.notification?.id === TIMETABLE_ONGOING_NOTIFICATION_ID ||
+        detail.notification?.data?.type === 'timetable_nowbar'
+      ) {
+        void TimetableScheduler.markDismissed();
+        return;
+      }
       // User swiped it away — no routing, just don't leave the summary behind.
       void pruneChatGroupSummary(detail.notification?.data);
       return;
@@ -688,6 +695,13 @@ export function registerBackgroundHandlers(): void {
     // Dismissals happen in the tray, i.e. almost always while backgrounded —
     // this is the path that actually keeps the stale summary from sticking.
     if (type === EventType.DISMISSED) {
+      if (
+        detail.notification?.id === TIMETABLE_ONGOING_NOTIFICATION_ID ||
+        detail.notification?.data?.type === 'timetable_nowbar'
+      ) {
+        await TimetableScheduler.markDismissed();
+        return;
+      }
       await pruneChatGroupSummary(detail.notification?.data);
       return;
     }

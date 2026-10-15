@@ -11,7 +11,11 @@ const STORAGE_KEY_SETTINGS = 'intip_timetable_nowbar_settings';
 export const DEFAULT_NOWBAR_SETTINGS: TimetableNowBarSettings = {
   enabled: true,
   leadTimeMinutes: 10,
+  ongoingEnabled: false,
 };
+
+const STORAGE_KEY_DISMISSED = 'intip_timetable_dismissed_session';
+let memoryDismissedSessionKey: string | null = null;
 
 export const TimetableStorage = {
   /**
@@ -89,6 +93,38 @@ export const TimetableStorage = {
     } catch (e) {
       console.error('[TimetableStorage] 설정 저장 실패:', e);
       return DEFAULT_NOWBAR_SETTINGS;
+    }
+  },
+
+  /**
+   * 사용자가 상단바에서 지운(Dismissed) 시간표 세션 키 조회
+   */
+  async getDismissedSessionKey(): Promise<string | null> {
+    if (memoryDismissedSessionKey !== null) {
+      return memoryDismissedSessionKey;
+    }
+    try {
+      const raw = await SecureStore.getItemAsync(STORAGE_KEY_DISMISSED);
+      memoryDismissedSessionKey = raw || null;
+      return memoryDismissedSessionKey;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * 사용자가 상단바에서 지운(Dismissed) 시간표 세션 키 저장 또는 초기화
+   */
+  async setDismissedSessionKey(key: string | null): Promise<void> {
+    memoryDismissedSessionKey = key;
+    try {
+      if (key) {
+        await SecureStore.setItemAsync(STORAGE_KEY_DISMISSED, key);
+      } else {
+        await SecureStore.deleteItemAsync(STORAGE_KEY_DISMISSED);
+      }
+    } catch (e) {
+      console.error('[TimetableStorage] 지움 상태 저장 실패:', e);
     }
   },
 

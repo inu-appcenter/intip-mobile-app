@@ -63,7 +63,7 @@ export default function RootLayout() {
     void refreshAllWidgets();
 
     // Sync and restore the timetable Ongoing Activity / Now Bar.
-    void TimetableScheduler.syncSchedule();
+    void TimetableScheduler.syncSchedule(undefined, { fromAppResume: true });
 
     // iOS: register the ActivityKit push-to-start token so the server's
     // pre-class alert can start the timetable Live Activity while the app is
@@ -71,11 +71,11 @@ export default function RootLayout() {
     const unregisterPushToStart = registerLiveActivityPushToStart();
 
     const appStateSub = AppState.addEventListener("change", (state) => {
-      if (state === "active" || state === "background") {
-        void TimetableScheduler.syncSchedule();
-      }
       if (state === "active") {
+        void TimetableScheduler.syncSchedule(undefined, { fromAppResume: true });
         void syncLiveActivityStartToken();
+      } else if (state === "background") {
+        void TimetableScheduler.syncSchedule();
       }
     });
 

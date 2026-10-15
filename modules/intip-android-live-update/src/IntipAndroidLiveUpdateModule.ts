@@ -28,6 +28,7 @@ export interface LiveUpdateOptions {
   showChronometer?: boolean;
   showWhen?: boolean;
   ongoing?: boolean;
+  ongoingEnabled?: boolean;
 }
 
 export interface LiveUpdateResult {
@@ -42,6 +43,8 @@ declare class IntipAndroidLiveUpdateModule extends NativeModule {
   canPostPromoted(): boolean;
   startOrUpdateLiveUpdate(options: LiveUpdateOptions): LiveUpdateResult;
   stopLiveUpdate(id: number): boolean;
+  resetDismissed(): boolean;
+  markDismissed(sessionKey: string): boolean;
   openPromotionSettings(): boolean;
 }
 

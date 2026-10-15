@@ -235,4 +235,113 @@ describe('timetableScheduler unit tests', () => {
       syncSpy.mockRestore();
     });
   });
+
+  describe('syncSchedule ongoingEnabled and dismissal handling', () => {
+    const monday = new Date(2026, 8, 21, 0, 0, 0); // Monday
+    const TimetableStorage = require('../timetableStorage').TimetableStorage;
+    const TimetableNowBarService = require('../timetableNowBarService').TimetableNowBarService;
+
+    afterEach(async () => {
+      await TimetableScheduler.resetDismissed();
+      jest.restoreAllMocks();
+    });
+
+    it('cancels ongoing notification when ongoingEnabled is false during class', async () => {
+      jest.spyOn(TimetableStorage, 'getSettings').mockResolvedValue({
+        enabled: true,
+        leadTimeMinutes: 10,
+        ongoingEnabled: false,
+      });
+      jest.spyOn(TimetableStorage, 'getTestActivity').mockResolvedValue(null);
+      jest.spyOn(TimetableStorage, 'getTimetableData').mockResolvedValue({
+        updatedAt: Date.now(),
+        courses: sampleCourses,
+      });
+
+      const cancelSpy = jest.spyOn(TimetableNowBarService, 'cancel').mockResolvedValue(undefined as any);
+      const renderSpy = jest.spyOn(TimetableNowBarService, 'renderActivity').mockResolvedValue(undefined as any);
+
+      // Monday 09:30 (during 09:00~10:15 class)
+      const duringClass = new Date(monday);
+      duringClass.setHours(9, 30, 0, 0);
+
+      const result = await TimetableScheduler.syncSchedule(duringClass);
+      expect(result.phase).toBe('NONE');
+      expect(cancelSpy).toHaveBeenCalled();
+      expect(renderSpy).not.toHaveBeenCalled();
+    });
+
+    it('renders ongoing notification when ongoingEnabled is true during class', async () => {
+      jest.spyOn(TimetableStorage, 'getSettings').mockResolvedValue({
+        enabled: true,
+        leadTimeMinutes: 10,
+        ongoingEnabled: true,
+      });
+      jest.spyOn(TimetableStorage, 'getTestActivity').mockResolvedValue(null);
+      jest.spyOn(TimetableStorage, 'getTimetableData').mockResolvedValue({
+        updatedAt: Date.now(),
+        courses: sampleCourses,
+      });
+      jest.spyOn(TimetableStorage, 'getDismissedSessionKey').mockResolvedValue(null);
+
+      const renderSpy = jest.spyOn(TimetableNowBarService, 'renderActivity').mockResolvedValue(undefined as any);
+
+      const duringClass = new Date(monday);
+      duringClass.setHours(9, 30, 0, 0);
+
+      const result = await TimetableScheduler.syncSchedule(duringClass);
+      expect(result.phase).toBe('ONGOING');
+      expect(renderSpy).toHaveBeenCalled();
+    });
+
+    it('skips rendering when current session is marked as dismissed by user', async () => {
+      jest.spyOn(TimetableStorage, 'getSettings').mockResolvedValue({
+        enabled: true,
+        leadTimeMinutes: 15,
+        ongoingEnabled: true,
+      });
+      jest.spyOn(TimetableStorage, 'getTestActivity').mockResolvedValue(null);
+      jest.spyOn(TimetableStorage, 'getTimetableData').mockResolvedValue({
+        updatedAt: Date.now(),
+        courses: sampleCourses,
+      });
+
+      const preClass = new Date(monday);
+      preClass.setHours(8, 50, 0, 0); // 10 mins before 09:00 class
+      const classStartMs = new Date(monday);
+      classStartMs.setHours(9, 0, 0, 0);
+      const sessionKey = `운영체제_${classStartMs.getTime()}`;
+
+      // Mark session as dismissed
+      jest.spyOn(TimetableStorage, 'getDismissedSessionKey').mockResolvedValue(sessionKey);
+
+      const renderSpy = jest.spyOn(TimetableNowBarService, 'renderActivity').mockResolvedValue(undefined as any);
+
+      await TimetableScheduler.syncSchedule(preClass);
+      expect(renderSpy).not.toHaveBeenCalled();
+    });
+
+    it('resets dismissed state and restores rendering when resumed from app (fromAppResume)', async () => {
+      jest.spyOn(TimetableStorage, 'getSettings').mockResolvedValue({
+        enabled: true,
+        leadTimeMinutes: 15,
+        ongoingEnabled: true,
+      });
+      jest.spyOn(TimetableStorage, 'getTestActivity').mockResolvedValue(null);
+      jest.spyOn(TimetableStorage, 'getTimetableData').mockResolvedValue({
+        updatedAt: Date.now(),
+        courses: sampleCourses,
+      });
+
+      const preClass = new Date(monday);
+      preClass.setHours(8, 50, 0, 0);
+
+      const resetSpy = jest.spyOn(TimetableScheduler, 'resetDismissed');
+      const renderSpy = jest.spyOn(TimetableNowBarService, 'renderActivity').mockResolvedValue(undefined as any);
+
+      await TimetableScheduler.syncSchedule(preClass, { fromAppResume: true });
+      expect(resetSpy).toHaveBeenCalled();
+      expect(renderSpy).toHaveBeenCalled();
+    });
+  });
 });
