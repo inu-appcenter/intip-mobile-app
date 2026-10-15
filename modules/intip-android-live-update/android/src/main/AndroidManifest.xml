@@ -5,6 +5,7 @@
       android:exported="false">
       <intent-filter>
         <action android:name="expo.modules.androidliveupdate.ACTION_TICK" />
+        <action android:name="expo.modules.androidliveupdate.ACTION_DISMISS" />
       </intent-filter>
     </receiver>
   </application>
