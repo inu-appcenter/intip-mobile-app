@@ -433,9 +433,10 @@ object LiveUpdateManager {
     silent: Boolean = false
   ): Notification {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    ensureNotificationChannel(notificationManager, channelId, channelName)
+    val actualChannelId = if (silent && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) "${channelId}_silent" else channelId
+    ensureNotificationChannel(notificationManager, channelId, channelName, silent)
 
-    val builder = Notification.Builder(context, channelId)
+    val builder = Notification.Builder(context, actualChannelId)
       .setContentTitle(title)
       .setContentText(text)
       .setOngoing(ongoing)
@@ -443,14 +444,12 @@ object LiveUpdateManager {
       .setAutoCancel(false)
 
     if (silent) {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        builder.setNotificationSilent()
-      } else {
-        @Suppress("DEPRECATION")
-        builder.setSound(null, null)
-        @Suppress("DEPRECATION")
-        builder.setDefaults(0)
-      }
+      @Suppress("DEPRECATION")
+      builder.setSound(null, null)
+      @Suppress("DEPRECATION")
+      builder.setVibrate(null)
+      @Suppress("DEPRECATION")
+      builder.setDefaults(0)
     }
 
     val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
@@ -605,7 +604,7 @@ object LiveUpdateManager {
     }
   }
 
-  private fun ensureNotificationChannel(notificationManager: NotificationManager, channelId: String, channelName: String) {
+  private fun ensureNotificationChannel(notificationManager: NotificationManager, channelId: String, channelName: String, silent: Boolean = false) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       try {
         notificationManager.deleteNotificationChannel("timetable_nowbar")
@@ -613,16 +612,23 @@ object LiveUpdateManager {
         notificationManager.deleteNotificationChannel("timetable_nowbar_v3")
       } catch (_: Exception) {}
 
-      val existing = notificationManager.getNotificationChannel(channelId)
+      val actualChannelId = if (silent) "${channelId}_silent" else channelId
+      val existing = notificationManager.getNotificationChannel(actualChannelId)
       if (existing == null) {
+        val importance = if (silent) NotificationManager.IMPORTANCE_LOW else NotificationManager.IMPORTANCE_DEFAULT
         val channel = NotificationChannel(
-          channelId,
-          channelName,
-          NotificationManager.IMPORTANCE_DEFAULT
+          actualChannelId,
+          if (silent) "$channelName (무음)" else channelName,
+          importance
         ).apply {
           description = "Now Bar 실시간 라이브 업데이트 알림"
           lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-          enableVibration(true)
+          if (silent) {
+            enableVibration(false)
+            setSound(null, null)
+          } else {
+            enableVibration(true)
+          }
           setShowBadge(false)
         }
         notificationManager.createNotificationChannel(channel)
