@@ -99,6 +99,7 @@
       "./plugins/withExpoWidgetsVersionSync",
       "./plugins/withApsEnvironmentProduction",
       "./plugins/withPodsMinDeploymentTarget",
+      "./plugins/withJsiXcframeworkPhaseFix",
       [
         "expo-share-intent",
         {
