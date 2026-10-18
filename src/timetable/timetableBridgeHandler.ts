@@ -100,6 +100,7 @@ export async function handleTimetableBridgeMessage(
 
     case 'setTimetableNowBarSettings': {
       try {
+        await TimetableScheduler.resetDismissed();
         const updated = await TimetableStorage.saveSettings(payload || {});
         const state = await TimetableScheduler.syncSchedule();
         // 끄면 서버의 push-to-start 등록도 해제한다 (켜면 다시 등록).
