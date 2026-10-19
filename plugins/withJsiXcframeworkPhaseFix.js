@@ -6,10 +6,10 @@ const { withPodfile } = require("expo/config-plugins");
 // for a SwiftCompile job that actually succeeded. The outer build sees an
 // `error:` line in the script output and fails the archive ("Command
 // PhaseScriptExecution emitted errors but did not return a nonzero exit code").
-// Upstream fixed its trigger only in 58.x (expo/expo#50482, #50587); 56.x
+// Upstream fixed its trigger only in 58.x (expo/expo#50482, #50587); 56.x/57.x
 // still hits it. Drop exactly that line; pipefail keeps the script's exit
 // status, so real compile errors still fail the build.
-// Remove once expo-modules-jsi ships a fix for SDK 56 (or after upgrading).
+// Remove once expo-modules-jsi ships a fix for SDK 57 (or after upgrading to 58).
 const ANCHOR = "# @generated withJsiXcframeworkPhaseFix";
 const BOGUS_LINE =
   "error: the following command failed with exit code 0 but produced no further output";
