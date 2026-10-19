@@ -100,6 +100,7 @@
       "./plugins/withApsEnvironmentProduction",
       "./plugins/withPodsMinDeploymentTarget",
       "./plugins/withJsiXcframeworkPhaseFix",
+      "./plugins/withItsmeQueries",
       [
         "expo-share-intent",
         {
