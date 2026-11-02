@@ -6,6 +6,7 @@ import { PortalCredentials } from './secureStore';
 
 const PORTAL_LOGIN_URL = 'https://portal.inu.ac.kr:444/enview/user/login.face';
 const ERP_SSO_URL = 'http://erp.inu.ac.kr:8881/com/SsoCtr/initPageWork.do?loginGbn=sso';
+const FRESHMAN_AUTH_URL = 'https://erp.inu.ac.kr:8443/nx/index_external.html?bG9naW5HYm49ZXgmbWVudUlkPU0wMDI3NDEmc2hvd1RpdGxlPWZhbHNl';
 const SCRAPE_TIMEOUT_MS = 35000;
 const MIN_SCRAPER_VIEW_SIZE = 1;
 
@@ -156,7 +157,7 @@ export const AcademicScraperWebView: React.FC = () => {
   const [targetUrl, setTargetUrl] = useState<string | null>(null);
   const credsRef = useRef<PortalCredentials | null>(null);
   const optionsRef = useRef<ErpActionOptions | null>(null);
-  const stepRef = useRef<'IDLE' | 'LOGIN' | 'ERP_REDIRECT' | 'ERP_QUERY'>('IDLE');
+  const stepRef = useRef<'IDLE' | 'LOGIN' | 'ERP_REDIRECT' | 'ERP_QUERY' | 'FRESHMAN_LOGIN'>('IDLE');
   // The login page is the only page the login script belongs on, but `onLoadEnd`
   // also fires for the post-login portal main page while the step is still
   // `LOGIN` (the step only advances on the `PORTAL_READY` message). Without
@@ -206,10 +207,16 @@ export const AcademicScraperWebView: React.FC = () => {
     triggerComponentScrape = (options: ErpActionOptions) => {
       credsRef.current = options.creds;
       optionsRef.current = options;
-      stepRef.current = 'LOGIN';
       loginScriptInjectedRef.current = false;
-      console.log('[AcademicScraper] Starting scraper for student:', options.creds.studentId, 'action:', options.actionId || 'DEFAULT');
-      setTargetUrl(PORTAL_LOGIN_URL);
+      if (options.actionId === 'FRESHMAN_ERP_AUTH') {
+        stepRef.current = 'FRESHMAN_LOGIN';
+        console.log('[AcademicScraper] Starting freshman auth scraper for:', options.target?.params?.examNo);
+        setTargetUrl(FRESHMAN_AUTH_URL);
+      } else {
+        stepRef.current = 'LOGIN';
+        console.log('[AcademicScraper] Starting scraper for student:', options.creds.studentId, 'action:', options.actionId || 'DEFAULT');
+        setTargetUrl(PORTAL_LOGIN_URL);
+      }
     };
     resolveScraperMount?.();
     resolveScraperMount = null;
@@ -241,6 +248,12 @@ export const AcademicScraperWebView: React.FC = () => {
         if (typeof msg.studentId === 'string' && msg.studentId) credsRef.current = {...credsRef.current, studentId: msg.studentId};
         stepRef.current = 'ERP_REDIRECT';
         setTargetUrl(ERP_SSO_URL);
+      } else if (msg.type === 'FRESHMAN_AUTH_SUCCESS') {
+        console.log('[AcademicScraper] Freshman auth succeeded:', msg.data?.userNm);
+        finishScrapeSuccess(JSON.stringify(msg.data));
+      } else if (msg.type === 'FRESHMAN_AUTH_FAIL') {
+        console.warn('[AcademicScraper] Freshman auth failed:', msg.message);
+        finishScrapeError(new Error(msg.message || '신입생 전산망 인증에 실패했습니다.'));
       } else if (msg.type === 'ALERT') {
         const text = String(msg.message || '');
         console.warn('[AcademicScraper] Web alert detected:', text);
@@ -280,6 +293,80 @@ export const AcademicScraperWebView: React.FC = () => {
 
   const handleLoadEnd = useCallback((syntheticEvent?: any) => {
     if (stepRef.current === 'IDLE' || !credsRef.current) return;
+
+    if (stepRef.current === 'FRESHMAN_LOGIN') {
+      const currentUrl = syntheticEvent?.nativeEvent?.url || targetUrl || '';
+      if (!currentUrl.includes('index_external.html')) return;
+      if (loginScriptInjectedRef.current) return;
+      loginScriptInjectedRef.current = true;
+
+      const examNo = String(optionsRef.current?.target?.params?.examNo || credsRef.current.studentId || '');
+      const name = String(optionsRef.current?.target?.params?.name || '');
+      const birthDate = String(optionsRef.current?.target?.params?.birthDate || '');
+
+      console.log('[AcademicScraper] Injecting freshman script for examNo:', examNo);
+
+      const freshmanScript = `
+        (function() {
+          window.alert = function(msg) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'FRESHMAN_AUTH_FAIL',
+              message: String(msg || '신입생 전산망 인증 실패')
+            }));
+          };
+
+          var retryCount = 0;
+          var checkReady = setInterval(function() {
+            retryCount++;
+            try {
+              var frame = application && application.mainframe && application.mainframe.ChildFrame && application.mainframe.ChildFrame.form && application.mainframe.ChildFrame.form.div_Work;
+              var form = frame ? frame.form : null;
+              if (form && form.DS_COND) {
+                clearInterval(checkReady);
+                form.DS_COND.set("j_id", ${JSON.stringify(examNo)});
+                form.DS_COND.set("nm", ${JSON.stringify(name)});
+                form.DS_COND.set("birthDt", ${JSON.stringify(birthDate)});
+
+                var originalLoginSuccess = form.loginSuccess;
+                form.loginSuccess = function() {
+                  var result = originalLoginSuccess.apply(this, arguments);
+                  if (result === 1) {
+                    var ds = application.gds_viewSession;
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'FRESHMAN_AUTH_SUCCESS',
+                      data: {
+                        userNm: ds.getColumn(0, "userNm"),
+                        persNo: ds.getColumn(0, "persNo"),
+                        deptNm: ds.getColumn(0, "deptNm"),
+                        deptTtNm: ds.getColumn(0, "deptTtNm"),
+                        userGbn: ds.getColumn(0, "userGbn"),
+                        encStr: ds.getColumn(0, "encStr"),
+                        examNo: ${JSON.stringify(examNo)},
+                        birthDate: ${JSON.stringify(birthDate)}
+                      }
+                    }));
+                  }
+                  return result;
+                };
+
+                form.preLoginChk();
+              }
+            } catch (e) {}
+
+            if (retryCount > 40) {
+              clearInterval(checkReady);
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'FRESHMAN_AUTH_FAIL',
+                message: '신입생 전산망 폼 준비 시간 초과 (8초)'
+              }));
+            }
+          }, 200);
+        })();
+        true;
+      `;
+      webViewRef.current?.injectJavaScript(freshmanScript);
+      return;
+    }
 
     if (stepRef.current === 'LOGIN') {
       const currentUrl = syntheticEvent?.nativeEvent?.url || targetUrl || '';
