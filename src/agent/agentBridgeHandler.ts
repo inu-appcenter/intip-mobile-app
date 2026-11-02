@@ -8,6 +8,7 @@ import { executeAgentAction } from './agentActionExecutor';
 import { LocalWatchManager } from './localWatchManager';
 import { LibraryOngoingService } from '../library/libraryOngoingService';
 import { LmsOngoingService } from '../lms/lmsOngoingService';
+import { AcademicScraperManager } from './AcademicScraperWebView';
 
 export interface AgentBridgeResponse {
   type: string;
@@ -49,6 +50,41 @@ export async function handleAgentBridgeMessage(
   };
 
   switch (type) {
+    case 'requestFreshmanAuth': {
+      const { examNo, name, birthDate } = payload || {};
+      if (!examNo || !name || !birthDate) {
+        sendWrappedResponse({
+          type: 'requestFreshmanAuthResult',
+          success: false,
+          errorMessage: '수험번호, 성명, 생년월일이 누락되었습니다.',
+        });
+        return true;
+      }
+
+      try {
+        const rawResult = await AcademicScraperManager.executeErpAction({
+          creds: { studentId: String(examNo), password: '' },
+          actionId: 'FRESHMAN_ERP_AUTH',
+          target: {
+            params: { examNo: String(examNo), name: String(name), birthDate: String(birthDate) },
+          },
+        });
+
+        const parsedData = JSON.parse(rawResult);
+        sendWrappedResponse({
+          type: 'requestFreshmanAuthResult',
+          success: true,
+          data: parsedData,
+        });
+      } catch (err: any) {
+        sendWrappedResponse({
+          type: 'requestFreshmanAuthResult',
+          success: false,
+          errorMessage: err?.message || '신입생 전산망 인증 중 오류가 발생했습니다.',
+        });
+      }
+      return true;
+    }
     case 'checkPortalAccount': {
       try {
         const has = await PortalSecureStore.hasCredentials();
