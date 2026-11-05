@@ -479,9 +479,9 @@ true;
 }
 
 /**
- * Launch cleanup loop (spec §5.B). Unregisters service workers and clears the
- * CacheStorage, then signals completion through the bridge shim so the native
- * loading overlay can fade out. Injected once after the root page first loads.
+ * @deprecated Legacy launch cleanup loop (spec §5.B). Formerly unregistered service
+ * workers and cleared CacheStorage on every launch. Root now preserves disk cache and
+ * synchronizes overlay dismissal directly on `bridgeReady`. Retained for compatibility.
  */
 export const LAUNCH_CLEANUP_SCRIPT = `
 (function() {
