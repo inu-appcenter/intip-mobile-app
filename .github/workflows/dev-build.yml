@@ -16,8 +16,8 @@ name: Dev Build
 #      로그인 없이 링크 하나로 받는다. iOS는 itms-services 무선 설치까지
 #      되고, 그 설치 페이지를 publish-install-page 잡이 만든다.
 #
-# 러너: ci.yml과 동일한 이유로 self-hosted(gangbook-air, macOS ARM64) 하나를
-# 공유한다 — private 저장소라 GitHub-hosted, 특히 macOS는 분당 과금이 크다.
+# 러너: ci.yml과 같다 — iOS 빌드(ios-dev-build)만 self-hosted(gangbook-air,
+# macOS ARM64)이고, 나머지 잡은 GitHub-hosted ubuntu-latest에서 돈다.
 # ─────────────────────────────────────────────────────────────────────────
 
 on:
@@ -31,7 +31,7 @@ concurrency:
 jobs:
   verify:
     name: 검증 (lint · 타입체크 · 테스트)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout (with intip-bridge submodule)
         uses: actions/checkout@v4
@@ -42,6 +42,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -58,7 +59,7 @@ jobs:
   android-dev-build:
     name: Android 개발 빌드 (APK)
     needs: verify
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
       APP_VARIANT: development
       # 네이티브 config(app.config.js, APP_VARIANT 기준)와 별개로 JS 번들에도
@@ -75,6 +76,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -335,7 +337,7 @@ jobs:
     name: 설치 페이지 게시
     if: always() && (needs.android-dev-build.result == 'success' || needs.ios-dev-build.result == 'success')
     needs: [android-dev-build, ios-dev-build]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       install_url: ${{ steps.publish.outputs.install_url }}
     steps:
@@ -388,7 +390,7 @@ jobs:
     name: Mattermost 알림
     if: always()
     needs: [verify, android-dev-build, ios-dev-build, publish-install-page]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Send Mattermost notification
         env:

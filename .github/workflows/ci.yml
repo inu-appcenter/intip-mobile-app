@@ -29,21 +29,17 @@ name: CI
 # 코드가 없는 구버전 앱으로 그 코드를 호출하는 JS가 흘러갈 수 없다.
 #
 # ── 러너 ──────────────────────────────────────────────────────────────
-# 모든 잡이 self-hosted 러너(gangbook-air, macOS ARM64) 하나에서 돈다.
-# 이 저장소는 private이라 GitHub-hosted 러너는 분 단위로 과금되고,
-# 특히 macOS는 단가가 10배다 — iOS 빌드 한 번이 무료 분을 크게 깎아먹었다.
-# self-hosted는 실행 시간에 대한 과금이 없다.
+# iOS 릴리스(ios-release)만 self-hosted 러너(gangbook-air, macOS ARM64)에서
+# 돌고, 나머지(verify / ota-publish / android-release / notify-mattermost)는
+# GitHub-hosted ubuntu-latest에서 돈다. macOS GitHub-hosted 러너는 분당
+# 단가가 리눅스의 10배라 iOS만 self-hosted에 남겼다 — 리눅스 잡은 private
+# 저장소 무료 분 안에서 충분히 감당된다. 덕분에 맥이 꺼져 있어도 main 머지
+# → OTA 경로는 막히지 않는다.
 #
 # 대가로 알아둘 것:
-#   - 러너(맥)가 꺼져 있거나 오프라인이면 잡은 실패하지 않고 큐에서 대기한다
-#   - 러너가 하나뿐이라 잡은 순차 실행된다 (Android + iOS면 하나씩)
-#   - 아티팩트 스토리지는 self-hosted로 옮겨도 여전히 GitHub 쿼터를 쓴다
+#   - 러너(맥)가 꺼져 있거나 오프라인이면 iOS 잡은 실패하지 않고 큐에서 대기한다
+#   - 아티팩트 스토리지는 어느 러너든 GitHub 쿼터를 쓴다
 #     (그래서 retention-days를 짧게 유지할 것)
-#
-# TEMP(2026-08-12): gangbook-air가 오프라인이라 모든 잡을 GitHub-hosted로
-# 임시 전환(verify/ota-publish/android-release/notify-mattermost →
-# ubuntu-latest, ios-release → macos-26, 335cbe4 이전 값 그대로). 러너가
-# 다시 온라인이 되면 각 잡의 `runs-on: self-hosted`로 되돌릴 것.
 # ─────────────────────────────────────────────────────────────────────────
 
 on:
@@ -87,7 +83,7 @@ concurrency:
 jobs:
   verify:
     name: 검증 (lint · 타입체크 · 테스트)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     # push/PR은 항상 돈다. 수동 실행은 "OTA publish"(→ 아래 needs: verify로
     # 실제 게이트가 됨)이나 "Verify only"를 골랐을 때만 돈다 — "Android only
     # release" / "iOS only release" / "Android + iOS release"만 고른 경우엔
@@ -111,10 +107,9 @@ jobs:
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
           node-version: 24
-          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
-          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
-          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
-          # 오래 걸린다.
+          # GitHub-hosted 러너는 매번 새 머신이라 ~/.npm 을 캐시한다. 캐시는
+          # lockfile 해시가 키라 저장(업로드)은 lockfile이 바뀐 첫 실행에서만 한다.
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -150,7 +145,7 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.task, 'OTA publish'))
     needs: verify
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       skipped: ${{ steps.native_guard.outputs.changed }}
     steps:
@@ -246,10 +241,9 @@ jobs:
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
           node-version: 24
-          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
-          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
-          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
-          # 오래 걸린다.
+          # GitHub-hosted 러너는 매번 새 머신이라 ~/.npm 을 캐시한다. 캐시는
+          # lockfile 해시가 키라 저장(업로드)은 lockfile이 바뀐 첫 실행에서만 한다.
+          cache: npm
 
       - name: Install dependencies
         if: steps.native_guard.outputs.changed != 'true'
@@ -332,7 +326,7 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'Android')
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     # 아래 "Bump android.versionCode"가 bump 커밋을 push한다.
     permissions:
       contents: write
@@ -349,10 +343,9 @@ jobs:
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
           node-version: 24
-          # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
-          # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
-          # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
-          # 오래 걸린다.
+          # GitHub-hosted 러너는 매번 새 머신이라 ~/.npm 을 캐시한다. 캐시는
+          # lockfile 해시가 키라 저장(업로드)은 lockfile이 바뀐 첫 실행에서만 한다.
+          cache: npm
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -462,9 +455,9 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' &&
       contains(inputs.task, 'iOS')
-    # TEMP: self-hosted(gangbook-air)가 오프라인이라 macos-26으로 임시 전환
-    # (335cbe4 이전 값). GitHub-hosted macOS는 분 단가가 10배라 이 잡 하나가
-    # 무료 분을 크게 깎아먹는다 — 러너가 돌아오면 self-hosted로 되돌릴 것.
+    # 이 잡만 self-hosted(gangbook-air)에 남긴다 — GitHub-hosted macOS는 분
+    # 단가가 10배라 이 잡 하나가 무료 분을 크게 깎아먹는다. 맥이 꺼져 있으면
+    # 큐에서 대기한다.
     runs-on: self-hosted
     env:
       # Matches the AuthKey_<id>.p8 filename — not itself a secret.
@@ -720,7 +713,7 @@ jobs:
         (github.event_name == 'push' && github.ref == 'refs/heads/main')
       )
     needs: [verify, ota-publish, android-release, ios-release]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       # Incoming Webhook만 사용한다 (https://developers.mattermost.com/integrate/reference/bot-accounts/
       # 의 Bot Account REST API가 아니라). 단순히 채널에 결과 메세지 하나
