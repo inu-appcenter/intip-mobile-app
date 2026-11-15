@@ -41,7 +41,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: npm
 
       - name: Install dependencies
@@ -75,7 +75,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: npm
 
       - name: Setup Java
@@ -180,7 +180,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Xcode 버전 확인
         run: xcodebuild -version
@@ -347,7 +347,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Generate & upload install page
         id: publish
