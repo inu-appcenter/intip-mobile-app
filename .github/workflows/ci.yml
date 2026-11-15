@@ -106,7 +106,7 @@ jobs:
           # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
-          node-version: 24
+          node-version: 24.22.1
           # GitHub-hosted 러너는 매번 새 머신이라 ~/.npm 을 캐시한다. 캐시는
           # lockfile 해시가 키라 저장(업로드)은 lockfile이 바뀐 첫 실행에서만 한다.
           cache: npm
@@ -240,7 +240,7 @@ jobs:
           # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
-          node-version: 24
+          node-version: 24.22.1
           # GitHub-hosted 러너는 매번 새 머신이라 ~/.npm 을 캐시한다. 캐시는
           # lockfile 해시가 키라 저장(업로드)은 lockfile이 바뀐 첫 실행에서만 한다.
           cache: npm
@@ -344,7 +344,7 @@ jobs:
           # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
-          node-version: 24
+          node-version: 24.22.1
           # GitHub-hosted 러너는 매번 새 머신이라 ~/.npm 을 캐시한다. 캐시는
           # lockfile 해시가 키라 저장(업로드)은 lockfile이 바뀐 첫 실행에서만 한다.
           cache: npm
@@ -484,7 +484,7 @@ jobs:
           # Node 24 = npm 11, 로컬 개발 환경(Node 25)과 같은 npm 메이저.
           # npm 10 과 11 은 optional peer 를 lockfile 에 다르게 기록해서,
           # 버전이 어긋나면 `npm ci` 가 EUSAGE 로 떨어진다.
-          node-version: 24
+          node-version: 24.22.1
           # `cache: npm` 은 일부러 쓰지 않는다. self-hosted 러너는 같은 머신을
           # 계속 쓰므로 ~/.npm 이 잡 사이에 이미 남아 있고, 캐시를 켜면 매 잡
           # post 단계에서 1.8GB 를 GitHub 캐시 서비스로 올리느라 빌드보다
