@@ -8,6 +8,8 @@ import { executeAgentAction } from './agentActionExecutor';
 import { LocalWatchManager } from './localWatchManager';
 import { LibraryOngoingService } from '../library/libraryOngoingService';
 import { LmsOngoingService } from '../lms/lmsOngoingService';
+import { AcademicScraperManager } from './AcademicScraperWebView';
+import { FRESHMAN_AUTH_ACTION_ID, freshmanAuthRequestSchema } from './freshmanAuth';
 
 export interface AgentBridgeResponse {
   type: string;
@@ -49,6 +51,41 @@ export async function handleAgentBridgeMessage(
   };
 
   switch (type) {
+    case 'requestFreshmanAuth': {
+      // 수험번호/성명/생년월일은 민감 정보: 로그/에러 메시지에 값을 싣지 않는다.
+      const validated = freshmanAuthRequestSchema.safeParse(payload);
+      if (!validated.success) {
+        sendWrappedResponse({
+          type: 'requestFreshmanAuthResult',
+          success: false,
+          errorCode: 'INVALID_REQUEST',
+          errorMessage: '수험번호, 성명, 생년월일(8자리) 형식이 올바르지 않습니다.',
+        });
+        return true;
+      }
+      const { examNo, name, birthDate } = validated.data;
+
+      try {
+        const rawResult = await AcademicScraperManager.executeErpAction({
+          creds: { studentId: examNo, password: '' },
+          actionId: FRESHMAN_AUTH_ACTION_ID,
+          target: { params: { examNo, name, birthDate } },
+        });
+
+        sendWrappedResponse({
+          type: 'requestFreshmanAuthResult',
+          success: true,
+          data: JSON.parse(rawResult),
+        });
+      } catch (err: any) {
+        sendWrappedResponse({
+          type: 'requestFreshmanAuthResult',
+          success: false,
+          errorMessage: err?.message || '신입생 전산망 인증 중 오류가 발생했습니다.',
+        });
+      }
+      return true;
+    }
     case 'checkPortalAccount': {
       try {
         const has = await PortalSecureStore.hasCredentials();

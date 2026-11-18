@@ -89,4 +89,20 @@ describe('agentActionExecutor 보안 가드 테스트', () => {
     expect(result.success).toBe(true);
     expect(AcademicScraperManager.executeErpAction).toHaveBeenCalledTimes(1);
   });
+
+  it('신입생 인증 전용 actionId 는 범용 액션 경로로 진입할 수 없다', async () => {
+    const result = await executeAgentAction({
+      actionId: 'FRESHMAN_ERP_AUTH',
+      authDomain: 'PORTAL',
+      request: {
+        method: 'POST',
+        url: 'https://erp.inu.ac.kr:8443/nx/index_external.html',
+        params: { examNo: '1', name: 'x', birthDate: '20070101' },
+      },
+    } as ClientActionInstruction);
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('UNAUTHORIZED_TARGET');
+    expect(AcademicScraperManager.executeErpAction).not.toHaveBeenCalled();
+  });
 });

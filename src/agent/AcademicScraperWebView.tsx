@@ -3,6 +3,15 @@ import { StyleSheet, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import { PortalCredentials } from './secureStore';
+import {
+  FRESHMAN_AUTH_ACTION_ID,
+  FRESHMAN_AUTH_URL,
+  buildFreshmanAuthScript,
+  freshmanAuthRequestSchema,
+  isFreshmanAuthUrl,
+  isPortalLoginUrl,
+  parseFreshmanAuthMessage,
+} from './freshmanAuth';
 
 const PORTAL_LOGIN_URL = 'https://portal.inu.ac.kr:444/enview/user/login.face';
 const ERP_SSO_URL = 'http://erp.inu.ac.kr:8881/com/SsoCtr/initPageWork.do?loginGbn=sso';
@@ -70,6 +79,7 @@ let activeCreds: PortalCredentials | null = null;
 let activeOptions: ErpActionOptions | null = null;
 let activeTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let triggerComponentScrape: ((options: ErpActionOptions) => void) | null = null;
+let cancelComponentScrape: (() => void) | null = null;
 let resolveScraperMount: (() => void) | null = null;
 
 function waitForScraperMount(timeoutMs = 15000): Promise<void> {
@@ -89,6 +99,20 @@ function waitForScraperMount(timeoutMs = 15000): Promise<void> {
   });
 }
 
+/**
+ * 진행 중인 요청과 "같은 요청"인지 판별한다. 신입생 인증은 수험번호가 같아도
+ * 성명/생년월일이 다르면 다른 요청이므로 결과를 재사용하면 안 된다.
+ */
+function isSameInFlightRequest(options: ErpActionOptions): boolean {
+  if (!activeScrapePromise || !activeOptions) return false;
+  if (activeCreds?.studentId !== options.creds.studentId) return false;
+  if (activeOptions.actionId !== options.actionId) return false;
+  if (options.actionId === FRESHMAN_AUTH_ACTION_ID) {
+    return JSON.stringify(activeOptions.target?.params ?? null) === JSON.stringify(options.target?.params ?? null);
+  }
+  return true;
+}
+
 export const AcademicScraperManager = {
   executeScrape(creds: PortalCredentials): Promise<string> {
     return this.executeErpAction({ creds, actionId: 'PORTAL_GET_ACADEMIC_RECORD' });
@@ -98,8 +122,8 @@ export const AcademicScraperManager = {
     const { creds, actionId } = options;
 
     // 동일한 학번 및 액션에 대해 이미 진행 중인 Promise가 있으면 재사용
-    if (activeScrapePromise && activeCreds?.studentId === creds.studentId && activeOptions?.actionId === actionId) {
-      console.log('[AcademicScraper] Reusing in-flight scrape promise for student:', creds.studentId, 'action:', actionId);
+    if (activeScrapePromise && isSameInFlightRequest(options)) {
+      console.log('[AcademicScraper] Reusing in-flight scrape promise for action:', actionId);
       return activeScrapePromise;
     }
 
@@ -132,6 +156,8 @@ export const AcademicScraperManager = {
               activeScrapePromise = null;
               activeCreds = null;
               activeOptions = null;
+              // 타임아웃 후에도 히든 웹뷰가 자격증명을 쥔 채 로딩/주입을 이어가지 않도록 정리한다.
+              cancelComponentScrape?.();
             }
           }, SCRAPE_TIMEOUT_MS);
         })
@@ -156,7 +182,7 @@ export const AcademicScraperWebView: React.FC = () => {
   const [targetUrl, setTargetUrl] = useState<string | null>(null);
   const credsRef = useRef<PortalCredentials | null>(null);
   const optionsRef = useRef<ErpActionOptions | null>(null);
-  const stepRef = useRef<'IDLE' | 'LOGIN' | 'ERP_REDIRECT' | 'ERP_QUERY'>('IDLE');
+  const stepRef = useRef<'IDLE' | 'LOGIN' | 'ERP_REDIRECT' | 'ERP_QUERY' | 'FRESHMAN_LOGIN'>('IDLE');
   // The login page is the only page the login script belongs on, but `onLoadEnd`
   // also fires for the post-login portal main page while the step is still
   // `LOGIN` (the step only advances on the `PORTAL_READY` message). Without
@@ -206,16 +232,31 @@ export const AcademicScraperWebView: React.FC = () => {
     triggerComponentScrape = (options: ErpActionOptions) => {
       credsRef.current = options.creds;
       optionsRef.current = options;
-      stepRef.current = 'LOGIN';
       loginScriptInjectedRef.current = false;
-      console.log('[AcademicScraper] Starting scraper for student:', options.creds.studentId, 'action:', options.actionId || 'DEFAULT');
-      setTargetUrl(PORTAL_LOGIN_URL);
+      if (options.actionId === FRESHMAN_AUTH_ACTION_ID) {
+        // 수험번호/성명/생년월일은 로그에 남기지 않는다.
+        stepRef.current = 'FRESHMAN_LOGIN';
+        console.log('[AcademicScraper] Starting freshman auth scraper');
+        setTargetUrl(FRESHMAN_AUTH_URL);
+      } else {
+        stepRef.current = 'LOGIN';
+        console.log('[AcademicScraper] Starting scraper for student:', options.creds.studentId, 'action:', options.actionId || 'DEFAULT');
+        setTargetUrl(PORTAL_LOGIN_URL);
+      }
+    };
+    cancelComponentScrape = () => {
+      stepRef.current = 'IDLE';
+      credsRef.current = null;
+      optionsRef.current = null;
+      loginScriptInjectedRef.current = false;
+      setTargetUrl(null);
     };
     resolveScraperMount?.();
     resolveScraperMount = null;
 
     return () => {
       triggerComponentScrape = null;
+      cancelComponentScrape = null;
       if (activeTimeoutTimer) {
         clearTimeout(activeTimeoutTimer);
         activeTimeoutTimer = null;
@@ -241,6 +282,20 @@ export const AcademicScraperWebView: React.FC = () => {
         if (typeof msg.studentId === 'string' && msg.studentId) credsRef.current = {...credsRef.current, studentId: msg.studentId};
         stepRef.current = 'ERP_REDIRECT';
         setTargetUrl(ERP_SSO_URL);
+      } else if (msg.type === 'FRESHMAN_AUTH_SUCCESS' || msg.type === 'FRESHMAN_AUTH_FAIL') {
+        // 신입생 인증 단계에서만 유효한 메시지. 다른 단계(포털 로그인/ERP 조회)에서
+        // 올라온 동일 type 메시지는 무시해 진행 중인 다른 스크레이프를 가로채지 못하게 한다.
+        if (stepRef.current !== 'FRESHMAN_LOGIN') return;
+        const expectedExamNo = String(optionsRef.current?.target?.params?.examNo ?? '');
+        const parsed = parseFreshmanAuthMessage(msg, expectedExamNo);
+        if (!parsed) return;
+        if (parsed.ok) {
+          console.log('[AcademicScraper] Freshman auth succeeded');
+          finishScrapeSuccess(JSON.stringify(parsed.data));
+        } else {
+          console.warn('[AcademicScraper] Freshman auth failed');
+          finishScrapeError(new Error(parsed.message));
+        }
       } else if (msg.type === 'ALERT') {
         const text = String(msg.message || '');
         console.warn('[AcademicScraper] Web alert detected:', text);
@@ -281,10 +336,33 @@ export const AcademicScraperWebView: React.FC = () => {
   const handleLoadEnd = useCallback((syntheticEvent?: any) => {
     if (stepRef.current === 'IDLE' || !credsRef.current) return;
 
+    if (stepRef.current === 'FRESHMAN_LOGIN') {
+      const currentUrl = syntheticEvent?.nativeEvent?.url || targetUrl || '';
+      // 신입생 정보는 https ERP 로그인 문서에만 주입한다 (부분 문자열 매칭 금지).
+      if (!isFreshmanAuthUrl(currentUrl)) return;
+      if (loginScriptInjectedRef.current) return;
+
+      const params = optionsRef.current?.target?.params;
+      const parsedRequest = freshmanAuthRequestSchema.safeParse({
+        examNo: params?.examNo,
+        name: params?.name,
+        birthDate: params?.birthDate,
+      });
+      if (!parsedRequest.success) {
+        finishScrapeError(new Error('수험번호, 성명, 생년월일 형식이 올바르지 않습니다.'));
+        return;
+      }
+      loginScriptInjectedRef.current = true;
+
+      console.log('[AcademicScraper] Injecting freshman script');
+      webViewRef.current?.injectJavaScript(buildFreshmanAuthScript(parsedRequest.data));
+      return;
+    }
+
     if (stepRef.current === 'LOGIN') {
       const currentUrl = syntheticEvent?.nativeEvent?.url || targetUrl || '';
       // 포털 로그인 페이지(portal.inu.ac.kr ... login.face)일 때만 계정 입력 스크립트 실행
-      if (!currentUrl.includes('portal.inu.ac.kr') || !currentUrl.includes('login.face')) {
+      if (!isPortalLoginUrl(currentUrl)) {
         return;
       }
 
@@ -328,7 +406,7 @@ export const AcademicScraperWebView: React.FC = () => {
       `;
       webViewRef.current?.injectJavaScript(loginScript);
     }
-  }, [targetUrl]);
+  }, [targetUrl, finishScrapeError]);
 
   const handleNavigationStateChange = useCallback((navState: { url: string; loading: boolean }) => {
     const { url, loading } = navState;

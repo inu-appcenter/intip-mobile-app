@@ -2,6 +2,7 @@ import { LibraryAuthService } from './libraryAuthService';
 import { LmsAuthService } from './lmsAuthService';
 import { PortalSecureStore } from './secureStore';
 import { AcademicScraperManager } from './AcademicScraperWebView';
+import { FRESHMAN_AUTH_ACTION_ID } from './freshmanAuth';
 import { saveDownload } from '../native/downloads';
 
 /**
@@ -49,6 +50,17 @@ export async function executeAgentAction(
   instruction: ClientActionInstruction
 ): Promise<ClientActionResult> {
   const { actionId, authDomain, request } = instruction;
+
+  // 신입생 인증 액션은 requestFreshmanAuth 브릿지 핸들러(입력 검증 포함)로만 진입해야 한다.
+  // 범용 액션 인스트럭션으로 같은 actionId를 보내 검증/저장 자격증명 바인딩을 우회하지 못하게 막는다.
+  if (actionId === FRESHMAN_AUTH_ACTION_ID) {
+    return {
+      actionId,
+      success: false,
+      errorCode: 'UNAUTHORIZED_TARGET',
+      errorMessage: '허가되지 않은 액션입니다.',
+    };
+  }
 
   try {
     // 0. 포털 ERP (Nexacro SSV) 전용 액션 처리 (기숙사 DORM 포함)
