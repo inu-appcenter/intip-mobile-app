@@ -60,7 +60,7 @@ import {
 } from "../../modules/intip-system-gestures";
 import { createNativeChannel } from "../../packages/intip-bridge/src/adapters/native";
 import { PROTOCOL_VERSION, type TokenInfoPayload } from "../../packages/intip-bridge/src/messages";
-import { clearCacheAndReload, clearWebViewCache } from "../native/cache";
+import { clearCacheAndReload } from "../native/cache";
 import { saveDownload } from "../native/downloads";
 import { ensureLocationPermission } from "../native/permissions";
 import { handleAgentBridgeMessage } from "../agent/agentBridgeHandler";
@@ -97,7 +97,6 @@ import {
   buildSafeAreaInsetsScript,
   INJECTED_SCRIPT,
   isGeoPermissionRequest,
-  LAUNCH_CLEANUP_SCRIPT,
 } from "../webview/injectedScript";
 import { openSubPageDepth } from "../webview/subPageStack";
 import {
@@ -130,8 +129,8 @@ const DOWNLOAD_EXTENSIONS = [
   ".jpeg",
 ];
 
-/** Hard cap on how long the launch overlay waits for the web cleanup signal. */
-const CLEANUP_OVERLAY_TIMEOUT_MS = 4000;
+/** Hard cap on how long the root launch overlay waits for web readiness (bridgeReady) before safety dismissal. */
+const LAUNCH_OVERLAY_TIMEOUT_MS = 6000;
 
 /** Hard cap on how long a sub-page holds its reveal overlay waiting for load. */
 const REVEAL_OVERLAY_TIMEOUT_MS = 4000;
@@ -377,7 +376,6 @@ export default function WebViewContainer({ url, mode }: Props) {
     campaignId?: string;
     sentAt?: string;
   } | null>(null);
-  const cleanupStartedRef = useRef(false);
   // Dev controller "load full URL": the URL a developer asked to load in place.
   // Lets `onShouldStartLoadWithRequest` allow that one navigation even off-portal
   // (which the security guard would otherwise divert to the system browser).
@@ -549,10 +547,10 @@ export default function WebViewContainer({ url, mode }: Props) {
 
   // --- Lifecycle: cache + notifications (root only) --------------------------
   useEffect(() => {
-    // Sub-pages share the process-wide WebView cache; only the launch screen
-    // clears it (login/cookies preserved) and owns the notification lifecycle.
     if (!isRoot) return;
-    clearWebViewCache(webViewRef);
+    // We preserve the HTTP disk cache on launch so the WebView reuses cached Vite
+    // chunks instead of cold-downloading bundles every time. On-demand cache
+    // clear is still available via `clearCacheAndReload`.
 
     const unsubForeground = setupForegroundNotifications();
     const unsubOpen = subscribeNotificationOpen(handleNavIntent);
@@ -564,8 +562,8 @@ export default function WebViewContainer({ url, mode }: Props) {
     const appStateSub = AppState.addEventListener("change", (state) => {
       if (state === "active") void postFcmToken();
     });
-    // Safety net: never leave the overlay stuck if the web never signals back.
-    const timeout = setTimeout(dismissOverlay, CLEANUP_OVERLAY_TIMEOUT_MS);
+    // Safety net: never leave the overlay stuck if the web never signals bridgeReady.
+    const timeout = setTimeout(dismissOverlay, LAUNCH_OVERLAY_TIMEOUT_MS);
     return () => {
       unsubForeground();
       unsubOpen();
@@ -770,6 +768,10 @@ export default function WebViewContainer({ url, mode }: Props) {
     const offs = [
       channel.on("bridgeReady", () => {
         webBridgeReadyRef.current = true;
+        // Lift the launch overlay now that the SPA bundle has executed and is ready to paint.
+        if (isRoot) {
+          dismissOverlay();
+        }
         // Ask the web for its stored token — see `adoptWebToken`. Root only:
         // every WebView shares the same storage, so one probe per launch is
         // enough, and pushed sub-pages would only repeat it.
@@ -934,19 +936,14 @@ export default function WebViewContainer({ url, mode }: Props) {
     // Push the FCM token into the web context after every page load (spec §5.A).
     void postFcmToken();
 
-    if (isRoot) {
-      // Kick off the one-time service-worker/cache cleanup loop (spec §5.B).
-      if (!cleanupStartedRef.current) {
-        cleanupStartedRef.current = true;
-        webViewRef.current?.injectJavaScript(LAUNCH_CLEANUP_SCRIPT);
-      }
-    } else {
+    if (!isRoot) {
       // Sub-page: the document is loaded, so the page has (or is one frame from)
       // its first paint — cross-fade the reveal overlay away instead of letting
       // the content pop in on top of the slide-in transition.
       dismissOverlay();
     }
-  }, [dismissOverlay, isRoot, navigateSpa, postFcmToken]);
+    // Root overlay dismissal is driven by `bridgeReady` when the SPA has executed.
+  }, [dismissOverlay, isRoot, postFcmToken]);
 
   const onLoadStart = useCallback(() => {
     if (isRoot) webBridgeReadyRef.current = false;
