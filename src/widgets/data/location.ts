@@ -21,6 +21,16 @@ export type Coordinate = { latitude: number; longitude: number };
 
 const CACHE_KEY = 'intip_widget_last_position';
 
+/**
+ * Readable on a locked phone, like the session token (see
+ * `native/secureTokenStore.ts`): iOS launches the app in the background before
+ * every class, usually locked, and a cache that can't be read then sends the
+ * bus widget back to its default stop.
+ */
+const STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+};
+
 /** A fix this recent is reused rather than waiting on a new one. */
 const LAST_KNOWN_MAX_AGE_MS = 5 * 60 * 1000;
 
@@ -33,7 +43,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 
 async function readCache(): Promise<Coordinate | null> {
   try {
-    const raw = await SecureStore.getItemAsync(CACHE_KEY);
+    const raw = await SecureStore.getItemAsync(CACHE_KEY, STORE_OPTIONS);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<Coordinate>;
     return typeof parsed.latitude === 'number' && typeof parsed.longitude === 'number'
@@ -41,6 +51,16 @@ async function readCache(): Promise<Coordinate | null> {
       : null;
   } catch {
     return null;
+  }
+}
+
+/** Deleted first: iOS keeps an existing item's accessibility when only its value changes. */
+async function writeCache(position: Coordinate): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(CACHE_KEY, STORE_OPTIONS);
+    await SecureStore.setItemAsync(CACHE_KEY, JSON.stringify(position), STORE_OPTIONS);
+  } catch {
+    // A cache that couldn't be written is just a cache miss next time.
   }
 }
 
@@ -67,7 +87,7 @@ export async function getWidgetPosition(): Promise<Coordinate | null> {
   try {
     const position = await readDevice();
     if (position) {
-      await SecureStore.setItemAsync(CACHE_KEY, JSON.stringify(position)).catch(() => undefined);
+      await writeCache(position);
       return position;
     }
   } catch (err) {

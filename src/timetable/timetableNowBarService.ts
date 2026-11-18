@@ -81,9 +81,13 @@ export const TimetableNowBarService = {
        * Activity는 건드리지 않는다 — 다음 수업 것을 현재 수업으로 덮어쓰거나 끝내 버리지 않도록.
        */
       leaveExisting?: boolean;
+      /**
+       * 알림을 무음(소리/진동 없이)으로 렌더링할지 여부 (복원 및 백그라운드 갱신 시 사용)
+       */
+      silent?: boolean;
     } = {},
   ): Promise<void> {
-    const { startUpcoming = true, leaveExisting = false } = options;
+    const { startUpcoming = true, leaveExisting = false, silent = false } = options;
     if (state.phase === 'NONE') {
       await this.cancel();
       return;
@@ -91,8 +95,9 @@ export const TimetableNowBarService = {
 
     const isUpcoming = state.phase === 'UPCOMING';
     const targetTimestamp = isUpcoming ? state.startTimestamp : state.endTimestamp;
-    const settings = await TimetableStorage.getSettings().catch(() => ({ leadTimeMinutes: 15 }));
+    const settings = await TimetableStorage.getSettings().catch(() => ({ leadTimeMinutes: 15, ongoingEnabled: false }));
     const leadTimeMinutes = settings?.leadTimeMinutes || 15;
+    const ongoingEnabled = settings?.ongoingEnabled ?? false;
 
     // --- iOS: Dynamic Island & Live Activity (ActivityKit) ---
     if (Platform.OS === 'ios') {
@@ -227,6 +232,8 @@ export const TimetableNowBarService = {
             // 수업 전 대기 구간 전용 100% 단일 세그먼트 (끊김 없는 매끄러운 바)
             segments: [{ length: 100, color: '#5B8DEF' }],
             ongoing: true,
+            ongoingEnabled,
+            silent,
           });
           return;
         }
@@ -260,6 +267,8 @@ export const TimetableNowBarService = {
           showChronometer: false,
           showWhen: false,
           ongoing: true,
+          ongoingEnabled,
+          silent,
         });
         return;
       } catch (e) {
@@ -299,6 +308,7 @@ export const TimetableNowBarService = {
           autoCancel: false,
           onlyAlertOnce: true,
           visibility: AndroidVisibility.PUBLIC,
+          ...(silent ? { sound: undefined, vibrationPattern: [] } : {}),
           style: {
             type: AndroidStyle.BIGTEXT,
             text: cardBody,

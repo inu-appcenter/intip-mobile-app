@@ -50,6 +50,8 @@ import {
   LMS_DEADLINE_NOTIFICATION_ID,
 } from '../lms/lmsOngoingService';
 import { LocalWatchManager } from '../agent/localWatchManager';
+import { refreshAllWidgetsIfStale } from '../widgets/refresh';
+import { PUSH_REFRESH_MIN_INTERVAL_MS } from '../widgets/refreshIntervals';
 
 export type { NavIntent };
 
@@ -492,6 +494,13 @@ export function subscribeNotificationOpen(cb: (intent: NavIntent) => void): () =
   });
   const unsubNotifee = notifee.onForegroundEvent(({ type, detail }) => {
     if (type === EventType.DISMISSED) {
+      if (
+        detail.notification?.id === TIMETABLE_ONGOING_NOTIFICATION_ID ||
+        detail.notification?.data?.type === 'timetable_nowbar'
+      ) {
+        void TimetableScheduler.markDismissed();
+        return;
+      }
       // User swiped it away — no routing, just don't leave the summary behind.
       void pruneChatGroupSummary(detail.notification?.data);
       return;
@@ -546,13 +555,15 @@ export function registerBackgroundHandlers(): void {
   // We manually handle data-only notifications (i.e. remoteMessage.notification is undefined).
   messaging().setBackgroundMessageHandler(async (remoteMessage) => {
     const data = remoteMessage?.data as Record<string, unknown> | undefined;
-    if (await dispatchOngoingActivityIfMatched(data)) {
-      return;
-    }
-
-    if (!remoteMessage.notification) {
+    if (!(await dispatchOngoingActivityIfMatched(data)) && !remoteMessage.notification) {
       await handleDisplayNotification(remoteMessage);
     }
+
+    // A background push is the one time the app runs without being opened, so
+    // it doubles as the widgets' refresh — the only one an iOS widget gets on
+    // a phone the app stays closed on. Awaited: the OS keeps the process alive
+    // only until this handler settles. Never throws (see widgets/refresh.ts).
+    await refreshAllWidgetsIfStale(PUSH_REFRESH_MIN_INTERVAL_MS);
   });
 
   // Android 16 / One UI 8 Live Notification / Rich Ongoing Activity를 위한 Foreground Service 러너 등록
@@ -684,6 +695,13 @@ export function registerBackgroundHandlers(): void {
     // Dismissals happen in the tray, i.e. almost always while backgrounded —
     // this is the path that actually keeps the stale summary from sticking.
     if (type === EventType.DISMISSED) {
+      if (
+        detail.notification?.id === TIMETABLE_ONGOING_NOTIFICATION_ID ||
+        detail.notification?.data?.type === 'timetable_nowbar'
+      ) {
+        await TimetableScheduler.markDismissed();
+        return;
+      }
       await pruneChatGroupSummary(detail.notification?.data);
       return;
     }

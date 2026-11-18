@@ -1,6 +1,7 @@
 /**
- * Gives the iOS 인입런 widget a tap-to-refresh that fetches in the widget
- * extension itself, without opening the app.
+ * Gives the two iOS bus widgets (인입런 · 가까운 정류장, 인입런 · 정류장 선택) a
+ * tap-to-refresh that fetches in the widget extension itself, without opening
+ * the app.
  *
  * See `plugins/widget-ios/BusArrivalRefresh.swift` for the why. This plugin
  * only installs it:
@@ -9,7 +10,10 @@
  *   extension target's Sources phase, and
  * - rewrites the `BusArrivalWidget.swift` expo-widgets generates so its entry
  *   view is the file's `BusArrivalEntryView` (the generated view plus a tap
- *   target over the refresh icon) instead of the bare `WidgetsEntryView`.
+ *   target over the refresh icon) instead of the bare `WidgetsEntryView`, and
+ * - appends the same tap target to the entry view in `BusStopWidget.swift`.
+ *   That widget has options, so expo-widgets generates it an entry view of its
+ *   own (carrying the configuration) — it is kept and wrapped, not replaced.
  *
  * Must be listed *before* `expo-widgets` in app.json's `plugins`, for the
  * same reason as `withWidgetAssets` and `withExpoWidgetsVersionSync`: mods
@@ -34,6 +38,10 @@ const WIDGET_SWIFT = 'BusArrivalWidget.swift';
 const GENERATED_ENTRY_VIEW = 'WidgetsEntryView(entry: entry)';
 const PATCHED_ENTRY_VIEW = 'BusArrivalEntryView(entry: entry)';
 
+const STOP_WIDGET_SWIFT = 'BusStopWidget.swift';
+const GENERATED_STOP_ENTRY_VIEW = 'BusStopWidgetEntryView(entry: entry)';
+const PATCHED_STOP_ENTRY_VIEW = `${GENERATED_STOP_ENTRY_VIEW}.busStopRefreshOverlay()`;
+
 /**
  * Swaps the entry view in expo-widgets' generated `BusArrivalWidget.swift`.
  *
@@ -55,22 +63,46 @@ function patchBusArrivalWidgetSwift(source) {
   return source.replace(GENERATED_ENTRY_VIEW, PATCHED_ENTRY_VIEW);
 }
 
+/** Appends the refresh tap target to `BusStopWidget.swift`'s entry view. Same guard as above. */
+function patchBusStopWidgetSwift(source) {
+  if (source.includes(PATCHED_STOP_ENTRY_VIEW)) return source;
+
+  const occurrences = source.split(GENERATED_STOP_ENTRY_VIEW).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `withBusArrivalRefreshIntent: expected exactly one "${GENERATED_STOP_ENTRY_VIEW}" in the ` +
+        `generated ${STOP_WIDGET_SWIFT}, found ${occurrences}. expo-widgets' widget template ` +
+        `has changed — update this plugin to match.`
+    );
+  }
+  return source.replace(GENERATED_STOP_ENTRY_VIEW, PATCHED_STOP_ENTRY_VIEW);
+}
+
 function withBusArrivalSwiftFiles(config) {
   return withDangerousMod(config, [
     'ios',
     (cfg) => {
       const { projectRoot, platformProjectRoot } = cfg.modRequest;
       const targetDir = path.join(platformProjectRoot, IOS_WIDGET_TARGET);
-      const widgetPath = path.join(targetDir, WIDGET_SWIFT);
-      if (!fs.existsSync(widgetPath)) {
-        throw new Error(
-          `withBusArrivalRefreshIntent: ${path.relative(projectRoot, widgetPath)} doesn't exist. ` +
-            `This plugin must run after expo-widgets — list it before "expo-widgets" in app.json.`
-        );
+      const patches = [
+        [WIDGET_SWIFT, patchBusArrivalWidgetSwift],
+        [STOP_WIDGET_SWIFT, patchBusStopWidgetSwift],
+      ];
+      for (const [filename] of patches) {
+        const widgetPath = path.join(targetDir, filename);
+        if (!fs.existsSync(widgetPath)) {
+          throw new Error(
+            `withBusArrivalRefreshIntent: ${path.relative(projectRoot, widgetPath)} doesn't exist. ` +
+              `This plugin must run after expo-widgets — list it before "expo-widgets" in app.json.`
+          );
+        }
       }
 
       fs.copyFileSync(path.join(projectRoot, SWIFT_SOURCE), path.join(targetDir, SWIFT_FILENAME));
-      fs.writeFileSync(widgetPath, patchBusArrivalWidgetSwift(fs.readFileSync(widgetPath, 'utf8')));
+      for (const [filename, patch] of patches) {
+        const widgetPath = path.join(targetDir, filename);
+        fs.writeFileSync(widgetPath, patch(fs.readFileSync(widgetPath, 'utf8')));
+      }
       return cfg;
     },
   ]);
@@ -116,3 +148,4 @@ module.exports = function withBusArrivalRefreshIntent(config) {
 
 // Exported for the unit test in __tests__; not part of the plugin contract.
 module.exports.patchBusArrivalWidgetSwift = patchBusArrivalWidgetSwift;
+module.exports.patchBusStopWidgetSwift = patchBusStopWidgetSwift;

@@ -45,6 +45,9 @@ jest.mock('@react-native-firebase/messaging', () => {
 });
 
 jest.mock('../fcmTokenSync', () => ({ registerFcmTokenRotationListener: jest.fn() }));
+// The background handler also refreshes the widgets; their module graph ends in
+// native widget modules this test has no use for.
+jest.mock('../../widgets/refresh', () => ({ refreshAllWidgetsIfStale: jest.fn(async () => false) }));
 jest.mock('../../native/permissions', () => ({ ensureAndroidPostNotifications: jest.fn() }));
 jest.mock('../../library/libraryOngoingService', () => ({
   LibraryOngoingService: {

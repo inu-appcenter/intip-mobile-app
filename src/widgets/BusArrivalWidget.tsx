@@ -59,15 +59,22 @@ type BusArrival = {
  * `src/widgets/refresh.ts`) — so this only has the one populated state plus
  * a fallback for whenever the upstream arrival API has nothing to show.
  */
-export type BusArrivalWidgetProps = (
+export type BusArrivalSnapshot =
   | {
       status: "normal";
-      /** The stop nearest the user, as the portal names it ("2번출구") — see `data/busArrival.ts`. */
+      /** The stop, as the portal names it ("2번출구") — see `data/busArrival.ts`. */
       stopLabel: string;
       arrivals: BusArrival[];
     }
-  | { status: "noData" }
-) & {
+  /**
+   * Every bus the last reading knew about has arrived. Not "no buses": the
+   * reading has run out, and only a refresh can say what is coming now.
+   */
+  | { status: "stale"; stopLabel: string; observedLabel: string }
+  | { status: "noData" };
+
+/** The 인입런 widget: one stop, the one nearest the user. */
+export type BusArrivalWidgetProps = BusArrivalSnapshot & {
   /**
    * What the iOS widget extension needs to refetch on its own when the
    * refresh icon is tapped — see `plugins/widget-ios/BusArrivalRefresh.swift`.
@@ -75,6 +82,27 @@ export type BusArrivalWidgetProps = (
    * be picked, in which case a tap does nothing.
    */
   source?: BusArrivalRefreshSource;
+};
+
+/**
+ * The 정류장 선택 widget: every selectable stop's snapshot, keyed by option id.
+ *
+ * Which stop a widget shows is its own option (`configuration.stop`, see
+ * app.json), known only to the widget — so the app sends all of them and the
+ * layout picks, exactly as `CafeteriaMenuWidget` does with cafeterias.
+ */
+export type BusStopWidgetProps = {
+  stops: Record<string, BusArrivalSnapshot>;
+  /** As {@link BusArrivalWidgetProps.source}, for every stop at once. */
+  source?: BusStopRefreshSource;
+};
+
+export type BusStopWidgetConfiguration = { stop?: string };
+
+/** Every selectable stop, for the extension's tap-to-refresh. */
+export type BusStopRefreshSource = {
+  apiBaseUrl: string;
+  stops: { id: string; bstopId: string; stopLabel: string; routeIds: string[] }[];
 };
 
 /** The stop the app last picked, for the extension's tap-to-refresh. */
@@ -99,7 +127,10 @@ export const DEFAULT_PROPS: BusArrivalWidgetProps = {
 };
 
 /**
- * Home screen widget for the nearest bus stop's next arrivals.
+ * The layout of both bus widgets — 인입런 (the nearest stop) and 정류장 선택 (a
+ * stop the user picks). One function registered under two names: they differ
+ * only in where the snapshot comes from, and a layout can't import a shared
+ * helper to draw the rest.
  *
  * See the `'widget'` directive note in `TestWidget.tsx` — only this
  * function's own source and whatever it declares internally ships to the
@@ -109,10 +140,19 @@ export const DEFAULT_PROPS: BusArrivalWidgetProps = {
  * `environment.widgetFamily` isn't branched on.
  */
 const BusArrivalWidget = (
-  props: BusArrivalWidgetProps,
-  environment: WidgetEnvironment,
+  input: BusArrivalWidgetProps | BusStopWidgetProps,
+  environment: WidgetEnvironment<BusStopWidgetConfiguration | undefined>,
 ) => {
   "widget";
+
+  // `stops` is what tells the two apart. For the picker, a missing
+  // `configuration` (a widget placed before it had options) falls back to
+  // 2번출구, the default app.json declares — a literal, since only this
+  // function's source reaches the widget.
+  const props: BusArrivalSnapshot =
+    "stops" in input && input.stops
+      ? (input.stops[environment.configuration?.stop ?? "exit2"] ?? { status: "noData" })
+      : (input as BusArrivalSnapshot);
 
   const isDark = environment.colorScheme === "dark";
 
@@ -338,6 +378,44 @@ const BusArrivalWidget = (
         </>
       );
       break;
+    case "stale":
+      content = (
+        <>
+          <HStack alignment="center" modifiers={[frame({ maxWidth: Infinity })]}>
+            <Text modifiers={[font({ size: 14, weight: "medium" }), foregroundStyle(colors.textTertiary)]}>
+              인입런
+            </Text>
+            <Spacer />
+            <Text
+              modifiers={[
+                lineLimit(1),
+                font({ size: 14, weight: "semibold" }),
+                foregroundStyle(colors.textSecondary),
+              ]}
+            >
+              {props.stopLabel}
+            </Text>
+          </HStack>
+          <Text
+            modifiers={[
+              padding({ top: 16 }),
+              font({ size: 16, weight: "semibold" }),
+              foregroundStyle(colors.textPrimary),
+            ]}
+          >
+            새로고침이 필요해요
+          </Text>
+          <Spacer minLength={0} />
+          <HStack alignment="center" modifiers={[frame({ maxWidth: Infinity })]}>
+            <Text modifiers={[font({ size: 10 }), foregroundStyle(colors.textTertiary)]}>
+              {props.observedLabel}
+            </Text>
+            <Spacer />
+            {refreshControl}
+          </HStack>
+        </>
+      );
+      break;
     case "noData":
       content = (
         <VStack
@@ -414,8 +492,15 @@ const BusArrivalWidget = (
 };
 
 // Android has no equivalent of createWidget()'s implicit iOS layout capture
-// (see expo-widgets-glance's README) — this explicit call is what stands in
+// (see expo-widgets-glance's README) — these explicit calls are what stand in
 // for it. No-op on iOS.
 registerGlanceWidget("BusArrivalWidget", BusArrivalWidget, { refreshIntervalMs: BUS_REFRESH_MS });
+registerGlanceWidget("BusStopWidget", BusArrivalWidget, { refreshIntervalMs: BUS_REFRESH_MS });
 
-export default createWidget("BusArrivalWidget", BusArrivalWidget);
+/** 정류장 선택 — the same layout, fed every stop and told which one to show. */
+export const BusStopWidget = createWidget<BusStopWidgetProps, BusStopWidgetConfiguration>(
+  "BusStopWidget",
+  BusArrivalWidget,
+);
+
+export default createWidget<BusArrivalWidgetProps>("BusArrivalWidget", BusArrivalWidget);

@@ -63,11 +63,41 @@ export async function executeAgentAction(
         };
       }
 
+      // 보안 검증 1: target URL이 대학교 ERP/포털 호스트인지 확인 (SSRF 방어)
+      if (request.url) {
+        try {
+          const parsedTarget = new URL(request.url, 'https://erp.inu.ac.kr:8443');
+          if (!['erp.inu.ac.kr', 'portal.inu.ac.kr'].includes(parsedTarget.hostname)) {
+            return {
+              actionId,
+              success: false,
+              errorCode: 'UNAUTHORIZED_TARGET',
+              errorMessage: '허가되지 않은 외부 시스템 대상 액션입니다.',
+            };
+          }
+        } catch (_) {}
+      }
+
+      // 보안 검증 2: stuno/persNo 파라미터가 포함된 경우 로그인된 본인 학번으로 강제 바인딩 (BOLA/IDOR 방어)
+      const safeRequest: any = { ...request };
+      if (safeRequest.params && typeof safeRequest.params === 'object') {
+        const nextParams = { ...safeRequest.params };
+        if ('stuno' in nextParams) nextParams.stuno = creds.studentId;
+        if ('persNo' in nextParams) nextParams.persNo = creds.studentId;
+        safeRequest.params = nextParams;
+      }
+      if (safeRequest.data && typeof safeRequest.data === 'object') {
+        const nextData = { ...safeRequest.data };
+        if ('stuno' in nextData) nextData.stuno = creds.studentId;
+        if ('persNo' in nextData) nextData.persNo = creds.studentId;
+        safeRequest.data = nextData;
+      }
+
       try {
         const rawResult = await AcademicScraperManager.executeErpAction({
           creds,
           actionId,
-          target: request,
+          target: safeRequest,
         });
 
         let parsedData: any = rawResult;

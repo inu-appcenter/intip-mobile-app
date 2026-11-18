@@ -10,7 +10,7 @@
  * distributed lock, just last-write-wins via `syncTokenInfo`/`tokenInfoUpdated`.
  */
 import { API_BASE_URL } from '../config/env';
-import { clearTokenInfo, readTokenInfo, saveTokenInfo, type TokenInfo } from './secureTokenStore';
+import { clearTokenInfo, readTokenInfoStrict, saveTokenInfo, type TokenInfo } from './secureTokenStore';
 
 /**
  * Parse a timezone-less "naive" datetime string (e.g.
@@ -45,12 +45,24 @@ export function onNativeTokenRefresh(cb: (tokenInfo: TokenInfo) => void): () => 
   };
 }
 
-let refreshInFlight: Promise<TokenInfo | null> | null = null;
+/**
+ * What is known about this device's session.
+ *
+ * `unknown` is the one that matters: the keychain was locked, or the refresh
+ * request never got an answer. It says nothing about whether the user is
+ * logged in, so nothing may be torn down on the strength of it.
+ */
+export type Session =
+  | { state: 'valid'; tokenInfo: TokenInfo }
+  | { state: 'none' }
+  | { state: 'unknown' };
 
-async function doRefresh(stored: TokenInfo): Promise<TokenInfo | null> {
+let refreshInFlight: Promise<Session> | null = null;
+
+async function doRefresh(stored: TokenInfo): Promise<Session> {
   if (!stored.refreshToken || isExpired(stored.refreshTokenExpiredTime, new Date())) {
     await clearTokenInfo();
-    return null;
+    return { state: 'none' };
   }
   try {
     const res = await fetch(`${API_BASE_URL}/api/members/refresh`, {
@@ -58,35 +70,56 @@ async function doRefresh(stored: TokenInfo): Promise<TokenInfo | null> {
       headers: { refresh: stored.refreshToken },
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) await clearTokenInfo();
-      return null;
+      if (res.status === 401 || res.status === 403) {
+        await clearTokenInfo();
+        return { state: 'none' };
+      }
+      return { state: 'unknown' };
     }
     const body = await res.json();
     const newTokenInfo: TokenInfo = body.data;
     await saveTokenInfo(newTokenInfo);
     listener?.(newTokenInfo);
-    return newTokenInfo;
+    return { state: 'valid', tokenInfo: newTokenInfo };
   } catch (err) {
     console.warn('[authTokens] self-refresh failed', err);
-    return null;
+    return { state: 'unknown' };
   }
 }
 
 /**
- * Returns a currently-valid accessToken, refreshing (and persisting) it
- * first if expired. `null` means no usable session — either never synced
- * from the web login, or the refresh token itself is gone/expired.
+ * Resolves the session, refreshing (and persisting) the access token first if
+ * it has expired. `none` is only ever a definite answer: nothing stored, the
+ * refresh token expired, or the server rejected it.
  */
-export async function getValidAccessToken(): Promise<string | null> {
-  const stored = await readTokenInfo();
-  if (!stored?.accessToken) return null;
-  if (!isExpired(stored.accessTokenExpiredTime, new Date())) return stored.accessToken;
+export async function getSession(): Promise<Session> {
+  let stored: TokenInfo | null;
+  try {
+    stored = await readTokenInfoStrict();
+  } catch (err) {
+    console.warn('[authTokens] token store unreadable', err);
+    return { state: 'unknown' };
+  }
+  if (!stored?.accessToken) return { state: 'none' };
+  if (!isExpired(stored.accessTokenExpiredTime, new Date())) {
+    return { state: 'valid', tokenInfo: stored };
+  }
 
   if (!refreshInFlight) {
     refreshInFlight = doRefresh(stored).finally(() => {
       refreshInFlight = null;
     });
   }
-  const refreshed = await refreshInFlight;
-  return refreshed?.accessToken ?? null;
+  return refreshInFlight;
+}
+
+/**
+ * Returns a currently-valid accessToken, refreshing (and persisting) it
+ * first if expired. `null` means no usable token right now — never synced
+ * from the web login, the refresh token gone/expired, or simply unreachable
+ * at the moment. Use `getSession` to tell those apart.
+ */
+export async function getValidAccessToken(): Promise<string | null> {
+  const session = await getSession();
+  return session.state === 'valid' ? session.tokenInfo.accessToken : null;
 }

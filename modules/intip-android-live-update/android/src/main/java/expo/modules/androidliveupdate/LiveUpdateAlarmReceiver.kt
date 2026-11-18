@@ -21,9 +21,13 @@ class LiveUpdateAlarmReceiver : BroadcastReceiver() {
     }
 
     try {
-      LiveUpdateManager.onTick(context)
+      if (intent?.action == ACTION_DISMISS) {
+        LiveUpdateManager.onDismissedByUser(context)
+      } else {
+        LiveUpdateManager.onTick(context)
+      }
     } catch (e: Exception) {
-      Log.e("IntipLiveUpdate", "Error during LiveUpdateAlarmReceiver onTick", e)
+      Log.e("IntipLiveUpdate", "Error during LiveUpdateAlarmReceiver processing", e)
     } finally {
       try {
         if (wakeLock != null && wakeLock.isHeld) {

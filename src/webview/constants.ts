@@ -102,8 +102,13 @@ export const APP_UA_SUFFIX = `INTIPApp/${Constants.expoConfig?.version ?? "1.0.0
  *
  * Update this whenever a new capability lands (e.g. a future `share:files`
  * once phase-2 image/file sharing ships).
+ *
+ * - `share`: OS 공유 시트(`share`/`shareResult`).
+ * - `portalScraper`: 포털 계정 기기 저장과 학적 조회(레거시 `intipAgentResult`
+ *   경로의 `savePortalAccount`/`fetchAcademicInfo` 등, `agent/agentBridgeHandler`).
+ *   웹 온보딩은 이 값이 있을 때만 "포털 계정 등록" 단계를 연다.
  */
-export const NATIVE_FEATURES = ["share"] as const;
+export const NATIVE_FEATURES = ["share", "portalScraper"] as const;
 
 /**
  * Main-tab paths (spec §3.A). These stay inside the single root WebView via SPA

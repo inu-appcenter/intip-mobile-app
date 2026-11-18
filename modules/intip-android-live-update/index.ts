@@ -77,4 +77,32 @@ export const IntipAndroidLiveUpdate = {
       return false;
     }
   },
+
+  /**
+   * 상단바에서 사용자가 지운 상태 초기화
+   */
+  resetDismissed(): boolean {
+    if (Platform.OS !== 'android' || !IntipAndroidLiveUpdateModule) {
+      return false;
+    }
+    try {
+      return IntipAndroidLiveUpdateModule.resetDismissed();
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * 사용자가 현재 실시간 알림을 상단바에서 지웠음을 기록
+   */
+  markDismissed(sessionKey: string): boolean {
+    if (Platform.OS !== 'android' || !IntipAndroidLiveUpdateModule) {
+      return false;
+    }
+    try {
+      return IntipAndroidLiveUpdateModule.markDismissed(sessionKey);
+    } catch {
+      return false;
+    }
+  },
 };

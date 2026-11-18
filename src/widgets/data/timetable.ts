@@ -276,8 +276,12 @@ export function formatDateLabel(now: Date): string {
 }
 
 /**
- * The 오늘 수업 header's right-hand notice — how long until the next class, or
- * that one is running. Mirrors the Figma frame's "1시간 후 시작".
+ * The 오늘 수업 header's right-hand notice — when the next class starts, or
+ * that one is running.
+ *
+ * An absolute time ("11:00 시작"), not the Figma frame's "1시간 후 시작". A
+ * timeline entry is only rebuilt at class starts and ends, so a relative label
+ * written at 10:13 ("47분 후 시작") stayed on screen, unchanged, until 11:00.
  */
 function noticeFor(today: ClassMeeting[], nowMinutes: number): string {
   const ongoing = today.find((m) => m.startMinutes <= nowMinutes && nowMinutes < m.endMinutes);
@@ -286,9 +290,7 @@ function noticeFor(today: ClassMeeting[], nowMinutes: number): string {
   const upcoming = today.find((m) => m.startMinutes > nowMinutes);
   if (!upcoming) return '오늘 수업 종료';
 
-  const minutesUntil = upcoming.startMinutes - nowMinutes;
-  if (minutesUntil < 60) return `${minutesUntil}분 후 시작`;
-  return `${Math.floor(minutesUntil / 60)}시간 후 시작`;
+  return `${formatHhMm(upcoming.startMinutes)} 시작`;
 }
 
 /**
@@ -359,32 +361,66 @@ export function toTimetableProps(meetings: ClassMeeting[], now: Date): Timetable
 }
 
 /**
- * The instants today at which any of the schedule widgets would change — every
- * class start and end still ahead of `now`.
+ * How many days of entries the schedule widgets are handed at once.
+ *
+ * A timetable repeats weekly, so every one of these days is computable from
+ * the same fetch. Two weeks is how long a widget stays right on a phone the
+ * app is never opened on; past that it holds its last entry.
+ */
+export const SCHEDULE_TIMELINE_DAYS = 14;
+
+/** Midnight `offset` days after `now`'s day. */
+function startOfDay(now: Date, offset: number): Date {
+  const day = new Date(now);
+  day.setDate(day.getDate() + offset);
+  day.setHours(0, 0, 0, 0);
+  return day;
+}
+
+/**
+ * The next `days - 1` midnights — when "today" becomes a different day.
+ *
+ * Without these a widget fed only today's entries kept showing yesterday:
+ * yesterday's date, "오늘 수업이 모두 끝났어요", yesterday's column highlighted.
+ */
+export function dayBoundariesOf(now: Date, days: number = SCHEDULE_TIMELINE_DAYS): Date[] {
+  return Array.from({ length: Math.max(days - 1, 0) }, (_, index) => startOfDay(now, index + 1));
+}
+
+/**
+ * The instants at which any of the schedule widgets would change over the next
+ * `days` days — every class start and end still ahead of `now`, and every
+ * midnight in between.
  *
  * This is what turns three widgets that look live into three widgets that need
- * one fetch a day. A caller that can schedule future work hands these to the
- * platform along with the props for each, and the widget advances through the
- * day on its own: iOS walks a timeline with no further network, and Android
- * can queue one-shot updates at the same instants.
+ * one fetch in two weeks. A caller that can schedule future work hands these
+ * to the platform along with the props for each, and the widget advances on
+ * its own: iOS walks a timeline with no further network, and Android queues
+ * repaints at the same instants.
  */
-export function classBoundariesOf(meetings: ClassMeeting[], now: Date): Date[] {
-  const today = meetings.filter((m) => m.dayIndex === dayIndexOf(now));
-  const nowMinutes = minutesOfDay(now);
-  const minutes = new Set<number>();
+export function classBoundariesOf(
+  meetings: ClassMeeting[],
+  now: Date,
+  days: number = SCHEDULE_TIMELINE_DAYS,
+): Date[] {
+  const instants = new Set<number>();
 
-  for (const meeting of today) {
-    if (meeting.startMinutes > nowMinutes) minutes.add(meeting.startMinutes);
-    if (meeting.endMinutes > nowMinutes) minutes.add(meeting.endMinutes);
+  for (let offset = 0; offset < days; offset++) {
+    const day = startOfDay(now, offset);
+    if (offset > 0) instants.add(day.getTime());
+
+    const dayIndex = dayIndexOf(day);
+    for (const meeting of meetings) {
+      if (meeting.dayIndex !== dayIndex) continue;
+      for (const minutes of [meeting.startMinutes, meeting.endMinutes]) {
+        const at = new Date(day);
+        at.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+        if (at.getTime() > now.getTime()) instants.add(at.getTime());
+      }
+    }
   }
 
-  return [...minutes]
-    .sort((a, b) => a - b)
-    .map((m) => {
-      const at = new Date(now);
-      at.setHours(Math.floor(m / 60), m % 60, 0, 0);
-      return at;
-    });
+  return [...instants].sort((a, b) => a - b).map((ms) => new Date(ms));
 }
 
 // --- Fetch -----------------------------------------------------------------
@@ -498,10 +534,14 @@ export function pickPrimaryTimetable(
  * fetched filtered to that semester, and the primary within it is expanded.
  */
 export async function fetchClassMeetings(now: Date = new Date()): Promise<ClassMeeting[] | null> {
-  // Not fatal on failure: without it the timetable list is fetched unfiltered
-  // and `pickPrimaryTimetable` falls back to the most recent primary.
+  // A failure here is a failure of the whole fetch. Carrying on without the
+  // semester list means guessing "the most recent primary" — which mid-term
+  // can be next semester's empty timetable — and pushing that guess over a
+  // snapshot that was right. An *empty* list is different: that is an answer,
+  // and `pickPrimaryTimetable` has a fallback for it.
   const semesters = await getJson<Semester[]>('/api/semesters', { authenticated: true });
-  const semester = currentSemesterOf(semesters ?? [], now);
+  if (semesters === null) return null;
+  const semester = currentSemesterOf(semesters, now);
 
   const timetables = await getJson<TimeTableSummary[]>('/api/timetables', {
     authenticated: true,

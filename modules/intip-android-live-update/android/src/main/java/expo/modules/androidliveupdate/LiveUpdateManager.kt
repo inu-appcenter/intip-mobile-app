@@ -13,6 +13,7 @@ import android.util.Log
 
 const val TAG = "IntipLiveUpdate"
 const val ACTION_TICK = "expo.modules.androidliveupdate.ACTION_TICK"
+const val ACTION_DISMISS = "expo.modules.androidliveupdate.ACTION_DISMISS"
 private const val PREFS_NAME = "intip_live_update_prefs"
 
 data class LiveUpdateSession(
@@ -31,7 +32,9 @@ data class LiveUpdateSession(
   val leadTimeMinutes: Int,
   val durationMinutes: Int,
   val segmentsRaw: List<Map<String, Any?>>?,
-  val ongoing: Boolean
+  val ongoing: Boolean,
+  val ongoingEnabled: Boolean = false,
+  val silent: Boolean = false
 )
 
 object LiveUpdateManager {
@@ -55,6 +58,8 @@ object LiveUpdateManager {
       putInt("leadTimeMinutes", session.leadTimeMinutes)
       putInt("durationMinutes", session.durationMinutes)
       putBoolean("ongoing", session.ongoing)
+      putBoolean("ongoingEnabled", session.ongoingEnabled)
+      putBoolean("silent", session.silent)
       apply()
     }
   }
@@ -87,8 +92,41 @@ object LiveUpdateManager {
       leadTimeMinutes = prefs.getInt("leadTimeMinutes", 15),
       durationMinutes = prefs.getInt("durationMinutes", 75),
       segmentsRaw = segmentsRaw,
-      ongoing = ongoing
+      ongoing = ongoing,
+      ongoingEnabled = prefs.getBoolean("ongoingEnabled", false),
+      silent = prefs.getBoolean("silent", false)
     )
+  }
+
+  @Synchronized
+  fun onDismissedByUser(context: Context) {
+    val session = loadSession(context) ?: return
+    val sessionKey = "${session.courseTitle}_${session.startTimestamp}"
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    prefs.edit().putString("dismissedSessionKey", sessionKey).apply()
+    cancelAlarm(context, session.id)
+    stopLiveUpdateService(context)
+    Log.i(TAG, "User dismissed LiveUpdate notification for session: $sessionKey")
+  }
+
+  fun isSessionDismissed(context: Context, session: LiveUpdateSession): Boolean {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val dismissedSessionKey = prefs.getString("dismissedSessionKey", null) ?: return false
+    val currentSessionKey = "${session.courseTitle}_${session.startTimestamp}"
+    return currentSessionKey == dismissedSessionKey
+  }
+
+  fun resetDismissed(context: Context) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    prefs.edit().remove("dismissedSessionKey").apply()
+    Log.i(TAG, "Reset dismissed LiveUpdate session")
+  }
+
+  fun markDismissed(context: Context, sessionKey: String) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    prefs.edit().putString("dismissedSessionKey", sessionKey).apply()
+    stopLiveUpdateService(context)
+    Log.i(TAG, "Marked LiveUpdate session as dismissed: $sessionKey")
   }
 
   @Synchronized
@@ -163,9 +201,20 @@ object LiveUpdateManager {
   @Synchronized
   fun onTick(context: Context) {
     val session = loadSession(context) ?: return
+    if (isSessionDismissed(context, session)) {
+      Log.d(TAG, "Skipping onTick because session is dismissed by user: ${session.courseTitle}")
+      return
+    }
+
     val now = System.currentTimeMillis()
 
     if (session.phase.equals("ONGOING", ignoreCase = true)) {
+      if (!session.ongoingEnabled) {
+        Log.i(TAG, "Class is ongoing and ongoingEnabled is false, stopping LiveUpdate")
+        stopLiveUpdate(context, session.id)
+        return
+      }
+
       val endMs = session.endTimestamp ?: (now + session.durationMinutes * 60_000L)
       if (now >= endMs) {
         Log.i(TAG, "Class ended (now >= $endMs), stopping LiveUpdate")
@@ -200,13 +249,19 @@ object LiveUpdateManager {
         shortCriticalText = remainingText,
         progress = progress,
         segmentsRaw = session.segmentsRaw,
-        ongoing = session.ongoing
+        ongoing = session.ongoing,
+        silent = true
       )
       scheduleNextAlarm(context, session)
 
     } else if (session.phase.equals("UPCOMING", ignoreCase = true)) {
       val startMs = session.startTimestamp ?: return
       if (now >= startMs) {
+        if (!session.ongoingEnabled) {
+          Log.i(TAG, "Class begins but ongoingEnabled is false, stopping LiveUpdate")
+          stopLiveUpdate(context, session.id)
+          return
+        }
         // Class begins! Transition session to ONGOING
         val courseName = session.courseTitle ?: session.title.removePrefix("[다음 수업] ").trim()
         val endMs = session.endTimestamp ?: (startMs + session.durationMinutes * 60_000L)
@@ -248,7 +303,8 @@ object LiveUpdateManager {
         shortCriticalText = remainingText,
         progress = progress,
         segmentsRaw = session.segmentsRaw,
-        ongoing = session.ongoing
+        ongoing = session.ongoing,
+        silent = true
       )
       scheduleNextAlarm(context, session)
     }
@@ -339,7 +395,8 @@ object LiveUpdateManager {
       targetTimestamp = session.targetTimestamp,
       showChronometer = false,
       showWhen = false,
-      ongoing = session.ongoing
+      ongoing = session.ongoing,
+      silent = session.silent
     )
   }
 
@@ -372,17 +429,28 @@ object LiveUpdateManager {
     targetTimestamp: Long? = null,
     showChronometer: Boolean = false,
     showWhen: Boolean = false,
-    ongoing: Boolean = true
+    ongoing: Boolean = true,
+    silent: Boolean = false
   ): Notification {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    ensureNotificationChannel(notificationManager, channelId, channelName)
+    val actualChannelId = if (silent && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) "${channelId}_silent" else channelId
+    ensureNotificationChannel(notificationManager, channelId, channelName, silent)
 
-    val builder = Notification.Builder(context, channelId)
+    val builder = Notification.Builder(context, actualChannelId)
       .setContentTitle(title)
       .setContentText(text)
       .setOngoing(ongoing)
       .setOnlyAlertOnce(true)
       .setAutoCancel(false)
+
+    if (silent) {
+      @Suppress("DEPRECATION")
+      builder.setSound(null, null)
+      @Suppress("DEPRECATION")
+      builder.setVibrate(null)
+      @Suppress("DEPRECATION")
+      builder.setDefaults(0)
+    }
 
     val iconRes = if (context.applicationInfo.icon != 0) context.applicationInfo.icon else android.R.drawable.sym_def_app_icon
     builder.setSmallIcon(iconRes)
@@ -397,6 +465,18 @@ object LiveUpdateManager {
       )
       builder.setContentIntent(pendingIntent)
     }
+
+    val dismissIntent = Intent(context, LiveUpdateAlarmReceiver::class.java).apply {
+      action = ACTION_DISMISS
+      putExtra("id", id)
+    }
+    val deletePendingIntent = PendingIntent.getBroadcast(
+      context,
+      id + 9000,
+      dismissIntent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+    builder.setDeleteIntent(deletePendingIntent)
 
     builder.setCategory(if (progress != null) Notification.CATEGORY_PROGRESS else Notification.CATEGORY_EVENT)
 
@@ -458,7 +538,8 @@ object LiveUpdateManager {
     targetTimestamp: Long? = null,
     showChronometer: Boolean = false,
     showWhen: Boolean = false,
-    ongoing: Boolean = true
+    ongoing: Boolean = true,
+    silent: Boolean = false
   ): Boolean {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     val notification = buildNotification(
@@ -475,7 +556,8 @@ object LiveUpdateManager {
       targetTimestamp = targetTimestamp,
       showChronometer = showChronometer,
       showWhen = showWhen,
-      ongoing = ongoing
+      ongoing = ongoing,
+      silent = silent
     )
     val promotable = checkPromotableCharacteristics(notification)
     notificationManager.notify(id, notification)
@@ -522,7 +604,7 @@ object LiveUpdateManager {
     }
   }
 
-  private fun ensureNotificationChannel(notificationManager: NotificationManager, channelId: String, channelName: String) {
+  private fun ensureNotificationChannel(notificationManager: NotificationManager, channelId: String, channelName: String, silent: Boolean = false) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       try {
         notificationManager.deleteNotificationChannel("timetable_nowbar")
@@ -530,16 +612,23 @@ object LiveUpdateManager {
         notificationManager.deleteNotificationChannel("timetable_nowbar_v3")
       } catch (_: Exception) {}
 
-      val existing = notificationManager.getNotificationChannel(channelId)
+      val actualChannelId = if (silent) "${channelId}_silent" else channelId
+      val existing = notificationManager.getNotificationChannel(actualChannelId)
       if (existing == null) {
+        val importance = if (silent) NotificationManager.IMPORTANCE_LOW else NotificationManager.IMPORTANCE_DEFAULT
         val channel = NotificationChannel(
-          channelId,
-          channelName,
-          NotificationManager.IMPORTANCE_DEFAULT
+          actualChannelId,
+          if (silent) "$channelName (무음)" else channelName,
+          importance
         ).apply {
           description = "Now Bar 실시간 라이브 업데이트 알림"
           lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-          enableVibration(true)
+          if (silent) {
+            enableVibration(false)
+            setSound(null, null)
+          } else {
+            enableVibration(true)
+          }
           setShowBadge(false)
         }
         notificationManager.createNotificationChannel(channel)

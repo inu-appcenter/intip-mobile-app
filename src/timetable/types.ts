@@ -30,6 +30,7 @@ export interface TimetableData {
 export interface TimetableNowBarSettings {
   enabled: boolean;
   leadTimeMinutes: number; // 수업 시작 몇 분 전에 노출할지 (기본 10분)
+  ongoingEnabled: boolean; // 수업 중에도 실시간 알림 유지할지 여부 (기본 false)
 }
 
 export type TimetableActivityPhase = 'NONE' | 'UPCOMING' | 'ONGOING';
