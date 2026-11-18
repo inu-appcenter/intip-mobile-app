@@ -123,7 +123,10 @@
           "android": {
             "extraMavenRepos": [
               "../../node_modules/@notifee/react-native/android/libs"
-            ]
+            ],
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "# --- INTIP release (R8) keep rules. Libraries ship their own consumer rules (RN, Hermes, expo-modules-core, notifee, firebase); these cover what they do not. ---\n-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations\n# WebView JS bridge (react-native-webview RNCWebView$RNCWebViewBridge#postMessage) is only reachable from JS\n-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }\n# WorkManager instantiates workers reflectively (expo-widgets-glance WidgetTimelineWorker/WidgetRefreshWorker, notifee)\n-keepclassmembers class * extends androidx.work.ListenableWorker { public <init>(android.content.Context, androidx.work.WorkerParameters); }\n# Local Expo modules (modules/*) and the Glance widget renderer: small, reflection/manifest/JNI-adjacent, so keep unshrunk\n-keep class expo.modules.androidliveupdate.** { *; }\n-keep class expo.modules.intipnativedialog.** { *; }\n-keep class expo.modules.intipsystemgestures.** { *; }\n-keep class expo.modules.widgetsglance.** { *; }\n# Zipline QuickJs (widget JS engine) is a JNI binding: native code looks Java classes/methods up by name\n-keep class app.cash.zipline.** { *; }\n-keepclasseswithmembernames class * { native <methods>; }\n"
           }
         }
       ],
