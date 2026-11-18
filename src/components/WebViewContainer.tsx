@@ -62,6 +62,8 @@ import { createNativeChannel } from "../../packages/intip-bridge/src/adapters/na
 import { PROTOCOL_VERSION, type TokenInfoPayload } from "../../packages/intip-bridge/src/messages";
 import { clearCacheAndReload } from "../native/cache";
 import { saveDownload } from "../native/downloads";
+import { isItsmeLink } from "../itsme/itsmeLink";
+import { openItsmeLink } from "../itsme/openItsme";
 import { ensureLocationPermission } from "../native/permissions";
 import { handleAgentBridgeMessage } from "../agent/agentBridgeHandler";
 import { handleTimetableBridgeMessage } from "../timetable/timetableBridgeHandler";
@@ -888,6 +890,13 @@ export default function WebViewContainer({ url, mode }: Props) {
       if (__DEV__ && devLoadUrlRef.current === target) {
         devLoadUrlRef.current = null;
         return true;
+      }
+
+      // 잇츠미(학식 식권 앱) 링크: 그냥 openURL 하면 꺼져 있던 잇츠미가 검은
+      // 화면에 멈추므로, 런처 실행 → 딥링크 순서로 연다 (src/itsme/openItsme.ts).
+      if (isItsmeLink(target)) {
+        void openItsmeLink(target);
+        return false;
       }
 
       let host = "";
