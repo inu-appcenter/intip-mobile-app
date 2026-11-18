@@ -3,10 +3,18 @@ import { StyleSheet, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import { PortalCredentials } from './secureStore';
+import {
+  FRESHMAN_AUTH_ACTION_ID,
+  FRESHMAN_AUTH_URL,
+  buildFreshmanAuthScript,
+  freshmanAuthRequestSchema,
+  isFreshmanAuthUrl,
+  isPortalLoginUrl,
+  parseFreshmanAuthMessage,
+} from './freshmanAuth';
 
 const PORTAL_LOGIN_URL = 'https://portal.inu.ac.kr:444/enview/user/login.face';
 const ERP_SSO_URL = 'http://erp.inu.ac.kr:8881/com/SsoCtr/initPageWork.do?loginGbn=sso';
-const FRESHMAN_AUTH_URL = 'https://erp.inu.ac.kr:8443/nx/index_external.html?bG9naW5HYm49ZXgmbWVudUlkPU0wMDI3NDEmc2hvd1RpdGxlPWZhbHNl';
 const SCRAPE_TIMEOUT_MS = 35000;
 const MIN_SCRAPER_VIEW_SIZE = 1;
 
@@ -71,6 +79,7 @@ let activeCreds: PortalCredentials | null = null;
 let activeOptions: ErpActionOptions | null = null;
 let activeTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let triggerComponentScrape: ((options: ErpActionOptions) => void) | null = null;
+let cancelComponentScrape: (() => void) | null = null;
 let resolveScraperMount: (() => void) | null = null;
 
 function waitForScraperMount(timeoutMs = 15000): Promise<void> {
@@ -90,6 +99,20 @@ function waitForScraperMount(timeoutMs = 15000): Promise<void> {
   });
 }
 
+/**
+ * 진행 중인 요청과 "같은 요청"인지 판별한다. 신입생 인증은 수험번호가 같아도
+ * 성명/생년월일이 다르면 다른 요청이므로 결과를 재사용하면 안 된다.
+ */
+function isSameInFlightRequest(options: ErpActionOptions): boolean {
+  if (!activeScrapePromise || !activeOptions) return false;
+  if (activeCreds?.studentId !== options.creds.studentId) return false;
+  if (activeOptions.actionId !== options.actionId) return false;
+  if (options.actionId === FRESHMAN_AUTH_ACTION_ID) {
+    return JSON.stringify(activeOptions.target?.params ?? null) === JSON.stringify(options.target?.params ?? null);
+  }
+  return true;
+}
+
 export const AcademicScraperManager = {
   executeScrape(creds: PortalCredentials): Promise<string> {
     return this.executeErpAction({ creds, actionId: 'PORTAL_GET_ACADEMIC_RECORD' });
@@ -99,8 +122,8 @@ export const AcademicScraperManager = {
     const { creds, actionId } = options;
 
     // 동일한 학번 및 액션에 대해 이미 진행 중인 Promise가 있으면 재사용
-    if (activeScrapePromise && activeCreds?.studentId === creds.studentId && activeOptions?.actionId === actionId) {
-      console.log('[AcademicScraper] Reusing in-flight scrape promise for student:', creds.studentId, 'action:', actionId);
+    if (activeScrapePromise && isSameInFlightRequest(options)) {
+      console.log('[AcademicScraper] Reusing in-flight scrape promise for action:', actionId);
       return activeScrapePromise;
     }
 
@@ -133,6 +156,8 @@ export const AcademicScraperManager = {
               activeScrapePromise = null;
               activeCreds = null;
               activeOptions = null;
+              // 타임아웃 후에도 히든 웹뷰가 자격증명을 쥔 채 로딩/주입을 이어가지 않도록 정리한다.
+              cancelComponentScrape?.();
             }
           }, SCRAPE_TIMEOUT_MS);
         })
@@ -208,9 +233,10 @@ export const AcademicScraperWebView: React.FC = () => {
       credsRef.current = options.creds;
       optionsRef.current = options;
       loginScriptInjectedRef.current = false;
-      if (options.actionId === 'FRESHMAN_ERP_AUTH') {
+      if (options.actionId === FRESHMAN_AUTH_ACTION_ID) {
+        // 수험번호/성명/생년월일은 로그에 남기지 않는다.
         stepRef.current = 'FRESHMAN_LOGIN';
-        console.log('[AcademicScraper] Starting freshman auth scraper for:', options.target?.params?.examNo);
+        console.log('[AcademicScraper] Starting freshman auth scraper');
         setTargetUrl(FRESHMAN_AUTH_URL);
       } else {
         stepRef.current = 'LOGIN';
@@ -218,11 +244,19 @@ export const AcademicScraperWebView: React.FC = () => {
         setTargetUrl(PORTAL_LOGIN_URL);
       }
     };
+    cancelComponentScrape = () => {
+      stepRef.current = 'IDLE';
+      credsRef.current = null;
+      optionsRef.current = null;
+      loginScriptInjectedRef.current = false;
+      setTargetUrl(null);
+    };
     resolveScraperMount?.();
     resolveScraperMount = null;
 
     return () => {
       triggerComponentScrape = null;
+      cancelComponentScrape = null;
       if (activeTimeoutTimer) {
         clearTimeout(activeTimeoutTimer);
         activeTimeoutTimer = null;
@@ -248,12 +282,20 @@ export const AcademicScraperWebView: React.FC = () => {
         if (typeof msg.studentId === 'string' && msg.studentId) credsRef.current = {...credsRef.current, studentId: msg.studentId};
         stepRef.current = 'ERP_REDIRECT';
         setTargetUrl(ERP_SSO_URL);
-      } else if (msg.type === 'FRESHMAN_AUTH_SUCCESS') {
-        console.log('[AcademicScraper] Freshman auth succeeded:', msg.data?.userNm);
-        finishScrapeSuccess(JSON.stringify(msg.data));
-      } else if (msg.type === 'FRESHMAN_AUTH_FAIL') {
-        console.warn('[AcademicScraper] Freshman auth failed:', msg.message);
-        finishScrapeError(new Error(msg.message || '신입생 전산망 인증에 실패했습니다.'));
+      } else if (msg.type === 'FRESHMAN_AUTH_SUCCESS' || msg.type === 'FRESHMAN_AUTH_FAIL') {
+        // 신입생 인증 단계에서만 유효한 메시지. 다른 단계(포털 로그인/ERP 조회)에서
+        // 올라온 동일 type 메시지는 무시해 진행 중인 다른 스크레이프를 가로채지 못하게 한다.
+        if (stepRef.current !== 'FRESHMAN_LOGIN') return;
+        const expectedExamNo = String(optionsRef.current?.target?.params?.examNo ?? '');
+        const parsed = parseFreshmanAuthMessage(msg, expectedExamNo);
+        if (!parsed) return;
+        if (parsed.ok) {
+          console.log('[AcademicScraper] Freshman auth succeeded');
+          finishScrapeSuccess(JSON.stringify(parsed.data));
+        } else {
+          console.warn('[AcademicScraper] Freshman auth failed');
+          finishScrapeError(new Error(parsed.message));
+        }
       } else if (msg.type === 'ALERT') {
         const text = String(msg.message || '');
         console.warn('[AcademicScraper] Web alert detected:', text);
@@ -296,82 +338,31 @@ export const AcademicScraperWebView: React.FC = () => {
 
     if (stepRef.current === 'FRESHMAN_LOGIN') {
       const currentUrl = syntheticEvent?.nativeEvent?.url || targetUrl || '';
-      if (!currentUrl.includes('index_external.html')) return;
+      // 신입생 정보는 https ERP 로그인 문서에만 주입한다 (부분 문자열 매칭 금지).
+      if (!isFreshmanAuthUrl(currentUrl)) return;
       if (loginScriptInjectedRef.current) return;
+
+      const params = optionsRef.current?.target?.params;
+      const parsedRequest = freshmanAuthRequestSchema.safeParse({
+        examNo: params?.examNo,
+        name: params?.name,
+        birthDate: params?.birthDate,
+      });
+      if (!parsedRequest.success) {
+        finishScrapeError(new Error('수험번호, 성명, 생년월일 형식이 올바르지 않습니다.'));
+        return;
+      }
       loginScriptInjectedRef.current = true;
 
-      const examNo = String(optionsRef.current?.target?.params?.examNo || credsRef.current.studentId || '');
-      const name = String(optionsRef.current?.target?.params?.name || '');
-      const birthDate = String(optionsRef.current?.target?.params?.birthDate || '');
-
-      console.log('[AcademicScraper] Injecting freshman script for examNo:', examNo);
-
-      const freshmanScript = `
-        (function() {
-          window.alert = function(msg) {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'FRESHMAN_AUTH_FAIL',
-              message: String(msg || '신입생 전산망 인증 실패')
-            }));
-          };
-
-          var retryCount = 0;
-          var checkReady = setInterval(function() {
-            retryCount++;
-            try {
-              var frame = application && application.mainframe && application.mainframe.ChildFrame && application.mainframe.ChildFrame.form && application.mainframe.ChildFrame.form.div_Work;
-              var form = frame ? frame.form : null;
-              if (form && form.DS_COND) {
-                clearInterval(checkReady);
-                form.DS_COND.set("j_id", ${JSON.stringify(examNo)});
-                form.DS_COND.set("nm", ${JSON.stringify(name)});
-                form.DS_COND.set("birthDt", ${JSON.stringify(birthDate)});
-
-                var originalLoginSuccess = form.loginSuccess;
-                form.loginSuccess = function() {
-                  var result = originalLoginSuccess.apply(this, arguments);
-                  if (result === 1) {
-                    var ds = application.gds_viewSession;
-                    window.ReactNativeWebView.postMessage(JSON.stringify({
-                      type: 'FRESHMAN_AUTH_SUCCESS',
-                      data: {
-                        userNm: ds.getColumn(0, "userNm"),
-                        persNo: ds.getColumn(0, "persNo"),
-                        deptNm: ds.getColumn(0, "deptNm"),
-                        deptTtNm: ds.getColumn(0, "deptTtNm"),
-                        userGbn: ds.getColumn(0, "userGbn"),
-                        encStr: ds.getColumn(0, "encStr"),
-                        examNo: ${JSON.stringify(examNo)},
-                        birthDate: ${JSON.stringify(birthDate)}
-                      }
-                    }));
-                  }
-                  return result;
-                };
-
-                form.preLoginChk();
-              }
-            } catch (e) {}
-
-            if (retryCount > 40) {
-              clearInterval(checkReady);
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'FRESHMAN_AUTH_FAIL',
-                message: '신입생 전산망 폼 준비 시간 초과 (8초)'
-              }));
-            }
-          }, 200);
-        })();
-        true;
-      `;
-      webViewRef.current?.injectJavaScript(freshmanScript);
+      console.log('[AcademicScraper] Injecting freshman script');
+      webViewRef.current?.injectJavaScript(buildFreshmanAuthScript(parsedRequest.data));
       return;
     }
 
     if (stepRef.current === 'LOGIN') {
       const currentUrl = syntheticEvent?.nativeEvent?.url || targetUrl || '';
       // 포털 로그인 페이지(portal.inu.ac.kr ... login.face)일 때만 계정 입력 스크립트 실행
-      if (!currentUrl.includes('portal.inu.ac.kr') || !currentUrl.includes('login.face')) {
+      if (!isPortalLoginUrl(currentUrl)) {
         return;
       }
 
@@ -415,7 +406,7 @@ export const AcademicScraperWebView: React.FC = () => {
       `;
       webViewRef.current?.injectJavaScript(loginScript);
     }
-  }, [targetUrl]);
+  }, [targetUrl, finishScrapeError]);
 
   const handleNavigationStateChange = useCallback((navState: { url: string; loading: boolean }) => {
     const { url, loading } = navState;

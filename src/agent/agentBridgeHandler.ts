@@ -9,6 +9,7 @@ import { LocalWatchManager } from './localWatchManager';
 import { LibraryOngoingService } from '../library/libraryOngoingService';
 import { LmsOngoingService } from '../lms/lmsOngoingService';
 import { AcademicScraperManager } from './AcademicScraperWebView';
+import { FRESHMAN_AUTH_ACTION_ID, freshmanAuthRequestSchema } from './freshmanAuth';
 
 export interface AgentBridgeResponse {
   type: string;
@@ -51,30 +52,30 @@ export async function handleAgentBridgeMessage(
 
   switch (type) {
     case 'requestFreshmanAuth': {
-      const { examNo, name, birthDate } = payload || {};
-      if (!examNo || !name || !birthDate) {
+      // 수험번호/성명/생년월일은 민감 정보: 로그/에러 메시지에 값을 싣지 않는다.
+      const validated = freshmanAuthRequestSchema.safeParse(payload);
+      if (!validated.success) {
         sendWrappedResponse({
           type: 'requestFreshmanAuthResult',
           success: false,
-          errorMessage: '수험번호, 성명, 생년월일이 누락되었습니다.',
+          errorCode: 'INVALID_REQUEST',
+          errorMessage: '수험번호, 성명, 생년월일(8자리) 형식이 올바르지 않습니다.',
         });
         return true;
       }
+      const { examNo, name, birthDate } = validated.data;
 
       try {
         const rawResult = await AcademicScraperManager.executeErpAction({
-          creds: { studentId: String(examNo), password: '' },
-          actionId: 'FRESHMAN_ERP_AUTH',
-          target: {
-            params: { examNo: String(examNo), name: String(name), birthDate: String(birthDate) },
-          },
+          creds: { studentId: examNo, password: '' },
+          actionId: FRESHMAN_AUTH_ACTION_ID,
+          target: { params: { examNo, name, birthDate } },
         });
 
-        const parsedData = JSON.parse(rawResult);
         sendWrappedResponse({
           type: 'requestFreshmanAuthResult',
           success: true,
-          data: parsedData,
+          data: JSON.parse(rawResult),
         });
       } catch (err: any) {
         sendWrappedResponse({
