@@ -2,7 +2,7 @@
   "expo": {
     "name": "INTIP",
     "slug": "intip-mobile-app",
-    "version": "3.0.14",
+    "version": "3.0.16",
     "orientation": "portrait",
     "scheme": "intipmobileapp",
     "userInterfaceStyle": "light",
@@ -35,7 +35,7 @@
     "android": {
       "package": "inu.appcenter.intip_android",
       "allowBackup": false,
-      "versionCode": 34,
+      "versionCode": 38,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -98,6 +98,8 @@
       "./plugins/withWorkManagerVersionAlign",
       "./plugins/withExpoWidgetsVersionSync",
       "./plugins/withApsEnvironmentProduction",
+      "./plugins/withPodsMinDeploymentTarget",
+      "./plugins/withJsiXcframeworkPhaseFix",
       [
         "expo-share-intent",
         {
@@ -114,7 +116,8 @@
         "expo-build-properties",
         {
           "ios": {
-            "useFrameworks": "static"
+            "useFrameworks": "static",
+            "enableSceneSupport": true
           },
           "android": {
             "extraMavenRepos": [
