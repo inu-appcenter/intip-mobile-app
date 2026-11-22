@@ -117,12 +117,12 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
         try {
           var frame = application && application.mainframe && application.mainframe.ChildFrame
             && application.mainframe.ChildFrame.form && application.mainframe.ChildFrame.form.div_Work;
-          form = frame ? frame.form : null;
+          form = frame ? (frame.form || frame) : null;
         } catch (e) {
           form = null;
         }
 
-        if (form && form.DS_COND) {
+        if (form && form.DS_COND && typeof form.preLoginChk === 'function') {
           if (typeof form.DS_COND.get === 'function') {
             var currentCollYy = '';
             try {
@@ -209,7 +209,7 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
           return;
         }
 
-        if (retryCount > 65) {
+        if (retryCount > 100) {
           clearInterval(checkReady);
           fail('신입생 전산망 폼 준비 시간 초과');
         }

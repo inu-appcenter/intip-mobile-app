@@ -264,6 +264,43 @@ describe('buildFreshmanAuthScript', () => {
       message: '수험번호 또는 성명이 일치하지 않습니다.',
     });
   });
+
+  it('넥사크로 14 구조(div_Work 에 .form 없이 직접 폼 속성이 붙는 경우)도 정상 인식한다', () => {
+    const posted: any[] = [];
+    const store: Record<string, string> = { collYy: '2026' };
+    const nexacro14DivWork: any = {
+      DS_COND: {
+        get: (k: string) => store[k],
+        set: (k: string, v: string) => {
+          store[k] = v;
+        },
+      },
+      loginSuccess: () => 1,
+      preLoginChk: () => nexacro14DivWork.loginSuccess(),
+    };
+    const sandbox = {
+      window: { ReactNativeWebView: { postMessage: (m: string) => posted.push(JSON.parse(m)) } },
+      application: {
+        mainframe: { ChildFrame: { form: { div_Work: nexacro14DivWork } } },
+        gds_viewSession: {
+          getColumn: (_r: number, c: string) =>
+            ({ userNm: '홍길동', persNo: 'F1', deptNm: '컴퓨터공학부' } as Record<string, string>)[c],
+        },
+      },
+      setInterval: (fn: () => void) => {
+        fn();
+        return 1;
+      },
+      clearInterval: () => {},
+      String,
+      JSON,
+    } as any;
+
+    vm.runInNewContext(buildFreshmanAuthScript(request), sandbox);
+    expect(posted).toHaveLength(1);
+    expect(posted[0].type).toBe('FRESHMAN_AUTH_SUCCESS');
+    expect(posted[0].data.deptNm).toBe('컴퓨터공학부');
+  });
 });
 
 describe('parseFreshmanAuthMessage', () => {
