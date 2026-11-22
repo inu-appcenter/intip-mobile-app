@@ -16,8 +16,7 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "icon": "./assets/expo.icon",
       "entitlements": {
-        "aps-environment": "production",
-        "com.apple.developer.devicecheck.appattest-environment": "production"
+        "aps-environment": "production"
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
