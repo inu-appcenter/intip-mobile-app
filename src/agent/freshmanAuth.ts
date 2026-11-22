@@ -47,6 +47,7 @@ export interface FreshmanAuthData {
   userGbn: string;
   encStr: string;
   examNo: string;
+  appCheckToken?: string;
 }
 
 /** 신입생 인증 문서(https://erp.inu.ac.kr[:port]/nx/index_external.html)인지 엄격하게 판별. */
@@ -97,7 +98,10 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
       var post = function(payload) {
         window.ReactNativeWebView.postMessage(JSON.stringify(payload));
       };
+      var settled = false;
       var fail = function(message) {
+        if (settled) return;
+        settled = true;
         post({ type: 'FRESHMAN_AUTH_FAIL', message: String(message || '') });
       };
 
@@ -106,6 +110,7 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
       };
 
       var retryCount = 0;
+      var collYyWaitCount = 0;
       var checkReady = setInterval(function() {
         retryCount++;
         var form = null;
@@ -118,18 +123,50 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
         }
 
         if (form && form.DS_COND) {
+          if (typeof form.DS_COND.get === 'function') {
+            var currentCollYy = '';
+            try {
+              currentCollYy = String(form.DS_COND.get('collYy') || '').trim();
+            } catch (e) {
+              currentCollYy = '';
+            }
+            if (!currentCollYy) {
+              collYyWaitCount++;
+              if (collYyWaitCount < 25) {
+                return;
+              }
+              var now = new Date();
+              var fallbackYear = String(now.getMonth() + 1 >= 11 ? now.getFullYear() + 1 : now.getFullYear());
+              form.DS_COND.set('collYy', fallbackYear);
+            }
+          }
+
           clearInterval(checkReady);
           try {
             form.DS_COND.set('j_id', CRED.examNo);
             form.DS_COND.set('nm', CRED.name);
             form.DS_COND.set('birthDt', CRED.birthDate);
 
+            if (form.utils && typeof form.utils.alert === 'function') {
+              var originalUtilsAlert = form.utils.alert;
+              form.utils.alert = function(msg) {
+                fail(msg || '신입생 전산망 인증 실패');
+                try {
+                  return originalUtilsAlert.apply(this, arguments);
+                } catch (ignore) {}
+              };
+            }
+
+            // 성공 후 /nx 리다이렉트로 postMessage 와 경합하지 않도록 차단한다.
+            form.afterLogin = function() {};
+
             var originalLoginSuccess = form.loginSuccess;
             form.loginSuccess = function() {
               var result = typeof originalLoginSuccess === 'function'
                 ? originalLoginSuccess.apply(this, arguments)
                 : undefined;
-              if (result === 1) {
+              if (result === 1 && !settled) {
+                settled = true;
                 try {
                   var ds = application.gds_viewSession;
                   post({
@@ -144,11 +181,26 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
                     }
                   });
                 } catch (e) {
+                  settled = false;
                   fail('신입생 전산망 세션 정보를 읽지 못했습니다.');
                 }
               }
               return result;
             };
+
+            if (typeof form.fn_callBack === 'function') {
+              var originalCallBack = form.fn_callBack;
+              form.fn_callBack = function(svcId) {
+                var ret = originalCallBack.apply(this, arguments);
+                if (svcId === 'j_login' && !settled) {
+                  var ok = typeof form.loginSuccess === 'function' ? form.loginSuccess() : 0;
+                  if (ok !== 1) {
+                    fail('신입생 전산망 인증에 실패했습니다.');
+                  }
+                }
+                return ret;
+              };
+            }
 
             form.preLoginChk();
           } catch (e) {
@@ -157,9 +209,9 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
           return;
         }
 
-        if (retryCount > 40) {
+        if (retryCount > 65) {
           clearInterval(checkReady);
-          fail('신입생 전산망 폼 준비 시간 초과 (8초)');
+          fail('신입생 전산망 폼 준비 시간 초과');
         }
       }, 200);
     })();

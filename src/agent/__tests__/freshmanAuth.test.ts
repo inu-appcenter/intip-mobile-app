@@ -140,6 +140,130 @@ describe('buildFreshmanAuthScript', () => {
   it('스크립트가 민감 입력을 console 로 출력하지 않는다', () => {
     expect(buildFreshmanAuthScript(request)).not.toMatch(/console\./);
   });
+
+  it('DS_COND.get(collYy)가 채워질 때까지 대기했다가 채워진 뒤 preLoginChk 를 호출한다', () => {
+    const posted: any[] = [];
+    const cols: Record<string, string> = {};
+    const intervalRef: { cb: (() => void) | null } = { cb: null };
+    let preLoginCalls = 0;
+
+    const form: any = {
+      DS_COND: {
+        get: (k: string) => cols[k] ?? '',
+        set: (k: string, v: string) => {
+          cols[k] = v;
+        },
+      },
+      preLoginChk: () => {
+        preLoginCalls++;
+      },
+      loginSuccess: () => 1,
+    };
+
+    const sandbox: any = {
+      window: { ReactNativeWebView: { postMessage: (m: string) => posted.push(JSON.parse(m)) } },
+      application: {
+        mainframe: { ChildFrame: { form: { div_Work: { form } } } },
+        gds_viewSession: { getColumn: () => '' },
+      },
+      setInterval: (fn: () => void) => {
+        intervalRef.cb = fn;
+        fn();
+        return 1;
+      },
+      clearInterval: () => {
+        intervalRef.cb = null;
+      },
+      String,
+      JSON,
+      Date,
+    };
+
+    vm.runInNewContext(buildFreshmanAuthScript(request), sandbox);
+    // findDormLogin.do 응답 전: 아직 preLoginChk 호출 안 함
+    expect(preLoginCalls).toBe(0);
+
+    // 2틱 후 findDormLogin.do 가 collYy 세팅 완료
+    cols.collYy = '2027';
+    intervalRef.cb?.();
+    expect(preLoginCalls).toBe(1);
+    expect(cols.j_id).toBe(request.examNo);
+  });
+
+  it('collYy 가 끝내 비어 있으면 25틱 대기 후 동적 입학년도를 폴백으로 채워 실행한다', () => {
+    const cols: Record<string, string> = {};
+    const intervalRef: { cb: (() => void) | null } = { cb: null };
+    let preLoginCalls = 0;
+
+    const form: any = {
+      DS_COND: {
+        get: (k: string) => cols[k] ?? '',
+        set: (k: string, v: string) => {
+          cols[k] = v;
+        },
+      },
+      preLoginChk: () => {
+        preLoginCalls++;
+      },
+    };
+
+    const sandbox: any = {
+      window: { ReactNativeWebView: { postMessage: () => {} } },
+      application: { mainframe: { ChildFrame: { form: { div_Work: { form } } } } },
+      setInterval: (fn: () => void) => {
+        intervalRef.cb = fn;
+        fn();
+        return 1;
+      },
+      clearInterval: () => {
+        intervalRef.cb = null;
+      },
+      String,
+      JSON,
+      Date,
+    };
+
+    vm.runInNewContext(buildFreshmanAuthScript(request), sandbox);
+    for (let i = 0; i < 24; i++) {
+      intervalRef.cb?.();
+    }
+    expect(preLoginCalls).toBe(1);
+    expect(cols.collYy).toMatch(/^\d{4}$/);
+  });
+
+  it('form.utils.alert 호출과 fn_callBack 실패 분기를 가로채 FRESHMAN_AUTH_FAIL 을 즉시 전달하고 afterLogin 리다이렉트를 막는다', () => {
+    const posted: any[] = [];
+    let redirected = false;
+    const form: any = {
+      DS_COND: { set: () => {} },
+      utils: {
+        alert: () => {},
+      },
+      afterLogin: () => {
+        redirected = true;
+      },
+      preLoginChk: () => {},
+      loginSuccess: () => 0,
+      fn_callBack: function (svcId: string) {
+        if (svcId === 'j_login') {
+          form.utils.alert('수험번호 또는 성명이 일치하지 않습니다.');
+        }
+      },
+    };
+
+    vm.runInNewContext(buildFreshmanAuthScript(request), makeSandbox(form, posted));
+    // afterLogin 무력화 검증
+    form.afterLogin();
+    expect(redirected).toBe(false);
+
+    // utils.alert 실패 전달 검증
+    form.fn_callBack('j_login');
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toEqual({
+      type: 'FRESHMAN_AUTH_FAIL',
+      message: '수험번호 또는 성명이 일치하지 않습니다.',
+    });
+  });
 });
 
 describe('parseFreshmanAuthMessage', () => {

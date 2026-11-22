@@ -9,6 +9,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import WebViewControllerPanel from "../components/WebViewControllerPanel";
 import { AcademicScraperWebView } from "../agent/AcademicScraperWebView";
+import { initializeAppCheck } from "../agent/appCheck";
 import { LocalWatchManager } from "../agent/localWatchManager";
 import { TimetableScheduler } from "../timetable/timetableScheduler";
 import {
@@ -37,6 +38,8 @@ export default function RootLayout() {
   const contentBackgroundColor = backgroundColorFor(scheme);
 
   useEffect(() => {
+    // Initialize Firebase App Check early so limited-use attestation is ready for freshman auth.
+    void initializeAppCheck();
     // Ask for notification permission on first launch (alert + badge + sound).
     void requestNotificationPermission();
     // Check for OTA updates (non-blocking; shows a prompt if one is available).

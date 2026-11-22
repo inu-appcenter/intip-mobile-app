@@ -16,7 +16,8 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "icon": "./assets/expo.icon",
       "entitlements": {
-        "aps-environment": "production"
+        "aps-environment": "production",
+        "com.apple.developer.devicecheck.appattest-environment": "production"
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -90,6 +91,7 @@
         }
       ],
       "@react-native-firebase/app",
+      "@react-native-firebase/app-check",
       "@react-native-firebase/messaging",
       "./plugins/withDefaultNotificationChannel",
       "./plugins/withTimetableForegroundService",

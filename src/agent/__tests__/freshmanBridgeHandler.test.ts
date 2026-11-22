@@ -1,6 +1,7 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { handleAgentBridgeMessage, type AgentBridgeResponse } from '../agentBridgeHandler';
 import { AcademicScraperManager } from '../AcademicScraperWebView';
+import { getFreshmanAppCheckToken } from '../appCheck';
 
 jest.mock('expo-router', () => ({ router: { push: jest.fn() } }));
 jest.mock('../secureStore', () => ({ PortalSecureStore: {} }));
@@ -13,6 +14,10 @@ jest.mock('../../library/libraryOngoingService', () => ({ LibraryOngoingService:
 jest.mock('../../lms/lmsOngoingService', () => ({ LmsOngoingService: {} }));
 jest.mock('../AcademicScraperWebView', () => ({
   AcademicScraperManager: { executeErpAction: jest.fn() },
+}));
+jest.mock('../appCheck', () => ({
+  initializeAppCheck: jest.fn(),
+  getFreshmanAppCheckToken: jest.fn(),
 }));
 
 const send = (payload: unknown, requestId = 'req-1') =>
@@ -32,6 +37,7 @@ describe('requestFreshmanAuth 브릿지 핸들러', () => {
     (AcademicScraperManager.executeErpAction as any).mockResolvedValue(
       JSON.stringify({ userNm: '홍길동', examNo: valid.examNo }),
     );
+    (getFreshmanAppCheckToken as any).mockResolvedValue('appcheck-limited-token');
   });
   afterEach(() => {
     logSpy.mockRestore();
@@ -63,7 +69,12 @@ describe('requestFreshmanAuth 브릿지 핸들러', () => {
       actionId: 'FRESHMAN_ERP_AUTH',
       target: { params: valid },
     });
-    expect(responses[0]).toMatchObject({ success: true, requestId: 'req-1', data: { userNm: '홍길동' } });
+    expect(getFreshmanAppCheckToken).toHaveBeenCalledTimes(1);
+    expect(responses[0]).toMatchObject({
+      success: true,
+      requestId: 'req-1',
+      data: { userNm: '홍길동', appCheckToken: 'appcheck-limited-token' },
+    });
   });
 
   it('스크레이프 실패는 success=false 로 전달된다', async () => {
