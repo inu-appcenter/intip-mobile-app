@@ -275,6 +275,10 @@ export const AcademicScraperWebView: React.FC = () => {
     const raw = event.nativeEvent.data;
     try {
       const msg = JSON.parse(raw);
+      if (msg.type === 'FRESHMAN_AUTH_DEBUG') {
+        console.log('[AcademicScraper][FreshmanDebug]', msg.step, JSON.stringify(msg.detail ?? {}));
+        return;
+      }
       console.log('[AcademicScraper] Received message type:', msg?.type);
 
       if (msg.type === 'PORTAL_READY') {
