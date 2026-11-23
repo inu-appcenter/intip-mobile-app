@@ -9,6 +9,7 @@ import { LocalWatchManager } from './localWatchManager';
 import { LibraryOngoingService } from '../library/libraryOngoingService';
 import { LmsOngoingService } from '../lms/lmsOngoingService';
 import { AcademicScraperManager } from './AcademicScraperWebView';
+import { getFreshmanAppCheckToken } from './appCheck';
 import { FRESHMAN_AUTH_ACTION_ID, freshmanAuthRequestSchema } from './freshmanAuth';
 
 export interface AgentBridgeResponse {
@@ -72,10 +73,16 @@ export async function handleAgentBridgeMessage(
           target: { params: { examNo, name, birthDate } },
         });
 
+        const parsedData = JSON.parse(rawResult);
+        const appCheckToken = await getFreshmanAppCheckToken();
+
         sendWrappedResponse({
           type: 'requestFreshmanAuthResult',
           success: true,
-          data: JSON.parse(rawResult),
+          data: {
+            ...parsedData,
+            ...(appCheckToken ? { appCheckToken } : {}),
+          },
         });
       } catch (err: any) {
         sendWrappedResponse({

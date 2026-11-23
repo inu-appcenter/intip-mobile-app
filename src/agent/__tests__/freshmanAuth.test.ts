@@ -61,7 +61,14 @@ describe('freshmanAuthRequestSchema', () => {
 
 function makeSandbox(form: any, posted: any[], cols: Record<string, string> = {}) {
   return {
-    window: { ReactNativeWebView: { postMessage: (m: string) => posted.push(JSON.parse(m)) } },
+    window: {
+      ReactNativeWebView: {
+        postMessage: (m: string) => {
+          const parsed = JSON.parse(m);
+          if (parsed.type !== 'FRESHMAN_AUTH_DEBUG') posted.push(parsed);
+        },
+      },
+    },
     application: {
       mainframe: { ChildFrame: { form: { div_Work: { form } } } },
       gds_viewSession: { getColumn: (_r: number, c: string) => cols[c] },
@@ -139,6 +146,207 @@ describe('buildFreshmanAuthScript', () => {
 
   it('스크립트가 민감 입력을 console 로 출력하지 않는다', () => {
     expect(buildFreshmanAuthScript(request)).not.toMatch(/console\./);
+  });
+
+  it('DS_COND.get(collYy)가 채워질 때까지 대기했다가 채워진 뒤 preLoginChk 를 호출한다', () => {
+    const posted: any[] = [];
+    const cols: Record<string, string> = {};
+    const intervalRef: { cb: (() => void) | null } = { cb: null };
+    let preLoginCalls = 0;
+
+    const form: any = {
+      DS_COND: {
+        get: (k: string) => cols[k] ?? '',
+        set: (k: string, v: string) => {
+          cols[k] = v;
+        },
+      },
+      preLoginChk: () => {
+        preLoginCalls++;
+      },
+      loginSuccess: () => 1,
+    };
+
+    const sandbox: any = {
+      window: {
+      ReactNativeWebView: {
+        postMessage: (m: string) => {
+          const parsed = JSON.parse(m);
+          if (parsed.type !== 'FRESHMAN_AUTH_DEBUG') posted.push(parsed);
+        },
+      },
+    },
+      application: {
+        mainframe: { ChildFrame: { form: { div_Work: { form } } } },
+        gds_viewSession: { getColumn: () => '' },
+      },
+      setInterval: (fn: () => void) => {
+        intervalRef.cb = fn;
+        fn();
+        return 1;
+      },
+      clearInterval: () => {
+        intervalRef.cb = null;
+      },
+      String,
+      JSON,
+      Date,
+    };
+
+    vm.runInNewContext(buildFreshmanAuthScript(request), sandbox);
+    // findDormLogin.do 응답 전: 아직 preLoginChk 호출 안 함
+    expect(preLoginCalls).toBe(0);
+
+    // 2틱 후 findDormLogin.do 가 collYy 세팅 완료
+    cols.collYy = '2027';
+    intervalRef.cb?.();
+    expect(preLoginCalls).toBe(1);
+    expect(cols.j_id).toBe(request.examNo);
+  });
+
+  it('collYy 가 끝내 비어 있으면 25틱 대기 후 동적 입학년도를 폴백으로 채워 실행한다', () => {
+    const cols: Record<string, string> = {};
+    const intervalRef: { cb: (() => void) | null } = { cb: null };
+    let preLoginCalls = 0;
+
+    const form: any = {
+      DS_COND: {
+        get: (k: string) => cols[k] ?? '',
+        set: (k: string, v: string) => {
+          cols[k] = v;
+        },
+      },
+      preLoginChk: () => {
+        preLoginCalls++;
+      },
+    };
+
+    const sandbox: any = {
+      window: { ReactNativeWebView: { postMessage: () => {} } },
+      application: { mainframe: { ChildFrame: { form: { div_Work: { form } } } } },
+      setInterval: (fn: () => void) => {
+        intervalRef.cb = fn;
+        fn();
+        return 1;
+      },
+      clearInterval: () => {
+        intervalRef.cb = null;
+      },
+      String,
+      JSON,
+      Date,
+    };
+
+    vm.runInNewContext(buildFreshmanAuthScript(request), sandbox);
+    for (let i = 0; i < 24; i++) {
+      intervalRef.cb?.();
+    }
+    expect(preLoginCalls).toBe(1);
+    expect(cols.collYy).toMatch(/^\d{4}$/);
+  });
+
+  it('form.utils.alert 호출과 fn_callBack 실패 분기를 가로채 FRESHMAN_AUTH_FAIL 을 즉시 전달하고 afterLogin 리다이렉트를 막는다', () => {
+    const posted: any[] = [];
+    let redirected = false;
+    const form: any = {
+      DS_COND: { set: () => {} },
+      utils: {
+        alert: () => {},
+      },
+      afterLogin: () => {
+        redirected = true;
+      },
+      preLoginChk: () => {},
+      loginSuccess: () => 0,
+      fn_callBack: function (svcId: string) {
+        if (svcId === 'j_login') {
+          form.utils.alert('수험번호 또는 성명이 일치하지 않습니다.');
+        }
+      },
+    };
+
+    vm.runInNewContext(buildFreshmanAuthScript(request), makeSandbox(form, posted));
+    // afterLogin 무력화 검증
+    form.afterLogin();
+    expect(redirected).toBe(false);
+
+    // utils.alert 실패 전달 검증
+    form.fn_callBack('j_login');
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toEqual({
+      type: 'FRESHMAN_AUTH_FAIL',
+      message: '수험번호 또는 성명이 일치하지 않습니다.',
+    });
+  });
+
+  it('넥사크로 14 구조(div_Work 에 .form 없이 직접 폼 속성이 붙는 경우)도 정상 인식한다', () => {
+    const posted: any[] = [];
+    const store: Record<string, string> = { collYy: '2026' };
+    const nexacro14DivWork: any = {
+      DS_COND: {
+        get: (k: string) => store[k],
+        set: (k: string, v: string) => {
+          store[k] = v;
+        },
+      },
+      loginSuccess: () => 1,
+      preLoginChk: () => nexacro14DivWork.loginSuccess(),
+    };
+    const sandbox = {
+      window: {
+      ReactNativeWebView: {
+        postMessage: (m: string) => {
+          const parsed = JSON.parse(m);
+          if (parsed.type !== 'FRESHMAN_AUTH_DEBUG') posted.push(parsed);
+        },
+      },
+    },
+      application: {
+        mainframe: { ChildFrame: { form: { div_Work: nexacro14DivWork } } },
+        gds_viewSession: {
+          getColumn: (_r: number, c: string) =>
+            ({ userNm: '홍길동', persNo: 'F1', deptNm: '컴퓨터공학부' } as Record<string, string>)[c],
+        },
+      },
+      setInterval: (fn: () => void) => {
+        fn();
+        return 1;
+      },
+      clearInterval: () => {},
+      String,
+      JSON,
+    } as any;
+
+    vm.runInNewContext(buildFreshmanAuthScript(request), sandbox);
+    expect(posted).toHaveLength(1);
+    expect(posted[0].type).toBe('FRESHMAN_AUTH_SUCCESS');
+    expect(posted[0].data.deptNm).toBe('컴퓨터공학부');
+  });
+
+  it('_commTransactionCallback 에러와 popup.error.open 호출을 가로채 FRESHMAN_AUTH_FAIL 로 전달한다', () => {
+    const posted1: any[] = [];
+    const form1: any = {
+      DS_COND: { get: () => '2026', set: () => {} },
+      _commTransactionCallback: () => {},
+      preLoginChk: () => {},
+    };
+    vm.runInNewContext(buildFreshmanAuthScript(request), makeSandbox(form1, posted1));
+    form1._commTransactionCallback('preLoginChk|login', -1, '일치하는 정보가 없습니다.');
+    expect(posted1).toEqual([
+      { type: 'FRESHMAN_AUTH_FAIL', message: '일치하는 정보가 없습니다.' },
+    ]);
+
+    const posted2: any[] = [];
+    const form2: any = {
+      DS_COND: { get: () => '2026', set: () => {} },
+      popup: { error: { open: () => {} } },
+      preLoginChk: () => {},
+    };
+    vm.runInNewContext(buildFreshmanAuthScript(request), makeSandbox(form2, posted2));
+    form2.popup.error.open({ id: 'preLoginChk', errorMsg: '수험번호를 확인해주세요.' });
+    expect(posted2).toEqual([
+      { type: 'FRESHMAN_AUTH_FAIL', message: '수험번호를 확인해주세요.' },
+    ]);
   });
 });
 
