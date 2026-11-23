@@ -98,6 +98,11 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
       var post = function(payload) {
         window.ReactNativeWebView.postMessage(JSON.stringify(payload));
       };
+      var debug = function(step, detail) {
+        try {
+          post({ type: 'FRESHMAN_AUTH_DEBUG', step: step, detail: detail || {} });
+        } catch (ignore) {}
+      };
       var settled = false;
       var fail = function(message) {
         if (settled) return;
@@ -105,7 +110,10 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
         post({ type: 'FRESHMAN_AUTH_FAIL', message: String(message || '') });
       };
 
+      debug('SCRIPT_INJECTED', { href: String(window.location && window.location.href || '').split('?')[0] });
+
       window.alert = function(msg) {
+        debug('WINDOW_ALERT', { msg: String(msg || '') });
         fail(msg || '신입생 전산망 인증 실패');
       };
 
@@ -142,6 +150,14 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
           }
 
           clearInterval(checkReady);
+          debug('FORM_FOUND', {
+            retryCount: retryCount,
+            collYyWaitCount: collYyWaitCount,
+            hasUtilsAlert: !!(form.utils && typeof form.utils.alert === 'function'),
+            hasCommTxCb: typeof form._commTransactionCallback === 'function',
+            hasPopupError: !!(form.popup && form.popup.error && typeof form.popup.error.open === 'function'),
+            hasFnCallback: typeof form.fn_callBack === 'function'
+          });
           try {
             form.DS_COND.set('j_id', CRED.examNo);
             form.DS_COND.set('nm', CRED.name);
@@ -150,10 +166,35 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
             if (form.utils && typeof form.utils.alert === 'function') {
               var originalUtilsAlert = form.utils.alert;
               form.utils.alert = function(msg) {
+                debug('UTILS_ALERT', { msg: String(msg || '') });
                 fail(msg || '신입생 전산망 인증 실패');
                 try {
                   return originalUtilsAlert.apply(this, arguments);
                 } catch (ignore) {}
+              };
+            }
+
+            if (form.popup && form.popup.error && typeof form.popup.error.open === 'function') {
+              var originalPopupErrorOpen = form.popup.error.open;
+              form.popup.error.open = function(arg) {
+                var errMsg = arg && arg.errorMsg ? arg.errorMsg : '신입생 전산망 인증 실패';
+                debug('POPUP_ERROR_OPEN', { errMsg: String(errMsg) });
+                fail(errMsg);
+                try {
+                  return originalPopupErrorOpen.apply(this, arguments);
+                } catch (ignore) {}
+              };
+            }
+
+            if (typeof form._commTransactionCallback === 'function') {
+              var originalCommTxCb = form._commTransactionCallback;
+              form._commTransactionCallback = function(svcId, errCode, errMsg) {
+                debug('COMM_TX_CB', { svcId: String(svcId || ''), errCode: errCode, errMsg: String(errMsg || '') });
+                if (typeof errCode === 'number' && errCode < 0) {
+                  fail(errMsg && errMsg !== 'FAILED' ? errMsg : '신입생 전산망 인증에 실패했습니다.');
+                  return;
+                }
+                return originalCommTxCb.apply(this, arguments);
               };
             }
 
@@ -165,6 +206,7 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
               var result = typeof originalLoginSuccess === 'function'
                 ? originalLoginSuccess.apply(this, arguments)
                 : undefined;
+              debug('LOGIN_SUCCESS', { result: result });
               if (result === 1 && !settled) {
                 settled = true;
                 try {
@@ -191,6 +233,7 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
             if (typeof form.fn_callBack === 'function') {
               var originalCallBack = form.fn_callBack;
               form.fn_callBack = function(svcId) {
+                debug('FN_CALLBACK', { svcId: String(svcId || '') });
                 var ret = originalCallBack.apply(this, arguments);
                 if (svcId === 'j_login' && !settled) {
                   var ok = typeof form.loginSuccess === 'function' ? form.loginSuccess() : 0;
@@ -202,11 +245,30 @@ export function buildFreshmanAuthScript(request: FreshmanAuthRequest): string {
               };
             }
 
+            debug('CALL_PRE_LOGIN_CHK', {});
             form.preLoginChk();
           } catch (e) {
+            debug('PRE_LOGIN_CHK_THROW', { message: String(e && e.message || e || '') });
             fail('신입생 전산망 로그인 요청에 실패했습니다.');
           }
           return;
+        }
+
+        if (retryCount % 10 === 0) {
+          var divWorkObj = null;
+          try {
+            divWorkObj = application && application.mainframe && application.mainframe.ChildFrame
+              && application.mainframe.ChildFrame.form && application.mainframe.ChildFrame.form.div_Work;
+          } catch (ignore) {}
+          debug('WAIT_FORM', {
+            retryCount: retryCount,
+            hasApp: typeof application !== 'undefined',
+            hasMainframe: !!(typeof application !== 'undefined' && application && application.mainframe),
+            hasChildFrame: !!(typeof application !== 'undefined' && application && application.mainframe && application.mainframe.ChildFrame),
+            hasDivWork: !!divWorkObj,
+            hasFormDSCond: !!(form && form.DS_COND),
+            hasPreLoginChk: !!(form && typeof form.preLoginChk === 'function')
+          });
         }
 
         if (retryCount > 100) {

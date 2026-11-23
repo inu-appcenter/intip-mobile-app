@@ -61,7 +61,14 @@ describe('freshmanAuthRequestSchema', () => {
 
 function makeSandbox(form: any, posted: any[], cols: Record<string, string> = {}) {
   return {
-    window: { ReactNativeWebView: { postMessage: (m: string) => posted.push(JSON.parse(m)) } },
+    window: {
+      ReactNativeWebView: {
+        postMessage: (m: string) => {
+          const parsed = JSON.parse(m);
+          if (parsed.type !== 'FRESHMAN_AUTH_DEBUG') posted.push(parsed);
+        },
+      },
+    },
     application: {
       mainframe: { ChildFrame: { form: { div_Work: { form } } } },
       gds_viewSession: { getColumn: (_r: number, c: string) => cols[c] },
@@ -161,7 +168,14 @@ describe('buildFreshmanAuthScript', () => {
     };
 
     const sandbox: any = {
-      window: { ReactNativeWebView: { postMessage: (m: string) => posted.push(JSON.parse(m)) } },
+      window: {
+      ReactNativeWebView: {
+        postMessage: (m: string) => {
+          const parsed = JSON.parse(m);
+          if (parsed.type !== 'FRESHMAN_AUTH_DEBUG') posted.push(parsed);
+        },
+      },
+    },
       application: {
         mainframe: { ChildFrame: { form: { div_Work: { form } } } },
         gds_viewSession: { getColumn: () => '' },
@@ -279,7 +293,14 @@ describe('buildFreshmanAuthScript', () => {
       preLoginChk: () => nexacro14DivWork.loginSuccess(),
     };
     const sandbox = {
-      window: { ReactNativeWebView: { postMessage: (m: string) => posted.push(JSON.parse(m)) } },
+      window: {
+      ReactNativeWebView: {
+        postMessage: (m: string) => {
+          const parsed = JSON.parse(m);
+          if (parsed.type !== 'FRESHMAN_AUTH_DEBUG') posted.push(parsed);
+        },
+      },
+    },
       application: {
         mainframe: { ChildFrame: { form: { div_Work: nexacro14DivWork } } },
         gds_viewSession: {
@@ -300,6 +321,32 @@ describe('buildFreshmanAuthScript', () => {
     expect(posted).toHaveLength(1);
     expect(posted[0].type).toBe('FRESHMAN_AUTH_SUCCESS');
     expect(posted[0].data.deptNm).toBe('컴퓨터공학부');
+  });
+
+  it('_commTransactionCallback 에러와 popup.error.open 호출을 가로채 FRESHMAN_AUTH_FAIL 로 전달한다', () => {
+    const posted1: any[] = [];
+    const form1: any = {
+      DS_COND: { get: () => '2026', set: () => {} },
+      _commTransactionCallback: () => {},
+      preLoginChk: () => {},
+    };
+    vm.runInNewContext(buildFreshmanAuthScript(request), makeSandbox(form1, posted1));
+    form1._commTransactionCallback('preLoginChk|login', -1, '일치하는 정보가 없습니다.');
+    expect(posted1).toEqual([
+      { type: 'FRESHMAN_AUTH_FAIL', message: '일치하는 정보가 없습니다.' },
+    ]);
+
+    const posted2: any[] = [];
+    const form2: any = {
+      DS_COND: { get: () => '2026', set: () => {} },
+      popup: { error: { open: () => {} } },
+      preLoginChk: () => {},
+    };
+    vm.runInNewContext(buildFreshmanAuthScript(request), makeSandbox(form2, posted2));
+    form2.popup.error.open({ id: 'preLoginChk', errorMsg: '수험번호를 확인해주세요.' });
+    expect(posted2).toEqual([
+      { type: 'FRESHMAN_AUTH_FAIL', message: '수험번호를 확인해주세요.' },
+    ]);
   });
 });
 
