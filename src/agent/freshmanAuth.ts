@@ -47,7 +47,6 @@ export interface FreshmanAuthData {
   userGbn: string;
   encStr: string;
   examNo: string;
-  appCheckToken?: string;
 }
 
 /** 신입생 인증 문서(https://erp.inu.ac.kr[:port]/nx/index_external.html)인지 엄격하게 판별. */
