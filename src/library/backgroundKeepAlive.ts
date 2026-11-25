@@ -55,11 +55,18 @@ export const BackgroundKeepAlive = {
         if (!(await TaskManager.isAvailableAsync())) return 'NONE';
         const mode = await ensurePermission();
         if (mode === 'NONE') return mode;
-        if (await Location.hasStartedLocationUpdatesAsync(LIBRARY_WATCH_LOCATION_TASK)) return mode;
+        // TaskManager는 앱 재실행·업데이트 후에도 예전 옵션 그대로 태스크를 복원한다. 그대로 두면
+        // 옵션 변경(정확도 등)이 반영되지 않으므로 항상 현재 옵션으로 다시 시작한다.
+        if (await Location.hasStartedLocationUpdatesAsync(LIBRARY_WATCH_LOCATION_TASK)) {
+          await Location.stopLocationUpdatesAsync(LIBRARY_WATCH_LOCATION_TASK);
+        }
         await Location.startLocationUpdatesAsync(LIBRARY_WATCH_LOCATION_TASK, {
-          // 정확도는 생존 여부와 무관. 배터리를 덜 쓰는 100m 단위로 충분하다.
-          accuracy: Location.Accuracy.Balanced,
-          distanceInterval: 50,
+          // 정확도·거리 필터가 느슨하면(100m/50m 실측) locationd의 절전 로직(cblsPowerSaver)이
+          // "위치가 필요 없는 클라이언트"로 보고 백그라운드 진입 ~10초 뒤 프로세스 assertion을
+          // 풀어 앱을 suspend 시킨다. 생존을 위해 10m + 거리 필터 없음으로 둔다(배터리 비용 있음 →
+          // 감시가 있을 때만 켜고 마지막 감시가 끝나면 즉시 끈다).
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 0,
           // false가 핵심: true면 정지 상태에서 iOS가 업데이트를 멈추고 앱을 suspend 시킨다.
           pausesUpdatesAutomatically: false,
           activityType: Location.ActivityType.Other,

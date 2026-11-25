@@ -55,6 +55,9 @@ export const LibraryOngoingService = {
    * 1. 도서관 빈자리/취소표 감시 Ongoing Notification 렌더링
    */
   async renderWatchActivity(job: LocalWatchJob, checkCount?: number, activeCount = 1): Promise<void> {
+    // 상주(ongoing) 알림·포그라운드 서비스는 Android 개념. iOS에서 같은 id로 다시 그리면 위치 콜백
+    // (~5초)마다 알림 요청이 새로 등록된다(실기기 로그로 확인). iOS는 상태바 위치 표시로 대신한다.
+    if (Platform.OS !== 'android') return;
     if (job.status !== 'ACTIVE') {
       await this.cancelWatchActivity();
       return;
