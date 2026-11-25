@@ -462,14 +462,20 @@ export const LocalWatchManager = {
     return jobs.filter((j): j is ActiveJob => j.status === 'ACTIVE' && POLLING_WATCH_TYPES.has(j.type));
   },
 
-  ensureScheduler() {
-    if (!appStateSubscribed) {
-      appStateSubscribed = true;
+  subscribeAppState() {
+    if (appStateSubscribed) return;
+    appStateSubscribed = true;
+    AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      // 사용자가 앱에 들어왔으면 잠금화면에 남은 "빈자리 발생" Live Activity는 이미 본 것 → 내린다.
+      void LibraryOngoingService.dismissLingeringWatchActivities();
       // 포그라운드 복귀 즉시 한 번 확인 (백그라운드에서 끊겼을 수 있음)
-      AppState.addEventListener('change', (state) => {
-        if (state === 'active') void this.tick();
-      });
-    }
+      void this.tick();
+    });
+  },
+
+  ensureScheduler() {
+    this.subscribeAppState();
     if (schedulerTimer) return;
     schedulerTimer = setInterval(() => void this.tick(), POLL_INTERVAL_MS);
   },
@@ -589,6 +595,7 @@ export const LocalWatchManager = {
    * 앱 시작 시 기존 ACTIVE 상태인 작업들 자동 복구
    */
   async restoreActiveJobs() {
+    this.subscribeAppState();
     const active = await this.getActivePollingJobs();
     if (active.length === 0) {
       await this.syncRuntime();

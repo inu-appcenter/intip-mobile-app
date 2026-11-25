@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import notifee, {
   AndroidCategory,
   AndroidImportance,
@@ -15,6 +15,11 @@ import {
 import { after } from 'expo-widgets';
 
 let lastWatchLiveJson: string | null = null;
+/**
+ * FOUND/ENDED로 끝낸 뒤 잠금화면에 남겨 둔 Activity. getInstances()는 끝난 것을 빼고 돌려주므로
+ * 여기 붙잡아 두었다가 사용자가 앱에 들어오면(이미 확인했으므로) 즉시 내린다.
+ */
+let lingeringWatchActivities: ReturnType<typeof LibraryWatchLiveActivity.getInstances> = [];
 
 function watchKind(job: LocalWatchJob): LibraryWatchLiveActivityProps['kind'] {
   if (job.type === 'STUDY_ROOM_SNIPER') return 'STUDY_ROOM';
@@ -79,6 +84,7 @@ async function renderWatchLiveActivity(job: LocalWatchJob, activeCount: number):
 async function endWatchLiveActivities(final?: LibraryWatchLiveActivityProps, keepMinutes = 0): Promise<void> {
   lastWatchLiveJson = null;
   const instances = LibraryWatchLiveActivity.getInstances();
+  if (final && keepMinutes > 0) lingeringWatchActivities.push(...instances);
   await Promise.all(
     instances.map((instance) =>
       final && keepMinutes > 0
@@ -239,7 +245,17 @@ export const LibraryOngoingService = {
    */
   async finishWatchActivity(job: LocalWatchJob, phase: 'FOUND' | 'ENDED', message: string): Promise<void> {
     if (Platform.OS !== 'ios') return;
-    await endWatchLiveActivities(watchLiveProps(job, 1, phase, message), phase === 'FOUND' ? 10 : 2);
+    // 앱을 보고 있는 중이면 잠금화면에 남길 이유가 없다(헤드업 알림·화면으로 이미 보임).
+    const keepMinutes = AppState.currentState === 'active' ? 0 : phase === 'FOUND' ? 10 : 2;
+    await endWatchLiveActivities(watchLiveProps(job, 1, phase, message), keepMinutes);
+  },
+
+  /** iOS: 앱이 활성화되면 잠금화면에 남겨 둔 FOUND/ENDED Live Activity를 바로 내린다. */
+  async dismissLingeringWatchActivities(): Promise<void> {
+    if (Platform.OS !== 'ios' || lingeringWatchActivities.length === 0) return;
+    const list = lingeringWatchActivities;
+    lingeringWatchActivities = [];
+    await Promise.all(list.map((instance) => instance.end('immediate').catch(() => {})));
   },
 
   /**
