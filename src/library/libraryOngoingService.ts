@@ -54,7 +54,7 @@ export const LibraryOngoingService = {
   /**
    * 1. 도서관 빈자리/취소표 감시 Ongoing Notification 렌더링
    */
-  async renderWatchActivity(job: LocalWatchJob, checkCount?: number): Promise<void> {
+  async renderWatchActivity(job: LocalWatchJob, checkCount?: number, activeCount = 1): Promise<void> {
     if (job.status !== 'ACTIVE') {
       await this.cancelWatchActivity();
       return;
@@ -72,9 +72,10 @@ export const LibraryOngoingService = {
       ? `/services/library?tab=study&roomId=${targetRoomId}`
       : `/services/library?tab=seats&roomId=${targetRoomId}`;
 
+    const extra = activeCount > 1 ? ` 외 ${activeCount - 1}건` : '';
     const title = isStudyRoom
-      ? `🎯 [스터디룸] ${job.targetName} 취소표 감시 중`
-      : `🎯 [열람실] ${job.targetName} 빈자리 감시 중`;
+      ? `🎯 [스터디룸] ${job.targetName}${extra} 취소표 감시 중`
+      : `🎯 [열람실] ${job.targetName}${extra} 빈자리 감시 중`;
 
     const subtitle = '스마트 캠퍼스 감시';
     const checkText = checkCount ? ` · ${checkCount}회 확인` : '';

@@ -24,12 +24,14 @@
         "NSSupportsLiveActivitiesFrequentUpdates": true,
         "UIBackgroundModes": [
           "remote-notification",
-          "fetch"
+          "fetch",
+          "location"
         ],
         "NSCameraUsageDescription": "게시판 및 채팅 업로드용 사진 촬영을 위해 카메라 접근 권한이 필요합니다.",
         "NSPhotoLibraryUsageDescription": "게시판 및 채팅 사진 업로드를 위해 사진첩 접근 권한이 필요합니다.",
         "NSPhotoLibraryAddUsageDescription": "촬영한 사진을 저장하기 위해 사진첩 접근 권한이 필요합니다.",
-        "NSLocationWhenInUseUsageDescription": "캠퍼스맵 내 위치 표시 및 주변친구 찾기 기능을 위해 위치 권한이 필요합니다."
+        "NSLocationWhenInUseUsageDescription": "캠퍼스맵 내 위치 표시, 주변친구 찾기, 도서관 빈자리 감시 기능을 위해 위치 권한이 필요합니다.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "도서관 빈자리 감시를 켜 두면 앱을 닫아도 자리가 나는 즉시 알려드리기 위해 위치 권한 '항상 허용'이 필요합니다. 위치 정보는 저장하거나 전송하지 않으며, 감시가 끝나면 바로 꺼집니다."
       }
     },
     "android": {
@@ -142,6 +144,14 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": false,
+          "locationAlwaysAndWhenInUsePermission": "도서관 빈자리 감시를 켜 두면 앱을 닫아도 자리가 나는 즉시 알려드리기 위해 위치 권한 '항상 허용'이 필요합니다. 위치 정보는 저장하거나 전송하지 않으며, 감시가 끝나면 바로 꺼집니다."
+        }
+      ],
       "./plugins/withWidgetAssets",
       "./plugins/withBusArrivalRefreshIntent",
       [

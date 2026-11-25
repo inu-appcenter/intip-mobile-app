@@ -326,6 +326,15 @@ export async function handleAgentBridgeMessage(
             seatNo: String(seatNo || seatId),
             durationMinutes: durationMinutes ? Number(durationMinutes) : 90,
           });
+        } else if (watchType === 'ROOM_ANY_SEAT') {
+          if (!roomId) {
+            throw new Error('roomId 파라미터가 필요합니다.');
+          }
+          job = await LocalWatchManager.registerRoomAnySeat({
+            roomId: Number(roomId),
+            roomName: roomName || `${roomId}번 열람실`,
+            durationMinutes: durationMinutes ? Number(durationMinutes) : 120,
+          });
         } else if (watchType === 'SEAT_EXPIRATION') {
           if (!seatName || !endTime) {
             throw new Error('seatName 및 endTime 파라미터가 필요합니다.');

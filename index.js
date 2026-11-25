@@ -10,6 +10,8 @@
  * start there is no React tree.
  */
 import './src/widgets/headless';
+// 도서관 빈자리 감시용 iOS 백그라운드 위치 태스크 — 최상위 등록 필요 (src/library/backgroundKeepAlive.ts)
+import './src/library/watchLocationTask';
 import { registerBackgroundHandlers } from './src/push/messaging';
 
 import 'expo-router/entry';

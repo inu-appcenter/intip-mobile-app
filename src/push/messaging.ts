@@ -49,7 +49,7 @@ import {
   LmsOngoingService,
   LMS_DEADLINE_NOTIFICATION_ID,
 } from '../lms/lmsOngoingService';
-import { LocalWatchManager } from '../agent/localWatchManager';
+import { LocalWatchManager, POLLING_WATCH_TYPES } from '../agent/localWatchManager';
 import { refreshAllWidgetsIfStale } from '../widgets/refresh';
 import { PUSH_REFRESH_MIN_INTERVAL_MS } from '../widgets/refreshIntervals';
 
@@ -629,7 +629,7 @@ export function registerBackgroundHandlers(): void {
           try {
             const jobs = await LocalWatchManager.getJobs();
             const activeJob = jobs.find(
-              (j) => j.status === 'ACTIVE' && (j.type === 'SPECIFIC_SEAT_SNIPER' || j.type === 'STUDY_ROOM_SNIPER')
+              (j) => j.status === 'ACTIVE' && POLLING_WATCH_TYPES.has(j.type)
             );
 
             if (!activeJob || activeJob.expiresAt <= Date.now()) {
@@ -640,7 +640,8 @@ export function registerBackgroundHandlers(): void {
             }
 
             // 활성 폴러가 동작 중이므로 현황 Ongoing 알림 갱신
-            await LibraryOngoingService.renderWatchActivity(activeJob);
+            // 실제 조회는 LocalWatchManager 스케줄러가 한다. 여기선 서비스 수명만 관리.
+            void LocalWatchManager.tick();
           } catch (err) {
             console.warn('[ForegroundService] library watch interval error:', err);
           }
