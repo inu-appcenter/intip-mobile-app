@@ -174,7 +174,7 @@ async function checkJob(job: LocalWatchJob, cache: TickCache): Promise<CheckResu
         kind: 'FOUND',
         title: '🎉 열람실 좌석 빈자리 발생!',
         body: `기다리시던 [${job.targetName}] 좌석이 지금 비었습니다! 서둘러 배정하세요.`,
-        path: `/services/library?tab=seats&roomId=${roomId}`,
+        path: `/services/library?tab=seats&roomId=${roomId}&seatId=${target.id}`,
       };
     }
     return { kind: 'NOT_YET' };
@@ -201,7 +201,7 @@ async function checkJob(job: LocalWatchJob, cache: TickCache): Promise<CheckResu
         kind: 'FOUND',
         title: '🎉 스터디룸 빈자리(취소표) 발생!',
         body: `희망하신 ${job.targetName} 취소표가 생겼습니다! 지금 바로 예약하세요.`,
-        path: `/services/library?tab=study&roomId=${roomId}`,
+        path: `/services/library?tab=study&roomId=${roomId}&date=${hopeDate}&hour=${job.targetHour}`,
       };
     }
     return { kind: 'NOT_YET' };
@@ -543,6 +543,7 @@ export const LocalWatchManager = {
           if (result.kind === 'FOUND') {
             target.status = 'NOTIFIED';
             authErrorCounts.delete(job.id);
+            await LibraryOngoingService.finishWatchActivity(target, 'FOUND', result.body).catch(() => {});
             await notifee.displayNotification({
               id: job.id,
               title: result.title,
