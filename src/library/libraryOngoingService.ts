@@ -43,6 +43,23 @@ function watchDeepLink(job: LocalWatchJob): string {
   return `intipmobileapp:/${watchLibraryPath(job)}`;
 }
 
+/**
+ * Live Activity 문구 조각(Figma "Library Seat Alert LA"). 긴 열람실 이름 "ICT라운지 (이룸관B1F)"는
+ * 이름("ICT라운지")과 위치("이룸관B1F")로 나눠, 헤드라인엔 무엇을 찾는지만 둔다.
+ */
+export function watchLabels(job: LocalWatchJob): Pick<LibraryWatchLiveActivityProps, 'primary' | 'place'> {
+  if (job.type === 'STUDY_ROOM_SNIPER') {
+    return { primary: '이용 가능한 스터디룸', place: job.roomName || job.targetName.replace(/\s*\(\d+시\)$/, '') };
+  }
+  if (job.type === 'ROOM_ANY_SEAT') {
+    const full = job.roomName || job.targetName;
+    const m = full.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+    return { primary: `${m ? m[1] : full} 빈자리`, place: m ? m[2] : undefined };
+  }
+  if (job.seatNo) return { primary: `${job.seatNo}번`, place: job.roomName };
+  return { primary: job.targetName, place: job.roomName };
+}
+
 function watchLiveProps(
   job: LocalWatchJob,
   activeCount: number,
@@ -53,6 +70,7 @@ function watchLiveProps(
     phase,
     kind: watchKind(job),
     targetName: job.targetName,
+    ...watchLabels(job),
     extraCount: Math.max(0, activeCount - 1),
     startedAt: job.createdAt,
     expiresAt: job.expiresAt,
@@ -172,12 +190,16 @@ export const LibraryOngoingService = {
 
     const extra = activeCount > 1 ? ` 외 ${activeCount - 1}건` : '';
     const title = isStudyRoom
-      ? `🎯 [스터디룸] ${job.targetName}${extra} 취소표 감시 중`
-      : `🎯 [열람실] ${job.targetName}${extra} 빈자리 감시 중`;
+      ? `횃불이가 ${job.targetName}${extra} 취소표를 찾고 있어요`
+      : `횃불이가 ${job.targetName}${extra} 빈자리를 찾고 있어요`;
 
-    const subtitle = '스마트 캠퍼스 감시';
+    const subtitle = '빈자리 알림';
     const checkText = checkCount ? ` · ${checkCount}회 확인` : '';
-    const body = `남은 감시 시간: ${remainingMinutes}분 (최대 ${totalDurationMinutes}분)${checkText}`;
+    const remainText =
+      remainingMinutes >= 60
+        ? `${Math.floor(remainingMinutes / 60)}시간${remainingMinutes % 60 ? ` ${remainingMinutes % 60}분` : ''}`
+        : `${remainingMinutes}분`;
+    const body = `${remainText} 더 찾아볼게요${checkText}`;
 
     try {
       await this.ensureChannels();
@@ -223,7 +245,7 @@ export const LibraryOngoingService = {
               },
             },
             {
-              title: '감시 중단',
+              title: '그만 찾기',
               pressAction: {
                 id: 'cancel_library_watch',
               },

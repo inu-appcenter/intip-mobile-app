@@ -1,20 +1,22 @@
-import { HStack, Image, ProgressView, Spacer, Text, VStack, ZStack } from '@expo/ui/swift-ui';
+import { Capsule, HStack, Image, ProgressView, Spacer, Text, VStack, ZStack } from '@expo/ui/swift-ui';
 import {
+  background,
+  aspectRatio,
   font,
   foregroundStyle,
   frame,
+  labelsHidden,
   lineLimit,
   monospacedDigit,
   multilineTextAlignment,
   padding,
-  labelsHidden,
   progressViewStyle,
+  resizable,
+  scaleEffect,
   tint,
+  truncationMode,
 } from '@expo/ui/swift-ui/modifiers';
-import {
-  createLiveActivity,
-  type LiveActivityComponent,
-} from 'expo-widgets';
+import { createLiveActivity, type LiveActivityComponent } from 'expo-widgets';
 
 export type TimetableLiveActivityProps = {
   phase: 'UPCOMING' | 'ONGOING';
@@ -23,253 +25,190 @@ export type TimetableLiveActivityProps = {
   professor?: string;
   startTimestamp: number;
   endTimestamp: number;
-  /** UPCOMING 카운트다운/링의 시작점 (수업 시작 - 알림 리드타임) */
+  /** UPCOMING 카운트다운/진행바의 시작점 (수업 시작 - 알림 리드타임) */
   countdownFromTimestamp?: number;
   durationMinutes?: number;
 };
 
 /**
- * iOS Dynamic Island 및 잠금화면 Live Activity (ActivityKit)
+ * 수업 Live Activity (잠금화면 + Dynamic Island).
+ * Figma: INTIP › Live Activities › "Live Activity v2 — 횃불이" (Timetable LA / Lock Screen,
+ * INTIP LA / Dynamic Island). 수치·문구·색은 그 컴포넌트를 그대로 옮긴 것이다.
  *
- * Apple HIG(Live Activities) 기준으로 구성:
- * - compact: 좌측 로고 마크(컨테이너 없음) + 우측 실시간 카운트다운 — 하나의 정보로 읽히도록
- *   같은 브랜드 색을 쓰고, 카메라 쪽 패딩 없이 좁게 붙인다.
- * - minimal: 정적 로고 대신 진행 링으로 갱신되는 정보를 보여준다.
- * - expanded: compact의 배치(좌 로고·상태 / 우 카운트다운)를 그대로 확대한다.
- * - Lock Screen: expanded와 같은 구조, 표준 여백 14pt, 알림 레이아웃 흉내 금지.
- * - 텍스트는 medium 이상 굵기, 작은 텍스트는 최소화.
- * - 남은 시간은 Text/ProgressView(timerInterval:)로 시스템이 갱신하므로
- *   앱이 매초/매분 업데이트할 필요가 없다.
- *
- * 'widget' 지시어로 인해 이 함수는 위젯 확장 런타임에서 따로 실행된다 —
- * 바깥 스코프의 상수/헬퍼를 참조하면 안 된다.
+ * - 곧 수업: 달려가는 횃불이 + "12:03 뒤 시작 / 과목" · 수업 중: 노트 든 횃불이 + "과목 / 42:10 남음".
+ *   헤드라인 20 Bold(숫자만 상태 색), 보조 14 Medium. 일러스트는 위젯 확장 asset catalog.
+ * - 남은 시간과 진행바는 Text/ProgressView(timerInterval:)로 시스템이 갱신하므로 앱이 업데이트할 필요가 없다.
+ * - 서버 push-to-start로 시작된 Activity는 수업이 시작돼도 UPCOMING 그대로다(서버에 업데이트 토큰이 없고
+ *   앱은 꺼져 있을 수 있다). 서버는 stale-date를 수업 시작으로 두므로, 그때 시스템이 다시 그리면 현재
+ *   시각으로 "수업 중"을 판단한다.
+ * - 'widget' 지시어: 위젯 확장 런타임에서 따로 실행되므로 바깥 스코프 상수/헬퍼 참조 금지.
  */
 const TimetableLiveActivityLayout: LiveActivityComponent<TimetableLiveActivityProps> = (
   props: TimetableLiveActivityProps,
 ) => {
   'widget';
 
-  // Dynamic Island는 모드와 무관하게 항상 검은 불투명 배경이다.
-  const islandPrimary = '#FFFFFF';
-  const islandSecondary = '#A1A1A6';
-  const islandAccent = '#5B9BFF'; // INU Blue를 검은 배경 대비에 맞게 밝힌 값
-
-  // 잠금화면은 시스템 기본 배경을 그대로 쓴다. 이 배경은 environment.colorScheme과
-  // 항상 일치하지 않으므로(라이트 모드에서도 어두운 배경으로 렌더링됨) 본문은 배경에
-  // 맞춰 적응하는 계층형 스타일을 쓰고, 브랜드 색은 밝은/어두운 배경 모두에서 대비가
-  // 나오는 중간 톤을 쓴다.
-  const lockPrimary = { type: 'hierarchical', style: 'primary' } as const;
-  const lockSecondary = { type: 'hierarchical', style: 'secondary' } as const;
-  const lockAccent = '#3D7EF5';
-
-  const symbol = 'graduationcap.fill';
-  // 서버 push-to-start로 시작된 Activity는 수업이 시작돼도 UPCOMING 그대로다(서버에 업데이트
-  // 토큰이 없고 앱은 꺼져 있을 수 있다). 서버는 stale-date를 수업 시작으로 두므로, 그때 시스템이
-  // 다시 그리면 현재 시각으로 "수업 중"을 판단한다.
   const isUpcoming = props.phase === 'UPCOMING' && Date.now() < props.startTimestamp;
   const startDate = new Date(props.startTimestamp);
   const endDate = new Date(props.endTimestamp);
   const targetDate = isUpcoming ? startDate : endDate;
 
+  // INTIP 팔레트(Figma 변수)
+  const lockBg = isUpcoming ? '#FFFAEB' : '#EFF6FF'; // bg/warn · bg/brand
+  const lockAccent = isUpcoming ? '#B58000' : '#0061FF'; // text/warn · text/brand
+  const lockInk = '#191F28'; // text/primary
+  const lockSub = '#6B7684'; // gray/600
+  const lockTrackBase = isUpcoming ? '#FEF3C7' : '#DBEAFE'; // yellow/100 · blue/100
+  const lockTrackFill = isUpcoming ? '#FBB32F' : '#0061FF'; // brand/yellow · text/brand
+  const islandAccent = isUpcoming ? '#FBB32F' : '#60A5FA'; // brand/yellow · blue/400
+  const islandInk = '#FFFFFF'; // gray/0
+  const islandSub = '#B0B8C1'; // gray/400
+  const islandTrackBase = isUpcoming ? '#FEF3C7' : '#BBD9FF'; // yellow/100 · (Figma 지정값)
+  const islandTrackFill = isUpcoming ? '#FBB32F' : '#0061FF'; // brand/yellow · interactive/primary
+
+  const art = isUpcoming ? 'TorchClassUpcoming' : 'TorchClassOngoing';
+  const artW = isUpcoming ? 77 : 60; // Figma Character 폭(높이 104)
+
   // toLocaleTimeString은 위젯 확장의 로케일(en)을 따라 "09:00 AM"이 되므로 직접 포맷한다.
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-  const targetTimeText = `${pad(targetDate.getHours())}:${pad(targetDate.getMinutes())}`;
-  const timeCaption = isUpcoming ? `${targetTimeText} 시작` : `${targetTimeText} 종료`;
+  const endText = `${pad(endDate.getHours())}:${pad(endDate.getMinutes())}`;
+  const subText = isUpcoming
+    ? [props.location, props.professor].filter(Boolean).join(' · ')
+    : [props.location, `${endText} 종료`].filter(Boolean).join(' · ');
 
-  // 카운트다운 구간. Text(timerInterval:)은 upper - max(now, lower)를 보여준다.
+  // Text(timerInterval:)은 upper - max(now, lower)를 보여준다.
   const countdownLower = isUpcoming
     ? new Date(props.countdownFromTimestamp ?? props.startTimestamp - 15 * 60 * 1000)
     : startDate;
   const countdownInterval = { lower: countdownLower, upper: targetDate };
-  // 타이머 Text는 내용과 무관하게 넓게 잡히므로 폭을 고정해야 한다. 1시간 이상이면 h:mm:ss.
-  const isLongTimer = targetDate.getTime() - countdownLower.getTime() >= 60 * 60 * 1000;
+  // 타이머 Text는 내용과 무관하게 넓게 잡히므로 폭을 고정해야 한다. 지금 남은 시간이 1시간 이상이면 h:mm:ss.
+  // (수업 전체 길이로 정하면 75분 수업의 마지막 1시간 내내 "44:48      남음"처럼 벌어진다.)
+  const isLongTimer = targetDate.getTime() - Math.max(Date.now(), countdownLower.getTime()) >= 60 * 60 * 1000;
 
-  const statusText = isUpcoming ? '곧 수업' : '수업 중';
-  const detailText = [props.location, props.professor].filter(Boolean).join(' · ');
-
-  const countdown = (size: number, color: string, alignment: 'leading' | 'trailing') => (
+  const timer = (size: number, color: string, weight: 'bold' | 'semibold') => (
     <Text
       timerInterval={countdownInterval}
       modifiers={[
-        font({ size, weight: 'semibold' }),
+        font({ size, weight }),
         monospacedDigit(),
         foregroundStyle(color),
-        multilineTextAlignment(alignment),
-        frame({
-          width: Math.ceil(size * (isLongTimer ? 4.1 : 2.9)),
-          alignment,
-        }),
+        multilineTextAlignment('leading'),
+        frame({ width: Math.ceil(size * (isLongTimer ? 4.1 : 2.9)), alignment: 'leading' }),
       ]}
     />
   );
 
-  const progressBar = (color: string) => (
-    <ProgressView
-      timerInterval={{ lower: startDate, upper: endDate }}
-      countsDown={false}
-      modifiers={[progressViewStyle('linear'), tint(color), labelsHidden()]}
-    />
+  const titleLine = (ink: string) => (
+    <Text modifiers={[font({ size: 20, weight: 'bold' }), foregroundStyle(ink), lineLimit(1), truncationMode('tail')]}>
+      {props.courseTitle}
+    </Text>
+  );
+  const timerLine = (ink: string, accent: string) => (
+    <HStack alignment="firstTextBaseline" spacing={0}>
+      {timer(20, accent, 'bold')}
+      <Text modifiers={[font({ size: 20, weight: 'bold' }), foregroundStyle(ink)]}>
+        {isUpcoming ? ' 뒤 시작' : ' 남음'}
+      </Text>
+    </HStack>
   );
 
-  // 진행 링: 수업 중엔 경과만큼 차오르고, 수업 전엔 남은 시간만큼 줄어든다.
-  const progressRing = (size: number) => (
-    <ProgressView
-      timerInterval={countdownInterval}
-      countsDown={isUpcoming}
-      modifiers={[
-        progressViewStyle('circular'),
-        tint(islandAccent),
-        // 원형 타이머 ProgressView는 labelsHidden으로도 안쪽 경과 시간 라벨이 남는다.
-        // 링은 tint, 라벨은 foregroundStyle을 따르므로 라벨만 투명하게 만든다.
-        foregroundStyle('clear'),
-        frame({ width: size, height: size }),
-      ]}
-    />
+  // 8pt 진행바: 팔레트 색 바탕 + 시스템이 채우는 ProgressView(기본 4pt → 2배)
+  const track = (base: string, fill: string) => (
+    <ZStack alignment="leading" modifiers={[frame({ height: 8 })]}>
+      <Capsule modifiers={[foregroundStyle(base), frame({ height: 8 })]} />
+      <ProgressView
+        timerInterval={countdownInterval}
+        countsDown={false}
+        modifiers={[progressViewStyle('linear'), tint(fill), labelsHidden(), scaleEffect({ x: 1, y: 2 })]}
+      />
+    </ZStack>
   );
+
+  // 헤드라인 2줄 + 보조 1줄 + 진행바, 오른쪽 아래 횃불이(발끝이 진행바 위)
+  const body = (ink: string, sub: string, accent: string, base: string, fill: string, insets: { top: number; side: number; bottom: number }, artBottom: number) => (
+    <ZStack alignment="bottomTrailing">
+      <VStack
+        alignment="leading"
+        spacing={0}
+        modifiers={[
+          padding({ top: insets.top, leading: insets.side, trailing: insets.side, bottom: insets.bottom }),
+          frame({ maxWidth: 9999, alignment: 'leading' }),
+        ]}
+      >
+        <VStack alignment="leading" spacing={2} modifiers={[padding({ trailing: artW + 4 })]}>
+          {isUpcoming ? timerLine(ink, accent) : titleLine(ink)}
+          {isUpcoming ? titleLine(ink) : timerLine(ink, accent)}
+          {subText ? (
+            <Text
+              modifiers={[font({ size: 14, weight: 'medium' }), foregroundStyle(sub), lineLimit(1), truncationMode('tail')]}
+            >
+              {subText}
+            </Text>
+          ) : null}
+        </VStack>
+        <VStack modifiers={[padding({ top: 12 })]}>{track(base, fill)}</VStack>
+      </VStack>
+      <Image
+        assetName={art}
+        modifiers={[
+          resizable(),
+          aspectRatio({ contentMode: 'fit' }),
+          frame({ width: artW, height: 104 }),
+          padding({ trailing: 8, bottom: artBottom }),
+        ]}
+      />
+    </ZStack>
+  );
+
+  const cap = (size: number) => <Image systemName="graduationcap.fill" size={size} color={islandAccent} />;
 
   return {
-    // 잠금화면 / 알림 센터 / StandBy (expanded와 같은 구조)
+    // 잠금화면 / 알림 센터 / StandBy — 패딩 14 + 위 10. activityBackgroundTint는 iOS 26 잠금화면에서
+    // 연한 색을 진한 유리 틴트로 바꿔 그리므로 쓰지 않고, 내용을 카드 폭 전체로 펼친 뒤 배경을 직접 칠한다.
     banner: (
-      <VStack alignment="leading" spacing={8} modifiers={[padding({ all: 14 })]}>
-        <HStack alignment="center" spacing={6}>
-          <Image systemName={symbol} size={15} color={lockAccent} />
-          <Text modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle(lockAccent)]}>
-            {statusText}
-          </Text>
-          <Spacer />
-          {countdown(22, lockAccent, 'trailing')}
-        </HStack>
-        <HStack alignment="firstTextBaseline" spacing={8}>
-          <Text
-            modifiers={[
-              font({ size: 20, weight: 'bold' }),
-              foregroundStyle(lockPrimary),
-              lineLimit(1),
-            ]}
-          >
-            {props.courseTitle}
-          </Text>
-          <Spacer />
-          <Text
-            modifiers={[
-              font({ size: 15, weight: 'medium' }),
-              monospacedDigit(),
-              foregroundStyle(lockSecondary),
-            ]}
-          >
-            {timeCaption}
-          </Text>
-        </HStack>
-        {detailText ? (
-          <Text
-            modifiers={[
-              font({ size: 15, weight: 'medium' }),
-              foregroundStyle(lockSecondary),
-              lineLimit(1),
-            ]}
-          >
-            {detailText}
-          </Text>
-        ) : null}
-        {!isUpcoming && progressBar(lockAccent)}
+      <VStack modifiers={[background(lockBg)]}>
+        {body(lockInk, lockSub, lockAccent, lockTrackBase, lockTrackFill, { top: 24, side: 14, bottom: 14 }, 18)}
       </VStack>
     ),
 
     // Apple Watch Smart Stack / CarPlay (iOS 18+)
     bannerSmall: (
       <HStack alignment="center" spacing={8} modifiers={[padding({ all: 10 })]}>
-        <Image systemName={symbol} size={20} color={islandAccent} />
+        <Image assetName={art} modifiers={[resizable(), aspectRatio({ contentMode: 'fit' }), frame({ height: 40 })]} />
         <VStack alignment="leading" spacing={2}>
-          <Text
-            modifiers={[
-              font({ size: 15, weight: 'semibold' }),
-              foregroundStyle(islandPrimary),
-              lineLimit(1),
-            ]}
-          >
+          <Text modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle(islandInk), lineLimit(1)]}>
             {props.courseTitle}
           </Text>
-          {countdown(15, islandAccent, 'leading')}
+          {timer(15, islandAccent, 'semibold')}
         </VStack>
         <Spacer />
       </HStack>
     ),
 
-    // Dynamic Island compact — 좌: 로고 마크, 우: 수업 전엔 mm:ss 카운트다운(리드타임
-    // 이내라 짧다), 수업 중엔 h:mm:ss가 너무 넓어 좌우 균형이 깨지므로 진행 링.
-    // 둘이 하나의 정보로 읽히도록 같은 브랜드 색을 쓴다.
-    compactLeading: <Image systemName={symbol} size={15} color={islandAccent} />,
-    compactTrailing: isLongTimer ? progressRing(20) : countdown(14, islandAccent, 'trailing'),
+    // compact: 학사모 + 곧 수업엔 "곧 수업", 수업 중엔 남은 시간
+    compactLeading: cap(15),
+    compactTrailing: isUpcoming ? (
+      <Text modifiers={[font({ size: 14, weight: 'semibold' }), foregroundStyle(islandAccent)]}>곧 수업</Text>
+    ) : (
+      timer(14, islandAccent, 'semibold')
+    ),
 
-    // Dynamic Island minimal — 정적 로고 대신 진행 링 + 로고 마크
+    // minimal: 진행 링 + 학사모. 원형 타이머 ProgressView는 labelsHidden으로도 안쪽 라벨이 남아
+    // foregroundStyle('clear')로 라벨만 지운다.
     minimal: (
       <ZStack>
-        {progressRing(24)}
-        <Image systemName={symbol} size={10} color={islandAccent} />
+        <ProgressView
+          timerInterval={countdownInterval}
+          countsDown={isUpcoming}
+          modifiers={[progressViewStyle('circular'), tint(islandAccent), foregroundStyle('clear'), frame({ width: 31, height: 31 })]}
+        />
+        {cap(12)}
       </ZStack>
     ),
 
-    // Dynamic Island expanded — compact 배치를 확대 (좌 로고·상태 / 우 카운트다운)
-    expandedLeading: (
-      <HStack alignment="center" spacing={6} modifiers={[padding({ leading: 4 })]}>
-        <Image systemName={symbol} size={17} color={islandAccent} />
-        <Text modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle(islandAccent)]}>
-          {statusText}
-        </Text>
-      </HStack>
-    ),
-
-    expandedTrailing: (
-      <HStack alignment="center" modifiers={[padding({ trailing: 4 })]}>
-        {countdown(20, islandAccent, 'trailing')}
-      </HStack>
-    ),
-
-    expandedBottom: (
-      <VStack
-        alignment="leading"
-        spacing={6}
-        modifiers={[padding({ leading: 4, trailing: 4, top: 2 })]}
-      >
-        <HStack alignment="firstTextBaseline" spacing={8}>
-          <Text
-            modifiers={[
-              font({ size: 18, weight: 'bold' }),
-              foregroundStyle(islandPrimary),
-              lineLimit(1),
-            ]}
-          >
-            {props.courseTitle}
-          </Text>
-          <Spacer />
-          <Text
-            modifiers={[
-              font({ size: 15, weight: 'medium' }),
-              monospacedDigit(),
-              foregroundStyle(islandSecondary),
-            ]}
-          >
-            {timeCaption}
-          </Text>
-        </HStack>
-        {detailText ? (
-          <Text
-            modifiers={[
-              font({ size: 15, weight: 'medium' }),
-              foregroundStyle(islandSecondary),
-              lineLimit(1),
-            ]}
-          >
-            {detailText}
-          </Text>
-        ) : null}
-        {!isUpcoming && progressBar(islandAccent)}
-      </VStack>
-    ),
+    // 확장형: 잠금화면과 같은 구조를 검정 배경에
+    expandedBottom: body(islandInk, islandSub, islandAccent, islandTrackBase, islandTrackFill, { top: 6, side: 6, bottom: 6 }, 4),
   };
 };
 
-export const TimetableLiveActivity = createLiveActivity(
-  'TimetableLiveActivity',
-  TimetableLiveActivityLayout,
-);
+export const TimetableLiveActivity = createLiveActivity('TimetableLiveActivity', TimetableLiveActivityLayout);

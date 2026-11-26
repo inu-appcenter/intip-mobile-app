@@ -66,7 +66,7 @@ async function ensureLocalWatchChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
   await notifee.createChannel({
     id: LOCAL_WATCH_CHANNEL_ID,
-    name: '스마트 감시 & 리마인더',
+    name: '빈자리·마감 알림',
     importance: AndroidImportance.HIGH,
     sound: 'default',
     vibration: true,
@@ -288,9 +288,10 @@ export const LocalWatchManager = {
     const job: LocalWatchJob = {
       id: `watch_study_${params.roomId}_${params.targetHour}_${now}`,
       type: 'STUDY_ROOM_SNIPER',
-      title: `${params.roomName} ${params.targetHour}:00 취소표 감시`,
+      title: `${params.roomName} ${params.targetHour}:00 취소표 알림`,
       targetName: `${params.roomName} (${params.targetHour}시)`,
       targetId: params.roomId,
+      roomName: params.roomName,
       hopeDate: params.hopeDate,
       targetHour: params.targetHour,
       createdAt: now,
@@ -319,7 +320,7 @@ export const LocalWatchManager = {
     const job: LocalWatchJob = {
       id: `watch_seat_${params.roomId}_${params.seatNo}_${now}`,
       type: 'SPECIFIC_SEAT_SNIPER',
-      title: `${params.roomName} ${params.seatNo}번 좌석 빈자리 감시`,
+      title: `${params.roomName} ${params.seatNo}번 빈자리 알림`,
       targetName: `${params.roomName} ${params.seatNo}번`,
       targetId: params.seatId || params.seatNo,
       roomId: params.roomId,
@@ -350,7 +351,7 @@ export const LocalWatchManager = {
     const job: LocalWatchJob = {
       id: `watch_room_${params.roomId}_${now}`,
       type: 'ROOM_ANY_SEAT',
-      title: `${params.roomName} 빈자리 감시`,
+      title: `${params.roomName} 빈자리 알림`,
       targetName: params.roomName,
       targetId: params.roomId,
       roomId: params.roomId,
@@ -570,8 +571,8 @@ export const LocalWatchManager = {
               authErrorCounts.delete(job.id);
               await notifee.displayNotification({
                 id: job.id,
-                title: '⚠️ 빈자리 감시가 중단됐어요',
-                body: `도서관 로그인이 풀려 [${job.targetName}] 감시를 계속할 수 없어요. 앱에서 도서관 계정을 다시 연결해 주세요.`,
+                title: '⚠️ 빈자리 찾기를 멈췄어요',
+                body: `도서관 로그인이 풀려 [${job.targetName}] 자리를 더 찾을 수 없어요. 앱에서 도서관 계정을 다시 연결해 주세요.`,
                 data: { path: '/services/library' },
                 android: { channelId: LOCAL_WATCH_CHANNEL_ID, pressAction: { id: 'default' } },
               });

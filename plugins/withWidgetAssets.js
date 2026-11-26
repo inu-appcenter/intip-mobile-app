@@ -65,6 +65,28 @@ const WIDGET_ASSETS = [
 ];
 
 /**
+ * Full-color raster artwork for Live Activities (iOS only — ActivityKit has no
+ * Android counterpart, and these are not monochrome so the vector-drawable path
+ * above could not carry them anyway).
+ *
+ * Each entry becomes `<AssetName>.imageset` with the @2x/@3x PNGs from
+ * `assets/widgets/torch/`, rendered as-is (`original`, not template), and is
+ * drawn with `<Image assetName="..." modifiers={[resizable(), ...]}>`. The
+ * 횃불이 illustrations are 104pt tall at @1x — the height the lock-screen
+ * banner draws them at.
+ */
+const RASTER_WIDGET_ASSETS = [
+  'IntipSymbol',
+  'TorchSearchSeat',
+  'TorchSearchRoom',
+  'TorchSearchStudyRoom',
+  'TorchFound',
+  'TorchEnded',
+  'TorchClassUpcoming',
+  'TorchClassOngoing',
+].map((assetName) => ({ assetName, dir: 'assets/widgets/torch' }));
+
+/**
  * `BusIcon` → `bus_icon`. Kept character-for-character in step with
  * `AssetDrawables.toResourceName` in expo-widgets-glance's
  * `GlanceTreeRenderer.kt`; if they disagree, Android silently falls back to a
@@ -172,6 +194,23 @@ function imagesetContentsJson(filename) {
   )}\n`;
 }
 
+/** `Contents.json` for a full-color @2x/@3x raster imageset. */
+function rasterImagesetContentsJson(assetName) {
+  return `${JSON.stringify(
+    {
+      images: [
+        { idiom: 'universal', scale: '1x' },
+        { filename: `${assetName}@2x.png`, idiom: 'universal', scale: '2x' },
+        { filename: `${assetName}@3x.png`, idiom: 'universal', scale: '3x' },
+      ],
+      info: { version: 1, author: 'xcode' },
+      properties: { 'template-rendering-intent': 'original' },
+    },
+    null,
+    2
+  )}\n`;
+}
+
 function withIosWidgetAssetFiles(config) {
   return withDangerousMod(config, [
     'ios',
@@ -190,6 +229,16 @@ function withIosWidgetAssetFiles(config) {
         fs.mkdirSync(imagesetDir, { recursive: true });
         fs.copyFileSync(path.join(projectRoot, source), path.join(imagesetDir, filename));
         fs.writeFileSync(path.join(imagesetDir, 'Contents.json'), imagesetContentsJson(filename));
+      }
+
+      for (const { assetName, dir } of RASTER_WIDGET_ASSETS) {
+        const imagesetDir = path.join(catalogDir, `${assetName}.imageset`);
+        fs.mkdirSync(imagesetDir, { recursive: true });
+        for (const scale of ['2x', '3x']) {
+          const file = `${assetName}@${scale}.png`;
+          fs.copyFileSync(path.join(projectRoot, dir, file), path.join(imagesetDir, file));
+        }
+        fs.writeFileSync(path.join(imagesetDir, 'Contents.json'), rasterImagesetContentsJson(assetName));
       }
       return cfg;
     },
@@ -295,3 +344,5 @@ module.exports.toResourceName = toResourceName;
 module.exports.parseMonochromeSvg = parseMonochromeSvg;
 module.exports.vectorDrawableXml = vectorDrawableXml;
 module.exports.imagesetContentsJson = imagesetContentsJson;
+module.exports.rasterImagesetContentsJson = rasterImagesetContentsJson;
+module.exports.RASTER_WIDGET_ASSETS = RASTER_WIDGET_ASSETS;
