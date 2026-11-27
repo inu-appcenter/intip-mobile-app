@@ -1,0 +1,10 @@
+{
+  "name": "intip-notification-relay",
+  "platforms": ["android", "apple"],
+  "android": {
+    "modules": ["expo.modules.notificationrelay.IntipNotificationRelayModule"]
+  },
+  "apple": {
+    "modules": ["IntipNotificationRelayModule"]
+  }
+}

@@ -92,6 +92,7 @@
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
       "./plugins/withDefaultNotificationChannel",
+      "./plugins/withNotificationRelayIntent",
       "./plugins/withTimetableForegroundService",
       "./plugins/withAndroidReleaseSigning",
       "./plugins/withIOSManualSigning",

@@ -1,0 +1,22 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!--
+      다른 앱의 알림을 읽는 서비스. 사용자가 설정 > 알림 접근 허용에서 INTIP을 켜야 시스템이
+      바인드한다(런타임 권한 다이얼로그가 아니다). BIND_NOTIFICATION_LISTENER_SERVICE는 시스템만
+      바인드할 수 있게 막는 permission이라 exported="true"여도 다른 앱이 붙을 수 없다.
+    -->
+    <service
+      android:name=".RelayListenerService"
+      android:label="INTIP 알림 분류"
+      android:exported="true"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+      <!-- 소리 나는 알림 + 조용한 알림만. 진행 중(ongoing) 알림은 서비스에서도 거른다. -->
+      <meta-data
+        android:name="android.service.notification.default_filter_types"
+        android:value="alerting|silent" />
+    </service>
+  </application>
+</manifest>
