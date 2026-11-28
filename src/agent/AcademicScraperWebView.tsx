@@ -80,14 +80,17 @@ let activeOptions: ErpActionOptions | null = null;
 let activeTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let triggerComponentScrape: ((options: ErpActionOptions) => void) | null = null;
 let cancelComponentScrape: (() => void) | null = null;
-let resolveScraperMount: (() => void) | null = null;
+// 마운트 전에 들어온 요청이 여러 개일 수 있으므로 대기자를 모두 보관한다.
+// (단일 슬롯이면 나중 요청이 앞 요청의 resolver를 덮어써, 앞 요청이 15초 뒤
+// 준비 시간 초과로 reject 되면서 진행 중인 나중 요청까지 정리해 버렸다.)
+const scraperMountWaiters = new Set<() => void>();
 
 function waitForScraperMount(timeoutMs = 15000): Promise<void> {
   if (triggerComponentScrape) return Promise.resolve();
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      if (resolveScraperMount === onMounted) resolveScraperMount = null;
+      scraperMountWaiters.delete(onMounted);
       reject(new Error('포털 시스템 조회 준비 시간이 초과되었습니다.'));
     }, timeoutMs);
 
@@ -95,8 +98,14 @@ function waitForScraperMount(timeoutMs = 15000): Promise<void> {
       clearTimeout(timeout);
       resolve();
     };
-    resolveScraperMount = onMounted;
+    scraperMountWaiters.add(onMounted);
   });
+}
+
+function notifyScraperMounted() {
+  const waiters = [...scraperMountWaiters];
+  scraperMountWaiters.clear();
+  waiters.forEach((w) => w());
 }
 
 /**
@@ -142,14 +151,17 @@ export const AcademicScraperManager = {
     activeScrapePromise = new Promise<string>((resolve, reject) => {
       activeResolvers.push({ resolve, reject });
 
+      // 아래 콜백들은 "이 요청이 아직 활성 요청인가"를 options 객체 동일성으로 판별한다.
+      // 학번만 비교하면 같은 학번의 다른 액션/다른 신입생 입력으로 대체된 이전 요청이
+      // 새 요청을 트리거하거나 reject 해 버린다.
       waitForScraperMount()
         .then(() => {
-          if (activeCreds?.studentId !== creds.studentId) return;
+          if (activeOptions !== options) return;
           triggerComponentScrape?.(options);
 
           if (activeTimeoutTimer) clearTimeout(activeTimeoutTimer);
           activeTimeoutTimer = setTimeout(() => {
-            if (activeCreds?.studentId === creds.studentId && activeResolvers.length > 0) {
+            if (activeOptions === options && activeResolvers.length > 0) {
               const err = new Error('포털 ERP 정보 조회 시간 초과 (35초)');
               activeResolvers.forEach((r) => r.reject(err));
               activeResolvers = [];
@@ -162,7 +174,7 @@ export const AcademicScraperManager = {
           }, SCRAPE_TIMEOUT_MS);
         })
         .catch((error: Error) => {
-          if (activeCreds?.studentId === creds.studentId) {
+          if (activeOptions === options) {
             activeResolvers.forEach((r) => r.reject(error));
             activeResolvers = [];
             activeScrapePromise = null;
@@ -251,8 +263,7 @@ export const AcademicScraperWebView: React.FC = () => {
       loginScriptInjectedRef.current = false;
       setTargetUrl(null);
     };
-    resolveScraperMount?.();
-    resolveScraperMount = null;
+    notifyScraperMounted();
 
     return () => {
       triggerComponentScrape = null;
