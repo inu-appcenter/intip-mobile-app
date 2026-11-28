@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { PortalSecureStore } from './secureStore';
+import { PortalSecureStore, saveDeviceSecret } from './secureStore';
 
 const KEY_LMS_TOKEN = 'intip_lms_access_token';
 const KEY_LMS_USER = 'intip_lms_user_info';
@@ -23,9 +23,7 @@ export const LmsAuthService = {
    * LMS 계정 정보 및 토큰 로컬 보안 저장
    */
   async saveCredentials(credentials: LmsCredentials): Promise<void> {
-    await SecureStore.setItemAsync(KEY_LMS_CREDENTIALS, JSON.stringify(credentials), {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-    });
+    await saveDeviceSecret(KEY_LMS_CREDENTIALS, JSON.stringify(credentials));
     // 통합 포털 계정(학번/비밀번호)에도 자동 동기화하여 1회 로그인으로 전체 서비스 연동
     try {
       await PortalSecureStore.saveCredentials({
@@ -57,9 +55,7 @@ export const LmsAuthService = {
   },
 
   async saveToken(token: string): Promise<void> {
-    await SecureStore.setItemAsync(KEY_LMS_TOKEN, token, {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-    });
+    await saveDeviceSecret(KEY_LMS_TOKEN, token);
   },
 
   async getToken(): Promise<string | null> {
@@ -67,9 +63,7 @@ export const LmsAuthService = {
   },
 
   async saveUserInfo(userInfo: LmsUserInfo): Promise<void> {
-    await SecureStore.setItemAsync(KEY_LMS_USER, JSON.stringify(userInfo), {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-    });
+    await saveDeviceSecret(KEY_LMS_USER, JSON.stringify(userInfo));
   },
 
   async getUserInfo(): Promise<LmsUserInfo | null> {

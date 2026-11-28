@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import notifee, {
   AndroidCategory,
   AndroidImportance,
@@ -8,6 +8,109 @@ import notifee, {
 import { executeAgentAction } from '../agent/agentActionExecutor';
 import { LibraryAgentTools } from '../agent/libraryTools';
 import { LocalWatchJob } from '../agent/localWatchManager';
+import {
+  LibraryWatchLiveActivity,
+  LibraryWatchLiveActivityProps,
+} from '../widgets/LibraryWatchLiveActivity';
+import { after } from 'expo-widgets';
+
+let lastWatchLiveJson: string | null = null;
+/**
+ * FOUND/ENDED로 끝낸 뒤 잠금화면에 남겨 둔 Activity. getInstances()는 끝난 것을 빼고 돌려주므로
+ * 여기 붙잡아 두었다가 사용자가 앱에 들어오면(이미 확인했으므로) 즉시 내린다.
+ */
+let lingeringWatchActivities: ReturnType<typeof LibraryWatchLiveActivity.getInstances> = [];
+
+function watchKind(job: LocalWatchJob): LibraryWatchLiveActivityProps['kind'] {
+  if (job.type === 'STUDY_ROOM_SNIPER') return 'STUDY_ROOM';
+  if (job.type === 'ROOM_ANY_SEAT') return 'ROOM';
+  return 'SEAT';
+}
+
+/** 알림·Live Activity 탭 시 열 웹 경로. 웹 도서관 페이지가 roomId/seatId/date/hour를 읽어 바로 연다. */
+export function watchLibraryPath(job: LocalWatchJob): string {
+  if (job.type === 'STUDY_ROOM_SNIPER') {
+    const date = job.hopeDate ? `&date=${job.hopeDate}` : '';
+    const hour = job.targetHour != null ? `&hour=${job.targetHour}` : '';
+    return `/services/library?tab=study&roomId=${job.targetId ?? ''}${date}${hour}`;
+  }
+  const roomId = job.roomId || job.targetId || '';
+  const seat = job.type === 'SPECIFIC_SEAT_SNIPER' && job.seatId ? `&seatId=${job.seatId}` : '';
+  return `/services/library?tab=seats&roomId=${roomId}${seat}`;
+}
+
+function watchDeepLink(job: LocalWatchJob): string {
+  return `intipmobileapp:/${watchLibraryPath(job)}`;
+}
+
+/**
+ * Live Activity 문구 조각(Figma "Library Seat Alert LA"). 긴 열람실 이름 "ICT라운지 (이룸관B1F)"는
+ * 이름("ICT라운지")과 위치("이룸관B1F")로 나눠, 헤드라인엔 무엇을 찾는지만 둔다.
+ */
+export function watchLabels(job: LocalWatchJob): Pick<LibraryWatchLiveActivityProps, 'primary' | 'place'> {
+  if (job.type === 'STUDY_ROOM_SNIPER') {
+    return { primary: '이용 가능한 스터디룸', place: job.roomName || job.targetName.replace(/\s*\(\d+시\)$/, '') };
+  }
+  if (job.type === 'ROOM_ANY_SEAT') {
+    const full = job.roomName || job.targetName;
+    const m = full.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+    return { primary: `${m ? m[1] : full} 빈자리`, place: m ? m[2] : undefined };
+  }
+  if (job.seatNo) return { primary: `${job.seatNo}번`, place: job.roomName };
+  return { primary: job.targetName, place: job.roomName };
+}
+
+function watchLiveProps(
+  job: LocalWatchJob,
+  activeCount: number,
+  phase: LibraryWatchLiveActivityProps['phase'] = 'WATCHING',
+  message?: string,
+): LibraryWatchLiveActivityProps {
+  return {
+    phase,
+    kind: watchKind(job),
+    targetName: job.targetName,
+    ...watchLabels(job),
+    extraCount: Math.max(0, activeCount - 1),
+    startedAt: job.createdAt,
+    expiresAt: job.expiresAt,
+    checkCount: job.checkCount || 0,
+    lastCheckedAt: job.lastCheckedAt,
+    message,
+  };
+}
+
+/**
+ * iOS: 감시 중 Live Activity 시작/갱신. 같은 내용이면 건너뛴다(위치 콜백이 ~5초마다 syncRuntime을
+ * 부르므로). 시작은 앱이 포그라운드일 때만 가능하다(ActivityKit 제약) — 감시는 사용자가 등록 화면에서
+ * 켜므로 그 시점에 시작된다. 백그라운드에서 start가 실패하면 다음 포그라운드 복귀 때 다시 시도된다.
+ */
+async function renderWatchLiveActivity(job: LocalWatchJob, activeCount: number): Promise<void> {
+  const props = watchLiveProps(job, activeCount);
+  const json = JSON.stringify(props);
+  const [current, ...dupes] = LibraryWatchLiveActivity.getInstances();
+  await Promise.all(dupes.map((d) => d.end('immediate').catch(() => {})));
+  if (current) {
+    if (json === lastWatchLiveJson && dupes.length === 0) return;
+    await current.update(props, new Date(job.expiresAt));
+  } else {
+    LibraryWatchLiveActivity.start(props, watchDeepLink(job), new Date(job.expiresAt));
+  }
+  lastWatchLiveJson = json;
+}
+
+async function endWatchLiveActivities(final?: LibraryWatchLiveActivityProps, keepMinutes = 0): Promise<void> {
+  lastWatchLiveJson = null;
+  const instances = LibraryWatchLiveActivity.getInstances();
+  if (final && keepMinutes > 0) lingeringWatchActivities.push(...instances);
+  await Promise.all(
+    instances.map((instance) =>
+      final && keepMinutes > 0
+        ? instance.end(after(new Date(Date.now() + keepMinutes * 60 * 1000)), final).catch(() => {})
+        : instance.end('immediate').catch(() => {}),
+    ),
+  );
+}
 
 export const LIVE_UPDATE_NOWBAR_CHANNEL_ID = 'live_update_nowbar';
 export const LIBRARY_WATCH_CHANNEL_ID = LIVE_UPDATE_NOWBAR_CHANNEL_ID;
@@ -54,7 +157,22 @@ export const LibraryOngoingService = {
   /**
    * 1. 도서관 빈자리/취소표 감시 Ongoing Notification 렌더링
    */
-  async renderWatchActivity(job: LocalWatchJob, checkCount?: number): Promise<void> {
+  async renderWatchActivity(job: LocalWatchJob, checkCount?: number, activeCount = 1): Promise<void> {
+    // 상주(ongoing) 알림·포그라운드 서비스는 Android 개념. iOS는 로컬 Live Activity로 대신한다
+    // (알림으로 그리면 위치 콜백 ~5초마다 알림 요청이 새로 등록됐다 — 실기기 로그로 확인).
+    if (Platform.OS === 'ios') {
+      if (job.status !== 'ACTIVE') {
+        await endWatchLiveActivities();
+        return;
+      }
+      try {
+        await renderWatchLiveActivity({ ...job, checkCount: checkCount ?? job.checkCount }, activeCount);
+      } catch (e) {
+        console.warn('[LibraryOngoingService] 감시 Live Activity 실패:', e);
+      }
+      return;
+    }
+    if (Platform.OS !== 'android') return;
     if (job.status !== 'ACTIVE') {
       await this.cancelWatchActivity();
       return;
@@ -68,17 +186,20 @@ export const LibraryOngoingService = {
 
     const isStudyRoom = job.type === 'STUDY_ROOM_SNIPER';
     const targetRoomId = job.roomId || job.targetId || '';
-    const libraryPath = isStudyRoom
-      ? `/services/library?tab=study&roomId=${targetRoomId}`
-      : `/services/library?tab=seats&roomId=${targetRoomId}`;
+    const libraryPath = watchLibraryPath(job);
 
+    const extra = activeCount > 1 ? ` 외 ${activeCount - 1}건` : '';
     const title = isStudyRoom
-      ? `🎯 [스터디룸] ${job.targetName} 취소표 감시 중`
-      : `🎯 [열람실] ${job.targetName} 빈자리 감시 중`;
+      ? `횃불이가 ${job.targetName}${extra} 취소표를 찾고 있어요`
+      : `횃불이가 ${job.targetName}${extra} 빈자리를 찾고 있어요`;
 
-    const subtitle = '스마트 캠퍼스 감시';
+    const subtitle = '빈자리 알림';
     const checkText = checkCount ? ` · ${checkCount}회 확인` : '';
-    const body = `남은 감시 시간: ${remainingMinutes}분 (최대 ${totalDurationMinutes}분)${checkText}`;
+    const remainText =
+      remainingMinutes >= 60
+        ? `${Math.floor(remainingMinutes / 60)}시간${remainingMinutes % 60 ? ` ${remainingMinutes % 60}분` : ''}`
+        : `${remainingMinutes}분`;
+    const body = `${remainText} 더 찾아볼게요${checkText}`;
 
     try {
       await this.ensureChannels();
@@ -124,7 +245,7 @@ export const LibraryOngoingService = {
               },
             },
             {
-              title: '감시 중단',
+              title: '그만 찾기',
               pressAction: {
                 id: 'cancel_library_watch',
               },
@@ -141,9 +262,32 @@ export const LibraryOngoingService = {
   },
 
   /**
+   * iOS: 빈자리/취소표 발견 → Live Activity를 FOUND 상태로 끝내고 잠금화면에 10분 남긴다.
+   * (헤드업 알림은 LocalWatchManager가 따로 보낸다 — Live Activity 갱신은 소리·배너가 없으므로.)
+   */
+  async finishWatchActivity(job: LocalWatchJob, phase: 'FOUND' | 'ENDED', message: string): Promise<void> {
+    if (Platform.OS !== 'ios') return;
+    // 앱을 보고 있는 중이면 잠금화면에 남길 이유가 없다(헤드업 알림·화면으로 이미 보임).
+    const keepMinutes = AppState.currentState === 'active' ? 0 : phase === 'FOUND' ? 10 : 2;
+    await endWatchLiveActivities(watchLiveProps(job, 1, phase, message), keepMinutes);
+  },
+
+  /** iOS: 앱이 활성화되면 잠금화면에 남겨 둔 FOUND/ENDED Live Activity를 바로 내린다. */
+  async dismissLingeringWatchActivities(): Promise<void> {
+    if (Platform.OS !== 'ios' || lingeringWatchActivities.length === 0) return;
+    const list = lingeringWatchActivities;
+    lingeringWatchActivities = [];
+    await Promise.all(list.map((instance) => instance.end('immediate').catch(() => {})));
+  },
+
+  /**
    * 도서관 감시 Ongoing 알림 취소
    */
   async cancelWatchActivity(): Promise<void> {
+    if (Platform.OS === 'ios') {
+      await endWatchLiveActivities();
+      return;
+    }
     try {
       if (Platform.OS === 'android') {
         await notifee.stopForegroundService().catch(() => {});

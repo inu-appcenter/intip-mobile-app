@@ -66,3 +66,33 @@ describe('parseMonochromeSvg', () => {
     expect(() => parseMonochromeSvg(svg, 'busIcon.svg')).toThrow(/withWidgetAssets/);
   });
 });
+
+describe('RASTER_WIDGET_ASSETS', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('fs') as typeof import('fs');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require('path') as typeof import('path');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { RASTER_WIDGET_ASSETS, rasterImagesetContentsJson } = require('../withWidgetAssets') as {
+    RASTER_WIDGET_ASSETS: { assetName: string; dir: string }[];
+    rasterImagesetContentsJson: (assetName: string) => string;
+  };
+
+  it.each(RASTER_WIDGET_ASSETS.map((a) => [a.assetName, a.dir]))(
+    '%s ships both @2x and @3x PNGs (prebuild copies them blindly)',
+    (assetName, dir) => {
+      for (const scale of ['2x', '3x']) {
+        expect(fs.existsSync(path.join(__dirname, '..', '..', dir, `${assetName}@${scale}.png`))).toBe(true);
+      }
+    },
+  );
+
+  it('renders artwork in its own colors, not as a tinted template', () => {
+    const json = JSON.parse(rasterImagesetContentsJson('TorchFound'));
+    expect(json.properties['template-rendering-intent']).toBe('original');
+    expect(json.images.map((i: { filename?: string }) => i.filename).filter(Boolean)).toEqual([
+      'TorchFound@2x.png',
+      'TorchFound@3x.png',
+    ]);
+  });
+});

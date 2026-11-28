@@ -69,3 +69,12 @@ version range (`"^0.1.0"`) and drop the submodule — no reason to keep both.
   `BusArrivalWidget` — which also registers `BusStopWidget`, the same layout
   with a stop the user picks — `CafeteriaMenuWidget`, `TimetableWidget`) stay in this
   app — they're INTIP-specific, unlike the renderer itself.
+
+# iOS widgets / Live Activities (`src/widgets/*.tsx`)
+
+Read `docs/expo-widgets.md` before touching any widget or Live Activity layout.
+The widget extension renders a static node tree, not React — several things that
+work in the app silently render nothing there (nested `<Text>`), and iOS 26 turns
+`activityBackgroundTint` into a saturated glass tint. Typecheck/tests/build all
+pass in those cases; only a real device shows it, so verify on the phone.
+`TimetableLiveActivityProps` is a contract with the server's push-to-start payload.

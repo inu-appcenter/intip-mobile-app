@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { PortalSecureStore } from './secureStore';
+import { PortalSecureStore, saveDeviceSecret } from './secureStore';
 
 const KEY_LIB_TOKEN = 'intip_lib_access_token';
 const KEY_LIB_USER = 'intip_lib_user_info';
@@ -24,9 +24,7 @@ export const LibraryAuthService = {
    * 도서관 계정 정보 및 토큰 로컬 보안 저장
    */
   async saveCredentials(credentials: LibraryCredentials): Promise<void> {
-    await SecureStore.setItemAsync(KEY_LIB_CREDENTIALS, JSON.stringify(credentials), {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-    });
+    await saveDeviceSecret(KEY_LIB_CREDENTIALS, JSON.stringify(credentials));
     // 통합 포털 계정(학번/비밀번호)에도 자동 동기화하여 1회 로그인으로 전체 서비스 연동
     try {
       await PortalSecureStore.saveCredentials({
@@ -58,9 +56,7 @@ export const LibraryAuthService = {
   },
 
   async saveToken(token: string): Promise<void> {
-    await SecureStore.setItemAsync(KEY_LIB_TOKEN, token, {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-    });
+    await saveDeviceSecret(KEY_LIB_TOKEN, token);
   },
 
   async getToken(): Promise<string | null> {
@@ -68,9 +64,7 @@ export const LibraryAuthService = {
   },
 
   async saveUserInfo(userInfo: LibraryUserInfo): Promise<void> {
-    await SecureStore.setItemAsync(KEY_LIB_USER, JSON.stringify(userInfo), {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-    });
+    await saveDeviceSecret(KEY_LIB_USER, JSON.stringify(userInfo));
   },
 
   async getUserInfo(): Promise<LibraryUserInfo | null> {

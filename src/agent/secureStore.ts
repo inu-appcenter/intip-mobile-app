@@ -1,5 +1,25 @@
 import * as SecureStore from 'expo-secure-store';
 
+/**
+ * 학교 계정 비밀값 저장 옵션.
+ * - iOS: Keychain(kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly) — iCloud 백업·기기 이전으로
+ *   복사되지 않고 이 기기에만 남는다. 잠금 상태에서도 읽혀야 백그라운드 좌석 감시가 동작하므로
+ *   WHEN_UNLOCKED 대신 AFTER_FIRST_UNLOCK 계열을 쓴다.
+ * - Android: expo-secure-store가 Android Keystore 키로 AES 암호화해 저장(옵션 무관).
+ */
+export const DEVICE_ONLY_SECRET: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+};
+
+/**
+ * expo-secure-store의 iOS update 경로는 접근성 속성을 바꾸지 않으므로, 기존 항목을
+ * 지우고 새로 써서 DEVICE_ONLY_SECRET가 확실히 적용되게 한다.
+ */
+export async function saveDeviceSecret(key: string, value: string): Promise<void> {
+  await SecureStore.deleteItemAsync(key).catch(() => {});
+  await SecureStore.setItemAsync(key, value, DEVICE_ONLY_SECRET);
+}
+
 const KEY_PORTAL_ID = 'intip_portal_student_id';
 const KEY_PORTAL_PW = 'intip_portal_password';
 
@@ -20,12 +40,8 @@ export const PortalSecureStore = {
       throw new Error('학번과 비밀번호를 모두 입력해 주세요.');
     }
 
-    await SecureStore.setItemAsync(KEY_PORTAL_ID, studentId.trim(), {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-    });
-    await SecureStore.setItemAsync(KEY_PORTAL_PW, password.trim(), {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-    });
+    await saveDeviceSecret(KEY_PORTAL_ID, studentId.trim());
+    await saveDeviceSecret(KEY_PORTAL_PW, password.trim());
   },
 
   async getCredentials(): Promise<PortalCredentials | null> {
